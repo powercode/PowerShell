@@ -28,7 +28,7 @@
     <DebugType>portable</DebugType>
   </PropertyGroup>
 
-  <PropertyGroup Condition=" '$(Configuration)' == 'Linux' ">
+  <PropertyGroup Condition=" '$(Platform)' == 'Linux' ">
     <DefineConstants>$(DefineConstants);UNIX</DefineConstants>
   </PropertyGroup>
 

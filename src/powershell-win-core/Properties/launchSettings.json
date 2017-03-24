@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "powershell-win-core": {
+      "commandName": "Executable",
+      "executablePath": "$(SolutionDir)\\src\\powershell-win-core\\bin\\$(Configuration)\\netcoreapp1.1\\win10-x64\\powershell.exe",
+      "environmentVariables": {
+        "DEVPATH": "$(SolutionDir)\\src\\powershell-win-core\\bin\\$(Configuration)\\netcoreapp1.1\\win10-x64"
+      }
+    }
+  }
+}

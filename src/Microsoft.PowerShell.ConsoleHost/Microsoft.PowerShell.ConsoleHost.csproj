@@ -35,7 +35,7 @@
     <Compile Remove="singleshell\installer\EngineInstaller.cs" />
     <Compile Remove="singleshell\installer\MshHostMshSnapin.cs" />
     <Compile Remove="gen\HostMshSnapinResources.cs" />
-    
+
     <EmbeddedResource Remove="resources\HostMshSnapinResources.resx" />
   </ItemGroup>
 
@@ -43,7 +43,7 @@
     <DebugType>portable</DebugType>
   </PropertyGroup>
 
-  <PropertyGroup Condition=" '$(Configuration)' == 'Linux' ">
+  <PropertyGroup Condition=" '$(Platform)' == 'Linux' ">
     <DefineConstants>$(DefineConstants);UNIX</DefineConstants>
   </PropertyGroup>
 
