@@ -14,11 +14,14 @@
 */
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text;
@@ -61,6 +64,7 @@ Usage: TypeCatalogGen.exe <{0}> <{1}>
             List<string> refAssemblyFiles = ResolveReferenceAssemblies(args[1]);
 
             Dictionary<string, string> typeNameToAssemblyMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, string> extentionMethodToAssemblyMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             // mscorlib.metadata_dll doesn't contain any type definition.
             foreach (string filePath in refAssemblyFiles)
@@ -77,6 +81,7 @@ Usage: TypeCatalogGen.exe <{0}> <{1}>
                 {
                     MetadataReader metadataReader = peReader.GetMetadataReader();
                     string strongAssemblyName = GetAssemblyStrongName(metadataReader);
+                    var typeProvider = new DisassemblingTypeProvider();
 
                     foreach (TypeDefinitionHandle typeHandle in metadataReader.TypeDefinitions)
                     {
@@ -88,10 +93,14 @@ Usage: TypeCatalogGen.exe <{0}> <{1}>
                         if (visibilityBits != TypeAttributes.Public && visibilityBits != TypeAttributes.NestedPublic)
                         {
                             continue;
-                        }
+                        }                        
 
                         string fullName = GetTypeFullName(metadataReader, typeDefinition);
-
+                        var tgps = typeDefinition.GetGenericParameters().Select(gph => metadataReader.GetString(metadataReader.GetGenericParameter(gph).Name)).ToArray();
+                        
+                        var genericTypeParameters = tgps.Length == 0 ? ImmutableArray<string>.Empty : ImmutableArray.Create(tgps);
+                        
+                        
                         // Only add unique types
                         if (!typeNameToAssemblyMap.ContainsKey(fullName))
                         {
@@ -101,11 +110,70 @@ Usage: TypeCatalogGen.exe <{0}> <{1}>
                         {
                             Debug.WriteLine($"Not adding duplicate key {fullName}!");
                         }
+                        var attr = typeDefinition.Attributes;
+                        const TypeAttributes publicStaticSealed = TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.Abstract;
+
+                        if ((attr & publicStaticSealed) != publicStaticSealed)
+                        {
+                            continue;
+                        }
+
+                        foreach(var mdh in typeDefinition.GetMethods())
+                        {
+                            var m = metadataReader.GetMethodDefinition(mdh);
+                            const MethodAttributes publicStatic =  MethodAttributes.Static | MethodAttributes.Public;
+                            if ((m.Attributes & publicStatic) != publicStatic)
+                            {
+                                continue;
+                            }
+
+                            foreach (var cah in m.GetCustomAttributes()){
+                                var ca = metadataReader.GetCustomAttribute(cah);
+                                if (ca.Constructor.Kind != HandleKind.MemberReference)
+                                {
+                                    continue;
+                                }
+                                var memberRef = metadataReader.GetMemberReference((MemberReferenceHandle)ca.Constructor);
+                                var parent = memberRef.Parent;
+                                var parentTypeRef = metadataReader.GetTypeReference((TypeReferenceHandle)parent);
+                                var isExtensionAttrib = metadataReader.GetString(parentTypeRef.Name) ==
+                                                        "ExtensionAttribute";
+                                if (!isExtensionAttrib)
+                                {
+                                    continue;
+                                }
+
+                                var methodName = metadataReader.GetString(m.Name);
+
+                                
+                                var genericParams = m.GetGenericParameters();
+                                var mgps = genericParams.Select(gph => metadataReader.GetString(metadataReader.GetGenericParameter(gph).Name)).ToArray();
+                                var genericMethodParameters = mgps.Length == 0
+                                    ? ImmutableArray<string>.Empty
+                                    : ImmutableArray.Create(mgps);
+
+                                // sig reader is on constructor                                                                                                
+                                var context = new DisassemblingGenericContext(genericTypeParameters, genericMethodParameters);                                
+                                                                
+                                var methodSig = m.DecodeSignature(typeProvider, context);
+                                var firstParam = methodSig.ParameterTypes[0];
+                                var ext = $"{fullName}:{methodName}:{firstParam}";
+                                if(!extentionMethodToAssemblyMap.ContainsKey(ext))
+                                { 
+                                    extentionMethodToAssemblyMap.Add(ext, strongAssemblyName);
+                                }
+                 
+
+                                
+
+
+                            }
+                        }
                     }
                 }
             }
 
-            WritePowerShellAssemblyLoadContextPartialClass(targetFilePath, typeNameToAssemblyMap);
+            WritePowerShellAssemblyLoadContextPartialClass(targetFilePath, typeNameToAssemblyMap, extentionMethodToAssemblyMap);            
         }
 
         /// <summary>
@@ -272,10 +340,10 @@ Usage: TypeCatalogGen.exe <{0}> <{1}>
         /// <summary>
         /// Generate the CSharp source code that initialize the type catalog.
         /// </summary>
-        private static void WritePowerShellAssemblyLoadContextPartialClass(string targetFilePath, Dictionary<string, string> typeNameToAssemblyMap)
+        private static void WritePowerShellAssemblyLoadContextPartialClass(string targetFilePath, Dictionary<string, string> typeNameToAssemblyMap, Dictionary<string, string> extensionMethodsToAssemblyMap)
         {
-            const string SourceFormat = "            typeCatalog[\"{0}\"] = \"{1}\";";
-            const string SourceHead = @"//
+            const string SourceFormat = "            {0}Catalog[\"{1}\"] = \"{2}\";";            
+            const string SourceHeader = @"//
 // This file is auto-generated by TypeCatalogGen.exe during build of Microsoft.PowerShell.CoreCLR.AssemblyLoadContext.dll.
 // This file will be compiled into Microsoft.PowerShell.CoreCLR.AssemblyLoadContext.dll.
 //
@@ -287,26 +355,40 @@ using System.Collections.Generic;
 using System.Runtime.Loader;
 
 namespace System.Management.Automation
-{{
+{
     internal partial class PowerShellAssemblyLoadContext : AssemblyLoadContext
-    {{
-        private Dictionary<string, string> InitializeTypeCatalog()
-        {{
-            Dictionary<string, string> typeCatalog = new Dictionary<string, string>({0}, StringComparer.OrdinalIgnoreCase);
+    {
 ";
-            const string SourceEnd = @"
-            return typeCatalog;
-        }
+            const string SourceHeadFormat = @"      
+        private Dictionary<string, string> Initialize{1}Catalog()
+        {{
+            Dictionary<string, string> {2}Catalog = new Dictionary<string, string>({0}, StringComparer.OrdinalIgnoreCase);
+";
+            const string SourceEndFormat = @"
+            return {0}Catalog;
+        }}
+";
+        const string Epilog = @"        
     }
 }
 ";
 
-            StringBuilder sourceCode = new StringBuilder(string.Format(CultureInfo.InvariantCulture, SourceHead, typeNameToAssemblyMap.Count));
+            StringBuilder sourceCode = new StringBuilder(SourceHeader);
+            sourceCode.Append(string.Format(CultureInfo.InvariantCulture, SourceHeadFormat, typeNameToAssemblyMap.Count, "Type", "type"));
             foreach (KeyValuePair<string, string> pair in typeNameToAssemblyMap)
             {
-                sourceCode.AppendLine(string.Format(CultureInfo.InvariantCulture, SourceFormat, pair.Key, pair.Value));
+                sourceCode.AppendLine(string.Format(CultureInfo.InvariantCulture, SourceFormat, "type",  pair.Key, pair.Value));
             }
-            sourceCode.Append(SourceEnd);
+            sourceCode.AppendLine(string.Format(CultureInfo.InvariantCulture, SourceEndFormat, "type"));
+            
+            sourceCode.Append(string.Format(CultureInfo.InvariantCulture, SourceHeadFormat, extensionMethodsToAssemblyMap.Count, "ExtensionMethod", "extensionMethod"));
+            foreach (KeyValuePair<string, string> pair in extensionMethodsToAssemblyMap)
+            {
+                sourceCode.AppendLine(string.Format(CultureInfo.InvariantCulture, SourceFormat, "extensionMethod",  pair.Key, pair.Value));
+            }
+            sourceCode.Append(string.Format(CultureInfo.InvariantCulture, SourceEndFormat, "extensionMethod"));
+
+            sourceCode.AppendLine(Epilog);
 
             using (FileStream stream = new FileStream(targetFilePath, FileMode.Create, FileAccess.Write))
             using (StreamWriter writer = new StreamWriter(stream, Encoding.ASCII))
@@ -315,6 +397,8 @@ namespace System.Management.Automation
             }
         }
     }
+    
+
 }
 
 
