@@ -5453,7 +5453,7 @@ namespace System.Management.Automation.Language
                         canOptimize = true;
                     }
                 }
-            }
+            }            
 
             // Check if the target value is actually a deserialized PSObject.
             // - If so, we want to use the original value.
@@ -5567,8 +5567,8 @@ namespace System.Management.Automation.Language
                             }
                         }
                     }
-                }
-
+                }    
+                                
                 if (candidateMethods != null && candidateMethods.Count > 0)
                 {
                     var psMethodInfo = memberInfo as PSMethod;
@@ -5587,10 +5587,17 @@ namespace System.Management.Automation.Language
                     else
                     {
                         DotNetAdapter.MethodCacheEntry method = new DotNetAdapter.MethodCacheEntry(candidateMethods.ToArray());
-                        memberInfo = new PSMethod(this.Name, PSObject.dotNetInstanceAdapter, null, method);
+                        memberInfo = new PSMethod(this.Name, PSObject.dotNetInstanceAdapter, target.Value, method);
                     }
                 }
             }
+
+            if (memberInfo == null) { 
+                memberInfo = getExtensionMethods(target, Name,
+                    context.CurrentCommandProcessor.CommandScope.TypeResolutionState);
+
+            }
+            
 
             if (hasInstanceMember)
             {
@@ -5623,12 +5630,54 @@ namespace System.Management.Automation.Language
                 restrictions = restrictions.Merge(
                         BindingRestrictions.GetExpressionRestriction(
                             Expression.Call(CachedReflectionInfo.PSGetMemberBinder_IsTypeNameSame, target.Expression.Cast(typeof(object)), Expression.Constant(typenames.Key))));
+               
             }
-
+            
             return memberInfo;
         }
+        
 
-        #region Runtime helper methods
+        internal static PSMethod getExtensionMethods(DynamicMetaObject target, string name, TypeResolutionState typeResolutionState)
+        {
+            var namespaces = typeResolutionState.namespaces;
+            var type = target.LimitType ?? target.RuntimeType;
+            var typenames = new List<Type>(20);
+            
+            var ifaces = type.GetTypeInfo().GetInterfaces();
+
+            while (type != null)
+            {                
+                typenames.Add(type);
+                var typeInfo = type;
+                type = type.GetTypeInfo().BaseType;
+            }
+
+            for (int i = 0; i < ifaces.Length; i++)
+            {
+                var iface = ifaces[i];
+                typenames.Add(iface);
+            }
+
+            List<MethodBase> candidateMethods = null;
+                        
+            foreach (var method in PowerShellAssemblyLoadContext.Instance.GetExtensionMethods(typeResolutionState.namespaces, name, typenames))
+            {
+                if (candidateMethods == null)
+                {
+                    candidateMethods = new List<MethodBase>();
+                }
+                candidateMethods.Add(method);                
+            }
+            if (candidateMethods != null)
+            {
+                DotNetAdapter.MethodCacheEntry method = new DotNetAdapter.MethodCacheEntry(candidateMethods.ToArray());
+                var m = new PSExtensionMethod(name, PSObject.dotNetStaticAdapter, method);                
+                return m;
+            }
+            return null;
+        }
+
+      #region Runtime helper methods
 
         internal static PSMemberInfo CloneMemberInfo(PSMemberInfo memberInfo, object obj)
         {
@@ -6252,6 +6301,7 @@ namespace System.Management.Automation.Language
             Getter,
             BaseCtor,
             NonVirtual,
+            ExtensionMethod,
         }
 
         private class KeyComparer : IEqualityComparer<PSInvokeMemberBinderKeyType>
@@ -6473,12 +6523,29 @@ namespace System.Management.Automation.Language
                 }
                 else
                 {
-                    call = Expression.Call(
-                        CachedReflectionInfo.PSInvokeMemberBinder_InvokeAdaptedMember,
-                        PSGetMemberBinder.GetTargetExpr(target, typeof(object)),
-                        Expression.Constant(Name),
-                        Expression.NewArrayInit(typeof(object),
-                                                args.Select(arg => arg.Expression.Cast(typeof(object)))));
+                    var extMethod = methodInfo as PSExtensionMethod;
+                    if (extMethod == null)
+                    {
+                        call = Expression.Call(
+                            CachedReflectionInfo.PSInvokeMemberBinder_InvokeAdaptedMember,
+                            PSGetMemberBinder.GetTargetExpr(target, typeof(object)),
+                            Expression.Constant(Name),
+                            Expression.NewArrayInit(typeof(object),
+                                args.Select(arg => arg.Expression.Cast(typeof(object)))));
+                    }
+                    else
+                    {
+                        // We have a static .net extension method
+                        var extArgs = new object[args.Length + 1];
+                        extArgs[0] = target.Value;
+                        Array.Copy(args, 0, extArgs, 1, args.Length);
+                        call = Expression.Call(
+                            CachedReflectionInfo.PSInvokeMemberBinder_InvokeAdaptedMember,                            
+                            Expression.Constant(Name),
+                            Expression.NewArrayInit(typeof(object),
+                                extArgs.Select(e => Expression.Constant(e)))
+                            );                              
+                    }
                 }
 
                 return new DynamicMetaObject(call, restrictions).WriteToDebugLog(this);
@@ -6516,9 +6583,12 @@ namespace System.Management.Automation.Language
             if (psMethod != null)
             {
                 var data = (DotNetAdapter.MethodCacheEntry)psMethod.adapterData;
+                
+                var methodInvocationType = _propertySetter ? MethodInvocationType.Setter : MethodInvocationType.Ordinary;
+                methodInvocationType = psMethod as PSExtensionMethod != null ? MethodInvocationType.ExtensionMethod : methodInvocationType;
 
-                return InvokeDotNetMethod(CallInfo, Name, _invocationConstraints, _propertySetter ? MethodInvocationType.Setter : MethodInvocationType.Ordinary, target, args, restrictions,
-                    data.methodInformationStructures, typeof(MethodException)).WriteToDebugLog(this);
+                return InvokeDotNetMethod(CallInfo, Name, _invocationConstraints, methodInvocationType, target, args, restrictions,
+                    data.methodInformationStructures, typeof(MethodException)).WriteToDebugLog(this);                                                               
             }
 
             var scriptMethod = methodInfo as PSScriptMethod;
@@ -6601,17 +6671,32 @@ namespace System.Management.Automation.Language
             string errorId = null;
             string errorMsg = null;
             int numArgs = args.Length;
+            int argValueOffset = 0;
             if (methodInvocationType == MethodInvocationType.Setter)
             {
                 numArgs -= 1;
-            }
-            object[] argValues = new object[numArgs];
-            for (int i = 0; i < numArgs; ++i)
+            }            
+            if (methodInvocationType == MethodInvocationType.ExtensionMethod)
             {
-                object arg = args[i].Value;
-                argValues[i] = arg == AutomationNull.Value ? null : arg;
+                numArgs += 1;
+                argValueOffset = 1;
             }
 
+            object[] argValues = new object[numArgs];            
+            for (int i = 0; i < numArgs - argValueOffset; ++i)
+            {
+                object arg = args[i].Value;
+                argValues[i + argValueOffset] = arg == AutomationNull.Value ? null : arg;
+            }
+            if (methodInvocationType == MethodInvocationType.ExtensionMethod)
+            {
+                argValues[0] = target.Value;                
+                var extArgs = new DynamicMetaObject[numArgs];
+                extArgs[0] = target;
+                Array.Copy(args, 0, extArgs, 1, args.Length);
+                args = extArgs;
+            }
+            
             if (ClrFacade.IsTransparentProxy(target.Value) && (psMethodInvocationConstraints == null || psMethodInvocationConstraints.MethodTargetType == null))
             {
                 var argTypes = (psMethodInvocationConstraints == null)

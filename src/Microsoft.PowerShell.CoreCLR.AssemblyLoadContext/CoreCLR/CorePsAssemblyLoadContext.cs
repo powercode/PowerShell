@@ -8,11 +8,14 @@ using System.IO;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Reflection;
 using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
 using System.Runtime.Loader;
+using System.Runtime.CompilerServices;
 
 namespace System.Management.Automation
 {
@@ -110,6 +113,7 @@ namespace System.Management.Automation
 
             // NEXT: Initialize the CoreCLR type catalog dictionary [OrdinalIgnoreCase]
             _coreClrTypeCatalog = InitializeTypeCatalog();
+            _coreClrExtensionMethodCatalog = InitializeExtensionMethodCatalog();
 
             // LAST: Handle useResolvingHandlerOnly flag
             _useResolvingHandlerOnly = useResolvingHandlerOnly;
@@ -148,6 +152,12 @@ namespace System.Management.Automation
         //  - Key: namespace qualified type name (FullName)
         //  - Value: strong name of the TPA that contains the type represented by Key.
         private readonly Dictionary<string, string> _coreClrTypeCatalog;
+
+        // CoreCLR type catalog dictionary
+        //  - Key: FullExtensionTypeName:MethodName:[ExtendedAssembly]ExtendedType. Ex: "System.TupleExtensions:ToValueTuple:[System.Runtime]System.Tuple`1<T1>"]
+        //  - Value: strong name of the TPA that contains the type implementing the extension method.
+        private readonly Dictionary<string, ExtentionMethodLookupInfo[]> _coreClrExtensionMethodCatalog;
+
         private readonly HashSet<string> _tpaSet;
         private readonly string[] _extensions = new string[] { ".ni.dll", ".dll" };
 
@@ -394,6 +404,82 @@ namespace System.Management.Automation
 
             // Otherwise, we return all assemblies from the AssemblyCache
             return s_assemblyCache.Values;
+        }
+
+        /// <summary>
+        /// Get the extension methods of a specified name, in a specified namespace that extends at least one of the types in extended types
+        /// </summary>
+        internal IEnumerable<MethodInfo> GetExtensionMethods(string[] extendedNamespaces, string methodName, IList<Type> extendedTypes)
+        {            
+            for (int i = extendedNamespaces.Length - 1; i >= 0 ; i--)
+            {
+                var extendedNamespace = extendedNamespaces[i];                            
+                if (!string.IsNullOrEmpty(extendedNamespace))
+                {                
+                    if (_coreClrExtensionMethodCatalog.TryGetValue($"{extendedNamespace}:{methodName}", out ExtentionMethodLookupInfo[] extensions))
+                    {
+                        var extentionMethodBindingFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
+                        for (int j = 0; j < extensions.Length; j++)
+                        {
+                            var extentionMethodLookupInfo = extensions[j];
+
+                            var extentionType = Type.GetType(extentionMethodLookupInfo.AssemblyQualifiedTypeName, false);
+                            if (extentionType == null)
+                            {
+                                continue;
+                            }
+                            
+                            var methods = extentionType.GetMethods(extentionMethodBindingFlags);
+                            for (int k = 0; k < methods.Length; k++)
+                            {
+                                var methodInfo = methods[k];
+                                if (methodInfo.IsDefined(typeof(ExtensionAttribute)) && 
+                                    string.Compare(methodInfo.Name, methodName, StringComparison.OrdinalIgnoreCase) == 0)
+                                {
+                                    var parameterType = methodInfo.GetParameters()[0].ParameterType;
+                                    
+                                    for (int l = 0; l < extendedTypes.Count; l++)
+                                    {
+                                        var extendedType = extendedTypes[l];
+                                        if (parameterType.Namespace == extendedType.Namespace &&
+                                            parameterType.Name == extendedType.Name && parameterType.GenericTypeArguments.Length == extendedType.GenericTypeArguments.Length)
+                                        {
+                                            if (parameterType.GetTypeInfo().ContainsGenericParameters)
+                                            {
+                                                var paramArgs = parameterType.GenericTypeArguments;
+
+                                                var genericArgs = methodInfo.GetGenericArguments();
+                                                var typeArguments = new Type[genericArgs.Length];
+                                                for (int m = 0; m < typeArguments.Length; m++)
+                                                {
+                                                    typeArguments[m] = typeof(object);
+                                                    var ga = genericArgs[m];
+                                                    for (int n = 0; n < paramArgs.Length; n++)
+                                                    {
+                                                        var paramArg = paramArgs[n];
+                                                        if (paramArg.Name == ga.Name)
+                                                        {
+                                                            typeArguments[m] = extendedType.GenericTypeArguments[n];
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                var concreteMethodInfo = methodInfo.MakeGenericMethod(typeArguments);
+                                                yield return concreteMethodInfo;
+                                            }
+                                            else { 
+                                                yield return methodInfo;                                                
+                                            }
+                                        }
+                                        
+                                    }                                    
+                                }
+                            }                                                                
+                        }                    
+                    }
+                }
+            }
         }
 
         /// <summary>

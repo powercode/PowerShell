@@ -178,7 +178,7 @@ namespace Microsoft.PowerShell.CoreCLR
 
         public virtual string GetGenericInstantiation(string genericType, ImmutableArray<string> typeArguments)
         {
-            return genericType + "<" + String.Join(",", typeArguments) + ">";
+            return genericType + "[" + String.Join(",", typeArguments) + "]";
         }
 
         public virtual string GetArrayType(string elementType, ArrayShape shape)

@@ -2645,6 +2645,25 @@ namespace System.Management.Automation
     }
 
     /// <summary>
+    /// Represent a static Extension method
+    /// </summary>
+    
+    public class PSExtensionMethod : PSMethod
+    {
+        /// <summary>
+        /// Constructs a PSMethod
+        /// </summary>
+        /// <param name="name">name</param>
+        /// <param name="adapter">adapter to be used invoking</param>        
+        /// <param name="adapterData">adapterData from adapter.GetMethodData</param>        
+        /// <exception cref="ArgumentException">for invalid arguments</exception>
+        internal PSExtensionMethod(string name, Adapter adapter,  object adapterData) 
+            : base(name, adapter, null, adapterData)
+        {
+        }
+    }
+
+    /// <summary>
     /// Used to access parameterized properties from the BaseObject
     /// </summary>
     /// <remarks>

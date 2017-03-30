@@ -19,6 +19,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
@@ -29,7 +30,7 @@ using System.Text;
 namespace Microsoft.PowerShell.CoreCLR
 {
     public class TypeCatalogGen
-    {
+    {     
         private const string Param_TargetCSharpFilePath = "TargetCSharpFilePath";
         private const string Param_ReferenceListPath = "ReferenceListPath";
         private const string HelpMessage = @"
@@ -50,7 +51,7 @@ Usage: TypeCatalogGen.exe <{0}> <{1}>
          * types are available and in which TPA assemblies. So we have to generate the type catalog based on the reference assemblies of .NET Core.
          */
         public static void Main(string[] args)
-        {
+        {            
             if (args.Length != 2)
             {
                 string message = string.Format(CultureInfo.CurrentCulture, HelpMessage,
@@ -63,8 +64,8 @@ Usage: TypeCatalogGen.exe <{0}> <{1}>
             string targetFilePath = ResolveTargetFilePath(args[0]);
             List<string> refAssemblyFiles = ResolveReferenceAssemblies(args[1]);
 
-            Dictionary<string, string> typeNameToAssemblyMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, string> extentionMethodToAssemblyMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var typeNameToAssemblyMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var extentionMethodToAssemblyMap = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
             // mscorlib.metadata_dll doesn't contain any type definition.
             foreach (string filePath in refAssemblyFiles)
@@ -95,20 +96,20 @@ Usage: TypeCatalogGen.exe <{0}> <{1}>
                             continue;
                         }                        
 
-                        string fullName = GetTypeFullName(metadataReader, typeDefinition);
+                        var names = GetTypeFullName(metadataReader, typeDefinition);
                         var tgps = typeDefinition.GetGenericParameters().Select(gph => metadataReader.GetString(metadataReader.GetGenericParameter(gph).Name)).ToArray();
                         
                         var genericTypeParameters = tgps.Length == 0 ? ImmutableArray<string>.Empty : ImmutableArray.Create(tgps);
                         
                         
                         // Only add unique types
-                        if (!typeNameToAssemblyMap.ContainsKey(fullName))
+                        if (!typeNameToAssemblyMap.ContainsKey(names.fullname))
                         {
-                            typeNameToAssemblyMap.Add(fullName, strongAssemblyName);
+                            typeNameToAssemblyMap.Add(names.fullname, strongAssemblyName);
                         }
                         else
                         {
-                            Debug.WriteLine($"Not adding duplicate key {fullName}!");
+                            Debug.WriteLine($"Not adding duplicate key {names.fullname}!");
                         }
                         var attr = typeDefinition.Attributes;
                         const TypeAttributes publicStaticSealed = TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.Abstract;
@@ -157,16 +158,19 @@ Usage: TypeCatalogGen.exe <{0}> <{1}>
                                                                 
                                 var methodSig = m.DecodeSignature(typeProvider, context);
                                 var firstParam = methodSig.ParameterTypes[0];
-                                var ext = $"{fullName}:{methodName}:{firstParam}";
-                                if(!extentionMethodToAssemblyMap.ContainsKey(ext))
+                                var paramCount = methodSig.ParameterTypes.Length;
+                                var ext = $"{names.nsName}:{methodName}";
+                                List<string> values = null;
+                                if(!extentionMethodToAssemblyMap.TryGetValue(ext, out values))
                                 { 
-                                    extentionMethodToAssemblyMap.Add(ext, strongAssemblyName);
+                                    values = new List<string>();
+                                    extentionMethodToAssemblyMap.Add(ext, values);                                    
                                 }
-                 
-
-                                
-
-
+                                var candidate = $"new ExtentionMethodLookupInfo(\"{firstParam}\",\"{names.fullname}, {strongAssemblyName}\", {paramCount})";
+                                if (values.All(c => c != candidate))
+                                {
+                                    values.Add(candidate);
+                                }
                             }
                         }
                     }
@@ -234,7 +238,7 @@ Usage: TypeCatalogGen.exe <{0}> <{1}>
         /// <summary>
         /// Get the full name of a Type.
         /// </summary>
-        private static string GetTypeFullName(MetadataReader metadataReader, TypeDefinition typeDefinition)
+        private static (string fullname, string nsName, string typeName) GetTypeFullName(MetadataReader metadataReader, TypeDefinition typeDefinition)
         {
             string fullName;
             string typeName = metadataReader.GetString(typeDefinition.Name);
@@ -269,7 +273,7 @@ Usage: TypeCatalogGen.exe <{0}> <{1}>
                 }
             }
 
-            return fullName;
+            return (fullName, nsName, typeName);
         }
 
         /// <summary>
@@ -340,9 +344,9 @@ Usage: TypeCatalogGen.exe <{0}> <{1}>
         /// <summary>
         /// Generate the CSharp source code that initialize the type catalog.
         /// </summary>
-        private static void WritePowerShellAssemblyLoadContextPartialClass(string targetFilePath, Dictionary<string, string> typeNameToAssemblyMap, Dictionary<string, string> extensionMethodsToAssemblyMap)
+        private static void WritePowerShellAssemblyLoadContextPartialClass(string targetFilePath, Dictionary<string, string> typeNameToAssemblyMap, Dictionary<string, List<string>> extensionMethodsToAssemblyMap)
         {
-            const string SourceFormat = "            {0}Catalog[\"{1}\"] = \"{2}\";";            
+            const string SourceFormat = "            {0}Catalog[\"{1}\"] = {2};";            
             const string SourceHeader = @"//
 // This file is auto-generated by TypeCatalogGen.exe during build of Microsoft.PowerShell.CoreCLR.AssemblyLoadContext.dll.
 // This file will be compiled into Microsoft.PowerShell.CoreCLR.AssemblyLoadContext.dll.
@@ -356,13 +360,28 @@ using System.Runtime.Loader;
 
 namespace System.Management.Automation
 {
+
+    internal struct ExtentionMethodLookupInfo
+    {
+        public string ExtendedType;
+        public string AssemblyQualifiedTypeName;
+        public int ParameterCount;
+
+        public ExtentionMethodLookupInfo(string extendedType, string assemblyQualifiedTypeName, int parameterCount)
+        {
+            ExtendedType = extendedType;
+            AssemblyQualifiedTypeName = assemblyQualifiedTypeName;
+            ParameterCount = parameterCount;
+        }
+    }
+
     internal partial class PowerShellAssemblyLoadContext : AssemblyLoadContext
     {
 ";
             const string SourceHeadFormat = @"      
-        private Dictionary<string, string> Initialize{1}Catalog()
+        private Dictionary<string, {3}> Initialize{1}Catalog()
         {{
-            Dictionary<string, string> {2}Catalog = new Dictionary<string, string>({0}, StringComparer.OrdinalIgnoreCase);
+            var {2}Catalog = new Dictionary<string, {3}>({0}, StringComparer.OrdinalIgnoreCase);
 ";
             const string SourceEndFormat = @"
             return {0}Catalog;
@@ -374,17 +393,18 @@ namespace System.Management.Automation
 ";
 
             StringBuilder sourceCode = new StringBuilder(SourceHeader);
-            sourceCode.Append(string.Format(CultureInfo.InvariantCulture, SourceHeadFormat, typeNameToAssemblyMap.Count, "Type", "type"));
+            sourceCode.Append(string.Format(CultureInfo.InvariantCulture, SourceHeadFormat, typeNameToAssemblyMap.Count, "Type", "type", "string"));
             foreach (KeyValuePair<string, string> pair in typeNameToAssemblyMap)
             {
-                sourceCode.AppendLine(string.Format(CultureInfo.InvariantCulture, SourceFormat, "type",  pair.Key, pair.Value));
+                sourceCode.AppendLine(string.Format(CultureInfo.InvariantCulture, SourceFormat, "type",  pair.Key, $"\"{pair.Value}\""));
             }
             sourceCode.AppendLine(string.Format(CultureInfo.InvariantCulture, SourceEndFormat, "type"));
             
-            sourceCode.Append(string.Format(CultureInfo.InvariantCulture, SourceHeadFormat, extensionMethodsToAssemblyMap.Count, "ExtensionMethod", "extensionMethod"));
-            foreach (KeyValuePair<string, string> pair in extensionMethodsToAssemblyMap)
+            sourceCode.Append(string.Format(CultureInfo.InvariantCulture, SourceHeadFormat, extensionMethodsToAssemblyMap.Count, "ExtensionMethod", "extensionMethod", "ExtentionMethodLookupInfo[]"));
+            foreach (KeyValuePair<string, List<string>> pair in extensionMethodsToAssemblyMap)
             {
-                sourceCode.AppendLine(string.Format(CultureInfo.InvariantCulture, SourceFormat, "extensionMethod",  pair.Key, pair.Value));
+                var value = string.Join(",\r\n\t\t\t\t", pair.Value);
+                sourceCode.AppendLine(string.Format(CultureInfo.InvariantCulture, SourceFormat, "extensionMethod",  pair.Key, $"new []{{ \r\n\t\t\t\t {value} }}"));
             }
             sourceCode.Append(string.Format(CultureInfo.InvariantCulture, SourceEndFormat, "extensionMethod"));
 
