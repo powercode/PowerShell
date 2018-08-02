@@ -3636,15 +3636,14 @@ namespace System.Management.Automation
                                     IFormatProvider formatProvider,
                                     TypeTable backupTable)
             {
-                return Convert(valueToConvert, resultType, recursion, originalValueToConvert, formatProvider, backupTable, false);
+                return Convert(valueToConvert, resultType, recursion, formatProvider, false);
             }
 
             internal object Convert(object valueToConvert,
                         Type resultType,
                         bool recursion,
-                        PSObject originalValueToConvert,
                         IFormatProvider formatProvider,
-                        TypeTable backupTable, bool ignoreUnknownMembers)
+                        bool ignoreUnknownMembers)
             {
                 try
                 {
