@@ -241,6 +241,8 @@ namespace System.Management.Automation
     /// </remarks>
     internal enum ConversionRank
     {
+        // ReSharper disable UnusedMember.Global
+        // ReSharper disable InconsistentNaming
         None = 0x0000,
         UnrelatedArraysS2A = 0x0007,
         UnrelatedArrays = 0x000F,
@@ -280,6 +282,8 @@ namespace System.Management.Automation
         Identity = 0x011F,
 
         ValueDependent = 0xFFF7,
+        // ReSharper restore UnusedMember.Global
+        // ReSharper restore InconsistentNaming
     }
 
     /// <summary>
@@ -858,6 +862,7 @@ namespace System.Management.Automation
         public static bool IsTrue(object obj)
         {
             // null is a valid argument - it converts to false...
+            // ReSharper disable once PossibleUnintendedReferenceComparison
             if (obj == null || obj == AutomationNull.Value)
             {
                 return false;
@@ -944,6 +949,7 @@ namespace System.Management.Automation
         /// <returns>true if the object is null</returns>
         internal static bool IsNull(object obj)
         {
+            // ReSharper disable once PossibleUnintendedReferenceComparison
             return obj == null || obj == AutomationNull.Value;
         }
 
@@ -1205,6 +1211,7 @@ namespace System.Management.Automation
             // - TimeSpan part of "datetime"
             // - <classname> ref
             TypeCode typeCode = GetTypeCode(type);
+            // ReSharper disable once PossibleNullReferenceException
             if (IsCimIntrinsicScalarType(typeCode) && !type.IsEnum)
             {
                 return true;
@@ -2719,6 +2726,7 @@ namespace System.Management.Automation
             Diagnostics.Assert(strToConvert != null, "Value to convert must be a string");
             Diagnostics.Assert(IsNumeric(GetTypeCode(resultType)), "Result type must be numeric");
 
+            // ReSharper disable once PossibleNullReferenceException
             if (strToConvert.Length == 0)
             {
                 s_typeConversion.WriteLine("Returning numeric zero.");
@@ -3132,6 +3140,7 @@ namespace System.Management.Automation
 
             Dbg.Assert(valueToConvert != null, "[ref]$null cast should be handler earlier with a separate ConvertNullToPSReference method");
 
+            // ReSharper disable once PossibleNullReferenceException
             return PSReference.CreateInstance(valueToConvert, valueToConvert.GetType());
         }
 
@@ -4462,6 +4471,7 @@ namespace System.Management.Automation
         {
             PSObject valueAsPsObj;
             Type originalType;
+            // ReSharper disable once PossibleUnintendedReferenceComparison
             if (valueToConvert == null || valueToConvert == AutomationNull.Value)
             {
                 valueAsPsObj = null;
@@ -4487,7 +4497,7 @@ namespace System.Management.Automation
 
                 // Now try converting PSObject.Base instead.
                 valueToConvert = PSObject.Base(valueToConvert);
-
+                // ReSharper disable once PossibleUnintendedReferenceComparison
                 Dbg.Assert(valueToConvert != AutomationNull.Value, "PSObject.Base converts AutomationNull.Value to null");
 
                 if (valueToConvert == null)
