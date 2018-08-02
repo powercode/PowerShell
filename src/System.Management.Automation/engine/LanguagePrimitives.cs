@@ -4029,10 +4029,7 @@ namespace System.Management.Automation
                 Rank = rank;
             }
 
-            public object Converter
-            {
-                get { return _converter; }
-            }
+            public object Converter => _converter;
 
             public ConversionRank Rank { get; }
 
