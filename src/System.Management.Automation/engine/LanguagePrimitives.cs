@@ -3067,7 +3067,7 @@ namespace System.Management.Automation
                                                      IFormatProvider formatProvider,
                                                      TypeTable backupTable)
         {
-            if (originalValueToConvert != null && originalValueToConvert.TokenText != null)
+            if (originalValueToConvert?.TokenText != null)
             {
                 return originalValueToConvert.TokenText;
             }
@@ -3252,7 +3252,7 @@ namespace System.Management.Automation
         {
             s_typeConversion.WriteLine("Value to convert is scalar.");
 
-            if (originalValueToConvert != null && originalValueToConvert.TokenText != null)
+            if (originalValueToConvert?.TokenText != null)
             {
                 valueToConvert = originalValueToConvert;
             }
@@ -3837,7 +3837,7 @@ namespace System.Management.Automation
         {
             // If the original object was a number, then try and do a conversion on the string
             // equivalent of that number...
-            if (originalValueToConvert != null && originalValueToConvert.TokenText != null)
+            if (originalValueToConvert?.TokenText != null)
             {
                 return ConvertTo(originalValueToConvert.TokenText,
                     resultType, recursion, formatProvider, backupTable);
@@ -4435,7 +4435,7 @@ namespace System.Management.Automation
             StringBuilder availableProperties = new StringBuilder();
             bool first = true;
 
-            if (pso != null && pso.Properties != null)
+            if (pso?.Properties != null)
             {
                 foreach (PSPropertyInfo p in pso.Properties)
                 {
