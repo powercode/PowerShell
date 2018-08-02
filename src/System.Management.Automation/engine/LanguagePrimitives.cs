@@ -1573,7 +1573,7 @@ namespace System.Management.Automation
             {
                 ConstructorInfo toConstructor = resultType.GetConstructor(PSTypeExtensions.EmptyTypes);
                 ConvertViaNoArgumentConstructor noArgumentConstructorConverter = new ConvertViaNoArgumentConstructor(toConstructor, resultType);
-                return noArgumentConstructorConverter.Convert(PSObject.Base(valueToConvert), resultType, recursion, (PSObject)valueToConvert, formatProvider, null, ignoreUnknownMembers);
+                return noArgumentConstructorConverter.Convert(PSObject.Base(valueToConvert), resultType, recursion, formatProvider, ignoreUnknownMembers);
             }
             return null;
         }
