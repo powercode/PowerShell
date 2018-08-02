@@ -3344,7 +3344,7 @@ namespace System.Management.Automation
                     object tempResult = ConvertTo(e.Current, resultType, recursion, formatProvider, backupTable);
                     if (tempResult != null)
                     {
-                        sbResult.Append(tempResult.ToString());
+                        sbResult.Append(tempResult);
                     }
                     else
                     {
