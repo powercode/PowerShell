@@ -335,8 +335,8 @@ namespace System.Management.Automation
             lock (s_converterCache)
             {
                 var toRemove = s_converterCache.Keys.Where(
-                    conv => string.Equals(conv.to.FullName, typeName, StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(conv.from.FullName, typeName, StringComparison.OrdinalIgnoreCase)).ToArray();
+                    conv => string.Equals(conv.To.FullName, typeName, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(conv.From.FullName, typeName, StringComparison.OrdinalIgnoreCase)).ToArray();
                 foreach (var k in toRemove)
                 {
                     s_converterCache.Remove(k);
@@ -1787,18 +1787,18 @@ namespace System.Management.Automation
             {
                 internal EnumHashEntry(String[] names, Array values, UInt64 allValues, bool hasNegativeValue, bool hasFlagsAttribute)
                 {
-                    this.names = names;
-                    this.values = values;
-                    this.allValues = allValues;
-                    this.hasNegativeValue = hasNegativeValue;
-                    this.hasFlagsAttribute = hasFlagsAttribute;
+                    this.Names = names;
+                    this.Values = values;
+                    this.AllValues = allValues;
+                    this.HasNegativeValue = hasNegativeValue;
+                    this.HasFlagsAttribute = hasFlagsAttribute;
                 }
 
-                internal readonly String[] names;
-                internal readonly Array values;
-                internal readonly UInt64 allValues;
-                internal readonly bool hasNegativeValue;
-                internal readonly bool hasFlagsAttribute;
+                public readonly String[] Names;
+                public readonly Array Values;
+                public readonly UInt64 AllValues;
+                public readonly bool HasNegativeValue;
+                public readonly bool HasFlagsAttribute;
             }
 
             // This static is thread safe based on the lock in GetEnumHashEntry
@@ -1888,7 +1888,7 @@ namespace System.Management.Automation
                     // An enumeration with a negative value should not be treated as flags
                     // so IsValueFlagDefined cannot determine the result, and as far as it knows,
                     // it is defined.
-                    if (enumHashEntry.hasNegativeValue)
+                    if (enumHashEntry.HasNegativeValue)
                     {
                         isDefined = true;
                         break;
@@ -1911,18 +1911,18 @@ namespace System.Management.Automation
                     // so the conversion should always work.
                     UInt64 enumValueUInt64 = Convert.ToUInt64(enumValue, CultureInfo.CurrentCulture);
 
-                    if (enumHashEntry.hasFlagsAttribute)
+                    if (enumHashEntry.HasFlagsAttribute)
                     {
                         // This expression will result in a "1 bit" for bits that are
                         // set in enumValueInt64 but not set in enumHashEntry.allValues,
                         // and a "0 bit" otherwise. Any "bit 1" in the result, indicates this is not defined.
-                        isDefined = ((enumValueUInt64 | enumHashEntry.allValues) ^ enumHashEntry.allValues) == 0;
+                        isDefined = ((enumValueUInt64 | enumHashEntry.AllValues) ^ enumHashEntry.AllValues) == 0;
                     }
                     else
                     {
                         // If flags is not set, then see if this value is in the list
                         // of valid values.
-                        if (Array.IndexOf(enumHashEntry.values, enumValue) >= 0)
+                        if (Array.IndexOf(enumHashEntry.Values, enumValue) >= 0)
                         {
                             isDefined = true;
                         }
@@ -1976,7 +1976,7 @@ namespace System.Management.Automation
             internal static string EnumValues(Type enumType)
             {
                 EnumHashEntry enumHashEntry = GetEnumHashEntry(enumType);
-                return string.Join(CultureInfo.CurrentUICulture.TextInfo.ListSeparator, enumHashEntry.names);
+                return string.Join(CultureInfo.CurrentUICulture.TextInfo.ListSeparator, enumHashEntry.Names);
             }
 
             public override object ConvertFrom(object sourceValue, Type destinationType, IFormatProvider formatProvider, bool ignoreCase)
@@ -2064,8 +2064,8 @@ namespace System.Management.Automation
                 }
 
                 EnumHashEntry enumHashEntry = GetEnumHashEntry(destinationType);
-                string[] names = enumHashEntry.names;
-                Array values = enumHashEntry.values;
+                string[] names = enumHashEntry.Names;
+                Array values = enumHashEntry.Values;
                 UInt64 returnUInt64 = 0;
                 StringComparison ignoreCaseOpt;
 
@@ -3534,7 +3534,7 @@ namespace System.Management.Automation
         private class ConvertViaParseMethod
         {
             // TODO - use an ETS wrapper that generates a dynamic method
-            internal MethodInfo parse;
+            public MethodInfo Parse;
 
             internal object ConvertWithCulture(object valueToConvert,
                                                Type resultType,
@@ -3545,7 +3545,7 @@ namespace System.Management.Automation
             {
                 try
                 {
-                    object result = parse.Invoke(null, new[] { valueToConvert, formatProvider });
+                    object result = Parse.Invoke(null, new[] { valueToConvert, formatProvider });
                     s_typeConversion.WriteLine("Parse result: {0}", result);
                     return result;
                 }
@@ -3575,7 +3575,7 @@ namespace System.Management.Automation
             {
                 try
                 {
-                    object result = parse.Invoke(null, new[] { valueToConvert });
+                    object result = Parse.Invoke(null, new[] { valueToConvert });
                     s_typeConversion.WriteLine("Parse result: \"{0}\".", result);
                     return result;
                 }
@@ -3599,7 +3599,7 @@ namespace System.Management.Automation
 
         private class ConvertViaConstructor
         {
-            internal Func<object, object> TargetCtorLambda;
+            public Func<object, object> TargetCtorLambda;
 
             internal object Convert(object valueToConvert,
                                     Type resultType,
@@ -3643,11 +3643,11 @@ namespace System.Management.Automation
         /// </remark>
         private class ConvertViaIEnumerableConstructor
         {
-            internal Func<int, IList> ListCtorLambda;
-            internal Func<IList, object> TargetCtorLambda;
+            public Func<int, IList> ListCtorLambda;
+            public Func<IList, object> TargetCtorLambda;
 
-            internal Type ElementType;
-            internal bool IsScalar;
+            public Type ElementType;
+            public bool IsScalar;
 
             internal object Convert(object valueToConvert,
                                     Type resultType,
@@ -3832,7 +3832,7 @@ namespace System.Management.Automation
 
         private class ConvertViaCast
         {
-            internal MethodInfo cast;
+            public MethodInfo Cast;
 
             internal object Convert(object valueToConvert,
                                     Type resultType,
@@ -3843,20 +3843,20 @@ namespace System.Management.Automation
             {
                 try
                 {
-                    return cast.Invoke(null, new[] { valueToConvert });
+                    return Cast.Invoke(null, new[] { valueToConvert });
                 }
                 catch (TargetInvocationException ex)
                 {
                     Exception inner = ex.InnerException ?? ex;
                     s_typeConversion.WriteLine("Cast operator exception: \"{0}\".", inner.Message);
-                    throw new PSInvalidCastException("InvalidCastTargetInvocationException" + cast.Name, inner,
+                    throw new PSInvalidCastException("InvalidCastTargetInvocationException" + Cast.Name, inner,
                         ExtendedTypeSystem.InvalidCastExceptionWithInnerException,
                         valueToConvert.ToString(), resultType.ToString(), inner.Message);
                 }
                 catch (Exception e)
                 {
                     s_typeConversion.WriteLine("Cast operator exception: \"{0}\".", e.Message);
-                    throw new PSInvalidCastException("InvalidCastException" + cast.Name, e,
+                    throw new PSInvalidCastException("InvalidCastException" + Cast.Name, e,
                         ExtendedTypeSystem.InvalidCastExceptionWithInnerException,
                         valueToConvert.ToString(), resultType.ToString(), e.Message);
                 }
@@ -3912,8 +3912,8 @@ namespace System.Management.Automation
 
         private class ConvertCheckingForCustomConverter
         {
-            internal PSConverter<object> tryfirstConverter;
-            internal PSConverter<object> fallbackConverter;
+            public PSConverter<object> TryfirstConverter;
+            public PSConverter<object> FallbackConverter;
 
             internal object Convert(object valueToConvert,
                                     Type resultType,
@@ -3924,11 +3924,11 @@ namespace System.Management.Automation
             {
                 object result;
 
-                if (tryfirstConverter != null)
+                if (TryfirstConverter != null)
                 {
                     try
                     {
-                        return tryfirstConverter(valueToConvert, resultType, recursion, originalValueToConvert, formatProvider, backupTable);
+                        return TryfirstConverter(valueToConvert, resultType, recursion, originalValueToConvert, formatProvider, backupTable);
                     }
                     catch (InvalidCastException)
                     {
@@ -3941,9 +3941,9 @@ namespace System.Management.Automation
                     return result;
                 }
 
-                if (fallbackConverter != null)
+                if (FallbackConverter != null)
                 {
-                    return fallbackConverter(valueToConvert, resultType, recursion, originalValueToConvert, formatProvider, backupTable);
+                    return FallbackConverter(valueToConvert, resultType, recursion, originalValueToConvert, formatProvider, backupTable);
                 }
 
                 throw new PSInvalidCastException("ConvertToFinalInvalidCastException", null,
@@ -4080,16 +4080,16 @@ namespace System.Management.Automation
             return null;
         }
 
-        [System.Diagnostics.DebuggerDisplay("{from.Name}->{to.Name}")]
+        [System.Diagnostics.DebuggerDisplay("{From.Name}->{To.Name}")]
         private struct ConversionTypePair
         {
-            internal readonly Type from;
-            internal readonly Type to;
+            public readonly Type From;
+            public readonly Type To;
 
             internal ConversionTypePair(Type fromType, Type toType)
             {
-                from = fromType;
-                to = toType;
+                From = fromType;
+                To = toType;
             }
 
             public override int GetHashCode()
@@ -4098,7 +4098,7 @@ namespace System.Management.Automation
                 {
                     // To prevent to/from == from/to, multiply and add rather than use
                     // an operation that won't overflow, like bitwise xor.
-                    return from.GetHashCode() + 37 * to.GetHashCode();
+                    return From.GetHashCode() + 37 * To.GetHashCode();
                 }
             }
 
@@ -4110,7 +4110,7 @@ namespace System.Management.Automation
                 }
 
                 var ctp = (ConversionTypePair)other;
-                return this.from == ctp.from && this.to == ctp.to;
+                return this.From == ctp.From && this.To == ctp.To;
             }
         }
 
@@ -5007,7 +5007,7 @@ namespace System.Management.Automation
                 if (parse != null)
                 {
                     ConvertViaParseMethod converter = new ConvertViaParseMethod();
-                    converter.parse = parse;
+                    converter.Parse = parse;
                     return converter.ConvertWithCulture;
                 }
 
@@ -5027,7 +5027,7 @@ namespace System.Management.Automation
                 if (parse != null)
                 {
                     ConvertViaParseMethod converter = new ConvertViaParseMethod();
-                    converter.parse = parse;
+                    converter.Parse = parse;
                     return converter.ConvertWithoutCulture;
                 }
             }
@@ -5300,7 +5300,7 @@ namespace System.Management.Automation
                 rank = castOperator.Name.Equals("op_Implicit", StringComparison.OrdinalIgnoreCase)
                     ? ConversionRank.ImplicitCast : ConversionRank.ExplicitCast;
                 ConvertViaCast converter = new ConvertViaCast();
-                converter.cast = castOperator;
+                converter.Cast = castOperator;
                 return converter.Convert;
             }
 
@@ -5497,8 +5497,8 @@ namespace System.Management.Automation
                 || (converter != null && valueDependentConversion != null))
             {
                 ConvertCheckingForCustomConverter customConverter = new ConvertCheckingForCustomConverter();
-                customConverter.tryfirstConverter = valueDependentConversion;
-                customConverter.fallbackConverter = converter;
+                customConverter.TryfirstConverter = valueDependentConversion;
+                customConverter.FallbackConverter = converter;
                 converter = customConverter.Convert;
                 if (valueDependentRank > rank)
                 {
