@@ -637,7 +637,11 @@ namespace System.Management.Automation
 
             if (first == null)
             {
-                if (second == null) return true;
+                if (second == null)
+                {
+                    return true;
+                }
+
                 return false;
             }
 
@@ -655,7 +659,10 @@ namespace System.Management.Automation
                                                     ignoreCase ? CompareOptions.IgnoreCase : CompareOptions.None) == 0);
             }
 
-            if (first.Equals(second)) return true;
+            if (first.Equals(second))
+            {
+                return true;
+            }
 
             Type firstType = first.GetType();
             Type secondType = second.GetType();
@@ -863,7 +870,9 @@ namespace System.Management.Automation
         {
             // null is a valid argument - it converts to false...
             if (obj == null || obj == AutomationNull.Value)
+            {
                 return false;
+            }
 
             obj = PSObject.Base(obj);
 
@@ -887,7 +896,9 @@ namespace System.Management.Automation
             }
 
             if (objType == typeof(SwitchParameter))
+            {
                 return ((SwitchParameter)obj).ToBool();
+            }
 
             IList objectArray = obj as IList;
             if (objectArray != null)
@@ -925,7 +936,10 @@ namespace System.Management.Automation
                         return IsTrue(objectArray[0]);
                     }
 
-                    if (firstElement.Count < 1) return false;
+                    if (firstElement.Count < 1)
+                    {
+                        return false;
+                    }
 
                     // the first element is an array with more than zero elements
                     return true;
@@ -1226,9 +1240,13 @@ namespace System.Management.Automation
         {
             if (type == typeof(bool) ||
                 type == typeof(Nullable<bool>))
+            {
                 return true;
+            }
             else
+            {
                 return false;
+            }
         }
 
         /// <summary>
@@ -1239,9 +1257,13 @@ namespace System.Management.Automation
         internal static bool IsSwitchParameterType(Type type)
         {
             if (type == typeof(SwitchParameter) || type == typeof(Nullable<SwitchParameter>))
+            {
                 return true;
+            }
             else
+            {
                 return false;
+            }
         }
 
         /// <summary>
@@ -1253,9 +1275,13 @@ namespace System.Management.Automation
         internal static bool IsBoolOrSwitchParameterType(Type type)
         {
             if (IsBooleanType(type) || IsSwitchParameterType(type))
+            {
                 return true;
+            }
             else
+            {
                 return false;
+            }
         }
 
         /// <summary>
@@ -1903,9 +1929,13 @@ namespace System.Management.Automation
                         // If flags is not set, then see if this value is in the list
                         // of valid values.
                         if (Array.IndexOf(enumHashEntry.values, enumValue) >= 0)
+                        {
                             isDefined = true;
+                        }
                         else
+                        {
                             isDefined = false;
+                        }
                     }
                 } while (false);
 
@@ -2047,9 +2077,13 @@ namespace System.Management.Automation
                 StringComparison ignoreCaseOpt;
 
                 if (ignoreCase)
+                {
                     ignoreCaseOpt = StringComparison.OrdinalIgnoreCase;
+                }
                 else
+                {
                     ignoreCaseOpt = StringComparison.Ordinal;
+                }
 
                 for (int i = 0; i < sourceValueEntries.Length; i++)
                 {
@@ -2064,12 +2098,16 @@ namespace System.Management.Automation
                         if (fromValuePattern != null)
                         {
                             if (!fromValuePattern.IsMatch(name))
+                            {
                                 continue;
+                            }
                         }
                         else
                         {
                             if (String.Compare(sourceValueEntry, name, ignoreCaseOpt) != 0)
+                            {
                                 continue;
+                            }
                         }
                         if (!multipleValues && foundOne)
                         {
@@ -3413,9 +3451,14 @@ namespace System.Management.Automation
             while (ParserOps.MoveNext(null, null, e))
             {
                 if (notFirst)
+                {
                     sbResult.Append(',');
+                }
                 else
+                {
                     notFirst = true;
+                }
+
                 string current = e.Current as string;
                 if (current == null)
                 {
@@ -4074,7 +4117,9 @@ namespace System.Management.Automation
             public override bool Equals(object other)
             {
                 if (!(other is ConversionTypePair))
+                {
                     return false;
+                }
 
                 var ctp = (ConversionTypePair)other;
                 return this.from == ctp.from && this.to == ctp.to;
@@ -5059,7 +5104,9 @@ namespace System.Management.Automation
                         {
                             ParameterInfo[] param = ctor.GetParameters();
                             if (param.Length != 1)
+                            {
                                 continue;
+                            }
 
                             Type paramType = param[0].ParameterType;
                             if (iEnumerableClosedType == paramType ||
