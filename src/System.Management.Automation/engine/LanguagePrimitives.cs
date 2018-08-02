@@ -5288,7 +5288,6 @@ namespace System.Management.Automation
                 return conversionData;
             }
 
-            rank = valueDependentConversion != null ? ConversionRank.Language : ConversionRank.None;
             converter = FigureParseConversion(fromType, toType);
             if (converter == null)
             {
