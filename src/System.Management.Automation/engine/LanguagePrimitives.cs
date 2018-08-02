@@ -4767,12 +4767,11 @@ namespace System.Management.Automation
                 int length = argumentTypes.Length;
                 if (length != _targetParameters.Length + 1) { return false; }
 
-                bool allTypesMatchExactly;
                 Type sourceReturnType = argumentTypes[length - 1];
 
                 if (ProjectedTypeMatchesTargetType(sourceReturnType, _targetReturnType, TypeMatchingContext.ReturnType, out bool typesMatchExactly))
                 {
-                    allTypesMatchExactly = typesMatchExactly;
+                    var allTypesMatchExactly = typesMatchExactly;
                     for (int i = 0; i < _targetParameters.Length; i++)
                     {
                         var targetParam = _targetParameters[i];
