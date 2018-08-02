@@ -4173,113 +4173,113 @@ namespace System.Management.Automation
                 Type typeofChar = typeof(char);
                 foreach (Type type in s_numericTypes)
                 {
-                    CacheConversion<string>(type, typeofString, ConvertNumericToString, ConversionRank.NumericString);
-                    CacheConversion<object>(type, typeofChar, ConvertIConvertible, ConversionRank.NumericString);
-                    CacheConversion<object>(typeofNull, type, ConvertNullToNumeric, ConversionRank.NullToValue);
+                    CacheConversion(type, typeofString, ConvertNumericToString, ConversionRank.NumericString);
+                    CacheConversion(type, typeofChar, ConvertIConvertible, ConversionRank.NumericString);
+                    CacheConversion(typeofNull, type, ConvertNullToNumeric, ConversionRank.NullToValue);
                 }
 
-                CacheConversion<bool>(typeof(Int16), typeofBool, ConvertInt16ToBool, ConversionRank.Language);
-                CacheConversion<bool>(typeof(Int32), typeofBool, ConvertInt32ToBool, ConversionRank.Language);
-                CacheConversion<bool>(typeof(Int64), typeofBool, ConvertInt64ToBool, ConversionRank.Language);
-                CacheConversion<bool>(typeof(UInt16), typeofBool, ConvertUInt16ToBool, ConversionRank.Language);
-                CacheConversion<bool>(typeof(UInt32), typeofBool, ConvertUInt32ToBool, ConversionRank.Language);
-                CacheConversion<bool>(typeof(UInt64), typeofBool, ConvertUInt64ToBool, ConversionRank.Language);
-                CacheConversion<bool>(typeof(SByte), typeofBool, ConvertSByteToBool, ConversionRank.Language);
-                CacheConversion<bool>(typeof(Byte), typeofBool, ConvertByteToBool, ConversionRank.Language);
-                CacheConversion<bool>(typeof(Single), typeofBool, ConvertSingleToBool, ConversionRank.Language);
-                CacheConversion<bool>(typeof(Double), typeofBool, ConvertDoubleToBool, ConversionRank.Language);
-                CacheConversion<bool>(typeof(Decimal), typeofBool, ConvertDecimalToBool, ConversionRank.Language);
+                CacheConversion(typeof(Int16), typeofBool, ConvertInt16ToBool, ConversionRank.Language);
+                CacheConversion(typeof(Int32), typeofBool, ConvertInt32ToBool, ConversionRank.Language);
+                CacheConversion(typeof(Int64), typeofBool, ConvertInt64ToBool, ConversionRank.Language);
+                CacheConversion(typeof(UInt16), typeofBool, ConvertUInt16ToBool, ConversionRank.Language);
+                CacheConversion(typeof(UInt32), typeofBool, ConvertUInt32ToBool, ConversionRank.Language);
+                CacheConversion(typeof(UInt64), typeofBool, ConvertUInt64ToBool, ConversionRank.Language);
+                CacheConversion(typeof(SByte), typeofBool, ConvertSByteToBool, ConversionRank.Language);
+                CacheConversion(typeof(Byte), typeofBool, ConvertByteToBool, ConversionRank.Language);
+                CacheConversion(typeof(Single), typeofBool, ConvertSingleToBool, ConversionRank.Language);
+                CacheConversion(typeof(Double), typeofBool, ConvertDoubleToBool, ConversionRank.Language);
+                CacheConversion(typeof(Decimal), typeofBool, ConvertDecimalToBool, ConversionRank.Language);
 
                 for (int i = 0; i < s_unsignedIntegerTypes.Length; i++)
                 {
                     // Identical types are an identity conversion.
-                    CacheConversion<object>(s_unsignedIntegerTypes[i], s_unsignedIntegerTypes[i],
+                    CacheConversion(s_unsignedIntegerTypes[i], s_unsignedIntegerTypes[i],
                                             ConvertAssignableFrom, ConversionRank.Identity);
-                    CacheConversion<object>(s_signedIntegerTypes[i], s_signedIntegerTypes[i],
+                    CacheConversion(s_signedIntegerTypes[i], s_signedIntegerTypes[i],
                                             ConvertAssignableFrom, ConversionRank.Identity);
 
                     // Unsigned to signed same size is explicit
-                    CacheConversion<object>(s_unsignedIntegerTypes[i], s_signedIntegerTypes[i],
+                    CacheConversion(s_unsignedIntegerTypes[i], s_signedIntegerTypes[i],
                                             ConvertNumeric, ConversionRank.NumericExplicit);
                     // Signed to unsigned same size is explicit, but better than the reverse (because it is "more specific")
-                    CacheConversion<object>(s_signedIntegerTypes[i], s_unsignedIntegerTypes[i],
+                    CacheConversion(s_signedIntegerTypes[i], s_unsignedIntegerTypes[i],
                                             ConvertNumeric, ConversionRank.NumericExplicit1);
 
                     for (int j = i + 1; j < s_unsignedIntegerTypes.Length; j++)
                     {
                         // Conversions where the sign doesn't change, but the size is bigger, is implicit
-                        CacheConversion<object>(s_unsignedIntegerTypes[i], s_unsignedIntegerTypes[j],
+                        CacheConversion(s_unsignedIntegerTypes[i], s_unsignedIntegerTypes[j],
                                                 ConvertNumeric, ConversionRank.NumericImplicit);
-                        CacheConversion<object>(s_signedIntegerTypes[i], s_signedIntegerTypes[j],
+                        CacheConversion(s_signedIntegerTypes[i], s_signedIntegerTypes[j],
                                                 ConvertNumeric, ConversionRank.NumericImplicit);
 
                         // Conversion from smaller unsigned to bigger signed is implicit
-                        CacheConversion<object>(s_unsignedIntegerTypes[i], s_signedIntegerTypes[j],
+                        CacheConversion(s_unsignedIntegerTypes[i], s_signedIntegerTypes[j],
                                                 ConvertNumeric, ConversionRank.NumericImplicit);
                         // Conversion from smaller signed to bigger unsigned is the "better" explicit conversion
-                        CacheConversion<object>(s_signedIntegerTypes[i], s_unsignedIntegerTypes[j],
+                        CacheConversion(s_signedIntegerTypes[i], s_unsignedIntegerTypes[j],
                                                 ConvertNumeric, ConversionRank.NumericExplicit1);
 
                         // Conversion to a smaller type is explicit
-                        CacheConversion<object>(s_unsignedIntegerTypes[j], s_unsignedIntegerTypes[i],
+                        CacheConversion(s_unsignedIntegerTypes[j], s_unsignedIntegerTypes[i],
                                                 ConvertNumeric, ConversionRank.NumericExplicit);
-                        CacheConversion<object>(s_signedIntegerTypes[j], s_signedIntegerTypes[i],
+                        CacheConversion(s_signedIntegerTypes[j], s_signedIntegerTypes[i],
                                                 ConvertNumeric, ConversionRank.NumericExplicit);
-                        CacheConversion<object>(s_unsignedIntegerTypes[j], s_signedIntegerTypes[i],
+                        CacheConversion(s_unsignedIntegerTypes[j], s_signedIntegerTypes[i],
                                                 ConvertNumeric, ConversionRank.NumericExplicit);
-                        CacheConversion<object>(s_signedIntegerTypes[j], s_unsignedIntegerTypes[i],
+                        CacheConversion(s_signedIntegerTypes[j], s_unsignedIntegerTypes[i],
                                                 ConvertNumeric, ConversionRank.NumericExplicit);
                     }
                 }
                 foreach (Type integerType in s_integerTypes)
                 {
-                    CacheConversion<object>(typeofString, integerType, ConvertStringToInteger, ConversionRank.NumericString);
+                    CacheConversion(typeofString, integerType, ConvertStringToInteger, ConversionRank.NumericString);
 
                     foreach (Type realType in s_realTypes)
                     {
-                        CacheConversion<object>(integerType, realType, ConvertNumeric, ConversionRank.NumericImplicit);
-                        CacheConversion<object>(realType, integerType, ConvertNumeric, ConversionRank.NumericExplicit);
+                        CacheConversion(integerType, realType, ConvertNumeric, ConversionRank.NumericImplicit);
+                        CacheConversion(realType, integerType, ConvertNumeric, ConversionRank.NumericExplicit);
                     }
                 }
 
-                CacheConversion<object>(typeofFloat, typeofDouble, ConvertNumeric, ConversionRank.NumericImplicit);
-                CacheConversion<object>(typeofDouble, typeofFloat, ConvertNumeric, ConversionRank.NumericExplicit);
-                CacheConversion<object>(typeofFloat, typeofDecimal, ConvertNumeric, ConversionRank.NumericExplicit);
-                CacheConversion<object>(typeofDouble, typeofDecimal, ConvertNumeric, ConversionRank.NumericExplicit);
-                CacheConversion<object>(typeofDecimal, typeofFloat, ConvertNumeric, ConversionRank.NumericExplicit1);
-                CacheConversion<object>(typeofDecimal, typeofDouble, ConvertNumeric, ConversionRank.NumericExplicit1);
+                CacheConversion(typeofFloat, typeofDouble, ConvertNumeric, ConversionRank.NumericImplicit);
+                CacheConversion(typeofDouble, typeofFloat, ConvertNumeric, ConversionRank.NumericExplicit);
+                CacheConversion(typeofFloat, typeofDecimal, ConvertNumeric, ConversionRank.NumericExplicit);
+                CacheConversion(typeofDouble, typeofDecimal, ConvertNumeric, ConversionRank.NumericExplicit);
+                CacheConversion(typeofDecimal, typeofFloat, ConvertNumeric, ConversionRank.NumericExplicit1);
+                CacheConversion(typeofDecimal, typeofDouble, ConvertNumeric, ConversionRank.NumericExplicit1);
 
-                CacheConversion<Regex>(typeofString, typeof(Regex), ConvertStringToRegex, ConversionRank.Language);
-                CacheConversion<char[]>(typeofString, typeof(char[]), ConvertStringToCharArray, ConversionRank.StringToCharArray);
-                CacheConversion<Type>(typeofString, typeof(Type), ConvertStringToType, ConversionRank.Language);
-                CacheConversion<Uri>(typeofString, typeof(Uri), ConvertStringToUri, ConversionRank.Language);
-                CacheConversion<object>(typeofString, typeofDecimal, ConvertStringToDecimal, ConversionRank.NumericString);
-                CacheConversion<object>(typeofString, typeofFloat, ConvertStringToReal, ConversionRank.NumericString);
-                CacheConversion<object>(typeofString, typeofDouble, ConvertStringToReal, ConversionRank.NumericString);
-                CacheConversion<object>(typeofChar, typeofFloat, ConvertNumericChar, ConversionRank.Language);
-                CacheConversion<object>(typeofChar, typeofDouble, ConvertNumericChar, ConversionRank.Language);
-                CacheConversion<bool>(typeofChar, typeofBool, ConvertCharToBool, ConversionRank.Language);
+                CacheConversion(typeofString, typeof(Regex), ConvertStringToRegex, ConversionRank.Language);
+                CacheConversion(typeofString, typeof(char[]), ConvertStringToCharArray, ConversionRank.StringToCharArray);
+                CacheConversion(typeofString, typeof(Type), ConvertStringToType, ConversionRank.Language);
+                CacheConversion(typeofString, typeof(Uri), ConvertStringToUri, ConversionRank.Language);
+                CacheConversion(typeofString, typeofDecimal, ConvertStringToDecimal, ConversionRank.NumericString);
+                CacheConversion(typeofString, typeofFloat, ConvertStringToReal, ConversionRank.NumericString);
+                CacheConversion(typeofString, typeofDouble, ConvertStringToReal, ConversionRank.NumericString);
+                CacheConversion(typeofChar, typeofFloat, ConvertNumericChar, ConversionRank.Language);
+                CacheConversion(typeofChar, typeofDouble, ConvertNumericChar, ConversionRank.Language);
+                CacheConversion(typeofChar, typeofBool, ConvertCharToBool, ConversionRank.Language);
 
                 // Conversions from null
-                CacheConversion<char>(typeofNull, typeofChar, ConvertNullToChar, ConversionRank.NullToValue);
-                CacheConversion<string>(typeofNull, typeofString, ConvertNullToString, ConversionRank.ToString);
-                CacheConversion<bool>(typeofNull, typeofBool, ConvertNullToBool, ConversionRank.NullToValue);
-                CacheConversion<PSReference>(typeofNull, typeof(PSReference), ConvertNullToPSReference, ConversionRank.NullToRef);
-                CacheConversion<SwitchParameter>(typeofNull, typeof(SwitchParameter), ConvertNullToSwitch, ConversionRank.NullToValue);
-                CacheConversion<object>(typeofNull, typeof(void), ConvertNullToVoid, ConversionRank.NullToValue);
+                CacheConversion(typeofNull, typeofChar, ConvertNullToChar, ConversionRank.NullToValue);
+                CacheConversion(typeofNull, typeofString, ConvertNullToString, ConversionRank.ToString);
+                CacheConversion(typeofNull, typeofBool, ConvertNullToBool, ConversionRank.NullToValue);
+                CacheConversion(typeofNull, typeof(PSReference), ConvertNullToPSReference, ConversionRank.NullToRef);
+                CacheConversion(typeofNull, typeof(SwitchParameter), ConvertNullToSwitch, ConversionRank.NullToValue);
+                CacheConversion(typeofNull, typeof(void), ConvertNullToVoid, ConversionRank.NullToValue);
 
                 // Conversions to bool
-                CacheConversion<object>(typeofBool, typeofBool, ConvertAssignableFrom, ConversionRank.Identity);
-                CacheConversion<bool>(typeofString, typeofBool, ConvertStringToBool, ConversionRank.Language);
-                CacheConversion<bool>(typeof(SwitchParameter), typeofBool, ConvertSwitchParameterToBool, ConversionRank.Language);
+                CacheConversion(typeofBool, typeofBool, ConvertAssignableFrom, ConversionRank.Identity);
+                CacheConversion(typeofString, typeofBool, ConvertStringToBool, ConversionRank.Language);
+                CacheConversion(typeof(SwitchParameter), typeofBool, ConvertSwitchParameterToBool, ConversionRank.Language);
 
 #if !UNIX
                 // Conversions to WMI and ADSI
-                CacheConversion<ManagementObjectSearcher>(typeofString, typeof(ManagementObjectSearcher), ConvertToWMISearcher, ConversionRank.Language);
-                CacheConversion<ManagementClass>(typeofString, typeof(ManagementClass), ConvertToWMIClass, ConversionRank.Language);
-                CacheConversion<ManagementObject>(typeofString, typeof(ManagementObject), ConvertToWMI, ConversionRank.Language);
-                CacheConversion<DirectoryEntry>(typeofString, typeof(DirectoryEntry), ConvertToADSI, ConversionRank.Language);
-                CacheConversion<DirectorySearcher>(typeofString, typeof(DirectorySearcher), ConvertToADSISearcher, ConversionRank.Language);
+                CacheConversion(typeofString, typeof(ManagementObjectSearcher), ConvertToWMISearcher, ConversionRank.Language);
+                CacheConversion(typeofString, typeof(ManagementClass), ConvertToWMIClass, ConversionRank.Language);
+                CacheConversion(typeofString, typeof(ManagementObject), ConvertToWMI, ConversionRank.Language);
+                CacheConversion(typeofString, typeof(DirectoryEntry), ConvertToADSI, ConversionRank.Language);
+                CacheConversion(typeofString, typeof(DirectorySearcher), ConvertToADSISearcher, ConversionRank.Language);
 #endif
             }
         }
@@ -4611,13 +4611,13 @@ namespace System.Management.Automation
                 ConversionData nullableConversion = FigureConversion(fromType, underlyingType);
                 if (nullableConversion.Rank != ConversionRank.None)
                 {
-                    return CacheConversion<object>(fromType, toType, ConvertToNullable, nullableConversion.Rank);
+                    return CacheConversion(fromType, toType, ConvertToNullable, nullableConversion.Rank);
                 }
             }
 
             if (toType == typeof(void))
             {
-                return CacheConversion<object>(fromType, toType, ConvertToVoid, ConversionRank.Language);
+                return CacheConversion(fromType, toType, ConvertToVoid, ConversionRank.Language);
             }
 
             if (toType == typeof(bool))
@@ -4639,14 +4639,14 @@ namespace System.Management.Automation
                 {
                     converter = ConvertClassToBool;
                 }
-                return CacheConversion<bool>(fromType, toType, converter, ConversionRank.Language);
+                return CacheConversion(fromType, toType, converter, ConversionRank.Language);
             }
 
             if (toType == typeof(string))
             {
                 Dbg.Assert(!IsNumeric(GetTypeCode(fromType)) || fromType.IsEnum,
                     "Number to string should be cached on initialization of cache table");
-                return CacheConversion<string>(fromType, toType, ConvertNonNumericToString, ConversionRank.ToString);
+                return CacheConversion(fromType, toType, ConvertNonNumericToString, ConversionRank.ToString);
             }
 
             if (toType.IsArray)
@@ -4657,15 +4657,15 @@ namespace System.Management.Automation
                 {
                     if (toElementType.IsAssignableFrom(fromType.GetElementType()))
                     {
-                        return CacheConversion<object>(fromType, toType, ConvertRelatedArrays, ConversionRank.Language);
+                        return CacheConversion(fromType, toType, ConvertRelatedArrays, ConversionRank.Language);
                     }
 
-                    return CacheConversion<object>(fromType, toType, ConvertUnrelatedArrays, ConversionRank.UnrelatedArrays);
+                    return CacheConversion(fromType, toType, ConvertUnrelatedArrays, ConversionRank.UnrelatedArrays);
                 }
 
                 if (IsTypeEnumerable(fromType))
                 {
-                    return CacheConversion<object>(fromType, toType, ConvertEnumerableToArray, ConversionRank.Language);
+                    return CacheConversion(fromType, toType, ConvertEnumerableToArray, ConversionRank.Language);
                 }
 
                 ConversionData data = FigureConversion(fromType, toElementType);
@@ -4681,12 +4681,12 @@ namespace System.Management.Automation
             {
                 if (fromType.IsArray || fromType == typeof(Array))
                 {
-                    return CacheConversion<object>(fromType, toType, ConvertAssignableFrom, ConversionRank.Assignable);
+                    return CacheConversion(fromType, toType, ConvertAssignableFrom, ConversionRank.Assignable);
                 }
 
                 if (IsTypeEnumerable(fromType))
                 {
-                    return CacheConversion<object>(fromType, toType, ConvertEnumerableToArray, ConversionRank.Language);
+                    return CacheConversion(fromType, toType, ConvertEnumerableToArray, ConversionRank.Language);
                 }
 
                 valueDependentRank = ConversionRank.Assignable & ConversionRank.ValueDependent;
@@ -4698,7 +4698,7 @@ namespace System.Management.Automation
             {
                 if (typeof(IDictionary).IsAssignableFrom(fromType))
                 {
-                    return CacheConversion<Hashtable>(fromType, toType, ConvertIDictionaryToHashtable, ConversionRank.Language);
+                    return CacheConversion(fromType, toType, ConvertIDictionaryToHashtable, ConversionRank.Language);
                 }
 
                 return null;
@@ -4706,18 +4706,18 @@ namespace System.Management.Automation
 
             if (toType == typeof(PSReference))
             {
-                return CacheConversion<PSReference>(fromType, toType, ConvertToPSReference, ConversionRank.Language);
+                return CacheConversion(fromType, toType, ConvertToPSReference, ConversionRank.Language);
             }
 
             if (toType == typeof(XmlDocument))
             {
-                return CacheConversion<XmlDocument>(fromType, toType, ConvertToXml, ConversionRank.Language);
+                return CacheConversion(fromType, toType, ConvertToXml, ConversionRank.Language);
             }
 
             if (toType == typeof(StringCollection))
             {
                 ConversionRank rank = fromType.IsArray || IsTypeEnumerable(fromType) ? ConversionRank.Language : ConversionRank.LanguageS2A;
-                return CacheConversion<StringCollection>(fromType, toType, ConvertToStringCollection, rank);
+                return CacheConversion(fromType, toType, ConvertToStringCollection, rank);
             }
 
 #if !CORECLR // No CommaDelimitedStringCollection In CoreCLR
@@ -4731,7 +4731,7 @@ namespace System.Management.Automation
             if (toType.IsSubclassOf(typeof(Delegate))
                 && (fromType == typeof(ScriptBlock) || fromType.IsSubclassOf(typeof(ScriptBlock))))
             {
-                return CacheConversion<Delegate>(fromType, toType, ConvertScriptBlockToDelegate, ConversionRank.Language);
+                return CacheConversion(fromType, toType, ConvertScriptBlockToDelegate, ConversionRank.Language);
             }
 
             if (toType == typeof(InternalPSCustomObject))
@@ -4747,7 +4747,7 @@ namespace System.Management.Automation
             TypeCode fromTypeCode = GetTypeCode(fromType);
             if (IsInteger(fromTypeCode) && toType.IsEnum)
             {
-                return CacheConversion<object>(fromType, toType, ConvertIntegerToEnum, ConversionRank.Language);
+                return CacheConversion(fromType, toType, ConvertIntegerToEnum, ConversionRank.Language);
             }
 
             if (fromType.IsSubclassOf(typeof(PSMethod)) && toType.IsSubclassOf(typeof(Delegate)) && !toType.IsAbstract)
@@ -4786,7 +4786,7 @@ namespace System.Management.Automation
                     // in the exact order. So we can use this index directly to locate the matching overload in
                     // the converter, without having to compare the signature again.
                     var converter = PSMethodToDelegateConverter.GetConverter(matchedIndex);
-                    return CacheConversion<Delegate>(fromType, toType, converter.Convert, ConversionRank.Language);
+                    return CacheConversion(fromType, toType, converter.Convert, ConversionRank.Language);
                 }
             }
 
@@ -5290,7 +5290,7 @@ namespace System.Management.Automation
 
             if (toType.IsAssignableFrom(fromType))
             {
-                return CacheConversion<object>(fromType, toType, ConvertAssignableFrom,
+                return CacheConversion(fromType, toType, ConvertAssignableFrom,
                                                toType == fromType ? ConversionRank.Identity : ConversionRank.Assignable);
             }
 
@@ -5305,7 +5305,7 @@ namespace System.Management.Automation
 
             if (toType == typeof(PSObject))
             {
-                return CacheConversion<PSObject>(fromType, toType, ConvertToPSObject, ConversionRank.PSObject);
+                return CacheConversion(fromType, toType, ConvertToPSObject, ConversionRank.PSObject);
             }
 
             PSConverter<object> converter = null;
@@ -5467,11 +5467,11 @@ namespace System.Management.Automation
 
             if (Nullable.GetUnderlyingType(toType) != null)
             {
-                return CacheConversion<object>(typeof(Null), toType, ConvertNullToNullable, ConversionRank.NullToValue);
+                return CacheConversion(typeof(Null), toType, ConvertNullToNullable, ConversionRank.NullToValue);
             }
             else if (!toType.IsValueType)
             {
-                return CacheConversion<object>(typeof(Null), toType, ConvertNullToRef, ConversionRank.NullToRef);
+                return CacheConversion(typeof(Null), toType, ConvertNullToRef, ConversionRank.NullToRef);
             }
             return CacheConversion(typeof(Null), toType, ConvertNoConversion, ConversionRank.None);
         }
