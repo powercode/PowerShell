@@ -1767,7 +1767,7 @@ namespace System.Management.Automation
             // This static is thread safe based on the lock in GetEnumHashEntry
             // It can be shared by Runspaces in different MiniShells
             private static readonly Dictionary<Type, EnumHashEntry> s_enumTable = new Dictionary<Type, EnumHashEntry>();
-            private const int maxEnumTableSize = 100;
+            private const int MaxEnumTableSize = 100;
 
             private static EnumHashEntry GetEnumHashEntry(Type enumType)
             {
@@ -1778,7 +1778,7 @@ namespace System.Management.Automation
                         return returnValue;
                     }
 
-                    if (s_enumTable.Count == maxEnumTableSize)
+                    if (s_enumTable.Count == MaxEnumTableSize)
                     {
                         s_enumTable.Clear();
                     }
