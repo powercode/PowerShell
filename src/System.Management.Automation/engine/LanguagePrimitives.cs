@@ -4867,13 +4867,13 @@ namespace System.Management.Automation
                 OutParameterType
             }
 
-            private readonly ParameterInfo[] targetParameters;
-            private readonly Type targetReturnType;
+            private readonly ParameterInfo[] _targetParameters;
+            private readonly Type _targetReturnType;
 
             internal SignatureComparator(MethodInfo targetMethodInfo)
             {
-                targetReturnType = targetMethodInfo.ReturnType;
-                targetParameters = targetMethodInfo.GetParameters();
+                _targetReturnType = targetMethodInfo.ReturnType;
+                _targetParameters = targetMethodInfo.GetParameters();
             }
 
             /// <summary>
@@ -4890,17 +4890,17 @@ namespace System.Management.Automation
             {
                 signaturesMatchExactly = false;
                 int length = argumentTypes.Length;
-                if (length != targetParameters.Length + 1) { return false; }
+                if (length != _targetParameters.Length + 1) { return false; }
 
                 bool typesMatchExactly, allTypesMatchExactly;
                 Type sourceReturnType = argumentTypes[length - 1];
 
-                if (ProjectedTypeMatchesTargetType(sourceReturnType, targetReturnType, TypeMatchingContext.ReturnType, out typesMatchExactly))
+                if (ProjectedTypeMatchesTargetType(sourceReturnType, _targetReturnType, TypeMatchingContext.ReturnType, out typesMatchExactly))
                 {
                     allTypesMatchExactly = typesMatchExactly;
-                    for (int i = 0; i < targetParameters.Length; i++)
+                    for (int i = 0; i < _targetParameters.Length; i++)
                     {
-                        var targetParam = targetParameters[i];
+                        var targetParam = _targetParameters[i];
                         var sourceType = argumentTypes[i];
                         var matchContext = targetParam.IsOut ? TypeMatchingContext.OutParameterType : TypeMatchingContext.ParameterType;
 
