@@ -2049,6 +2049,7 @@ namespace System.Management.Automation
                 // Get multiple matched Public & Static methods
                 const BindingFlags flagsToUse = BindingFlags.FlattenHierarchy | BindingFlags.Public | BindingFlags.Static | BindingFlags.InvokeMethod;
                 var methods = targetType.GetMember(methodName, flagsToUse);
+                // ReSharper disable once PossibleInvalidCastExceptionInForeachLoop
                 foreach (MethodInfo method in methods)
                 {
                     if (!resultType.IsAssignableFrom(method.ReturnType))
