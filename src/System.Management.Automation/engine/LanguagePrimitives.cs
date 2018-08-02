@@ -3055,7 +3055,7 @@ namespace System.Management.Automation
                                                                TypeTable backupTable)
         {
             s_typeConversion.WriteLine("Converting to Hashtable.");
-            return new Hashtable(valueToConvert as IDictionary);
+            return new Hashtable((IDictionary)valueToConvert);
         }
 
         private static PSReference ConvertToPSReference(object valueToConvert,
@@ -3142,7 +3142,7 @@ namespace System.Management.Automation
                                                      IFormatProvider formatProvider,
                                                      TypeTable backupTable)
         {
-            Array valueAsArray = valueToConvert as Array;
+            var valueAsArray = (Array)valueToConvert;
             Type resultElementType = resultType.GetElementType();
             Array resultArray = Array.CreateInstance(resultElementType, valueAsArray.Length);
 
