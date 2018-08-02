@@ -4448,7 +4448,7 @@ namespace System.Management.Automation
                         availableProperties.Append(" , ");
                     }
                     availableProperties.Append("[" + p.Name + " <" + p.TypeNameOfValue + ">]");
-                    if (first == true)
+                    if (first)
                     {
                         first = false;
                     }
@@ -4989,7 +4989,7 @@ namespace System.Management.Automation
         internal static Tuple<PSConverter<object>, ConversionRank> FigureIEnumerableConstructorConversion(Type fromType, Type toType)
         {
             // Win8: 653180. If toType is an Abstract type then we cannot construct it anyway. So, bailing out fast.
-            if (toType.IsAbstract == true)
+            if (toType.IsAbstract)
             {
                 return null;
             }
