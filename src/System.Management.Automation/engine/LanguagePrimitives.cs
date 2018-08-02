@@ -3513,7 +3513,7 @@ namespace System.Management.Automation
             {
                 try
                 {
-                    object result = parse.Invoke(null, new object[2] { valueToConvert, formatProvider });
+                    object result = parse.Invoke(null, new[] { valueToConvert, formatProvider });
                     typeConversion.WriteLine("Parse result: {0}", result);
                     return result;
                 }
@@ -4965,7 +4965,7 @@ namespace System.Management.Automation
                 MethodInfo parse = null;
                 try
                 {
-                    parse = toType.GetMethod("Parse", parseFlags, null, new Type[2] { typeof(string), typeof(IFormatProvider) }, null);
+                    parse = toType.GetMethod("Parse", parseFlags, null, new[] { typeof(string), typeof(IFormatProvider) }, null);
                 }
                 catch (AmbiguousMatchException e)
                 {
