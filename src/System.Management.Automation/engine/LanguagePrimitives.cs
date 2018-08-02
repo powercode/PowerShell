@@ -89,7 +89,7 @@ namespace System.Management.Automation
         /// <param name="formatProvider">The format provider to use like in IFormattable's ToString.</param>
         /// <param name="ignoreCase">True if case should be ignored.</param>
         /// <returns>The <paramref name="sourceValue"/> parameter converted to the <paramref name="destinationType"/> parameter using formatProvider and ignoreCase.</returns>
-        /// <exception cref="InvalidCastException">if no conversion was possible</exception>
+        /// <exception cref="InvalidCastException">if no conversion was possible.</exception>
         public abstract object ConvertFrom(object sourceValue, Type destinationType, IFormatProvider formatProvider, bool ignoreCase);
 
         /// <summary>
@@ -100,7 +100,7 @@ namespace System.Management.Automation
         /// <param name="formatProvider">The format provider to use like in IFormattable's ToString.</param>
         /// <param name="ignoreCase">True if case should be ignored.</param>
         /// <returns>The <paramref name="sourceValue"/> parameter converted to the <paramref name="destinationType"/> parameter using formatProvider and ignoreCase.</returns>
-        /// <exception cref="InvalidCastException">if no conversion was possible</exception>
+        /// <exception cref="InvalidCastException">if no conversion was possible.</exception>
         public virtual object ConvertFrom(PSObject sourceValue, Type destinationType, IFormatProvider formatProvider, bool ignoreCase)
         {
             return this.ConvertFrom(GetSourceValueAsObject(sourceValue), destinationType, formatProvider, ignoreCase);
@@ -133,7 +133,7 @@ namespace System.Management.Automation
         /// <param name="formatProvider">The format provider to use like in IFormattable's ToString.</param>
         /// <param name="ignoreCase">True if case should be ignored.</param>
         /// <returns>SourceValue converted to the <paramref name="destinationType"/> parameter using formatProvider and ignoreCase.</returns>
-        /// <exception cref="InvalidCastException">if no conversion was possible</exception>
+        /// <exception cref="InvalidCastException">if no conversion was possible.</exception>
         public abstract object ConvertTo(object sourceValue, Type destinationType, IFormatProvider formatProvider, bool ignoreCase);
 
         /// <summary>
@@ -144,7 +144,7 @@ namespace System.Management.Automation
         /// <param name="formatProvider">The format provider to use like in IFormattable's ToString.</param>
         /// <param name="ignoreCase">True if case should be ignored.</param>
         /// <returns>SourceValue converted to the <paramref name="destinationType"/> parameter using formatProvider and ignoreCase.</returns>
-        /// <exception cref="InvalidCastException">if no conversion was possible</exception>
+        /// <exception cref="InvalidCastException">if no conversion was possible.</exception>
         public virtual object ConvertTo(PSObject sourceValue, Type destinationType, IFormatProvider formatProvider, bool ignoreCase)
         {
             return this.ConvertTo(GetSourceValueAsObject(sourceValue), destinationType, formatProvider, ignoreCase);
@@ -187,7 +187,7 @@ namespace System.Management.Automation
         /// <param name="formatProvider">The IFormatProvider to use.</param>
         /// <param name="ignoreCase">True if case should be ignored.</param>
         /// <returns>SourceValue converted to destinationType.</returns>
-        /// <exception cref="PSInvalidCastException">When no conversion was possible</exception>
+        /// <exception cref="PSInvalidCastException">When no conversion was possible.</exception>
         public override object ConvertFrom(object sourceValue, Type destinationType, IFormatProvider formatProvider, bool ignoreCase)
         {
             var sourceAsString = (string)LanguagePrimitives.ConvertTo(sourceValue, typeof(string), formatProvider);
@@ -215,7 +215,7 @@ namespace System.Management.Automation
         /// <param name="formatProvider">The IFormatProvider to use.</param>
         /// <param name="ignoreCase">True if case should be ignored.</param>
         /// <returns>This method does not return a value.</returns>
-        /// <exception cref="NotSupportedException">NotSupportedException is always thrown</exception>
+        /// <exception cref="NotSupportedException">NotSupportedException is always thrown.</exception>
         public override object ConvertTo(object sourceValue, Type destinationType, IFormatProvider formatProvider, bool ignoreCase)
         {
             throw PSTraceSource.NewNotSupportedException();
@@ -556,7 +556,7 @@ namespace System.Management.Automation
         /// <param name="obj">
         /// IEnumerable or IEnumerable-like object
         /// .</param>
-        /// <exception cref="ExtendedTypeSystemException">When the act of getting the enumerator throws an exception</exception>
+        /// <exception cref="ExtendedTypeSystemException">When the act of getting the enumerator throws an exception.</exception>
         [SuppressMessage(
             "Microsoft.Naming",
             "CA1720:IdentifiersShouldNotContainTypeNames",
@@ -737,7 +737,7 @@ namespace System.Management.Automation
         /// <exception cref="System.ArgumentException">
         /// <paramref name="first"/> does not implement IComparable or <paramref name="second"/> cannot be converted
         /// to the type of <paramref name="first"/>.
-        /// </exception>
+        /// .</exception>
         public static int Compare(object first, object second)
         {
             return Compare(first, second, false, CultureInfo.InvariantCulture);
@@ -755,7 +755,7 @@ namespace System.Management.Automation
         /// <exception cref="System.ArgumentException">
         /// <paramref name="first"/> does not implement IComparable or <paramref name="second"/> cannot be converted
         /// to the type of <paramref name="first"/>.
-        /// </exception>
+        /// .</exception>
         public static int Compare(object first, object second, bool ignoreCase)
         {
             return Compare(first, second, ignoreCase, CultureInfo.InvariantCulture);
@@ -774,7 +774,7 @@ namespace System.Management.Automation
         /// <exception cref="System.ArgumentException">
         /// <paramref name="first"/> does not implement IComparable or <paramref name="second"/> cannot be converted
         /// to the type of <paramref name="first"/>.
-        /// </exception>
+        /// .</exception>
         public static int Compare(object first, object second, bool ignoreCase, IFormatProvider formatProvider)
         {
             if (formatProvider == null)
@@ -1549,8 +1549,8 @@ namespace System.Management.Automation
         /// <param name="valueToConvert">Value to be converted and returned.</param>
         /// <param name="resultType">Type to convert valueToConvert.</param>
         /// <returns>Converted value.</returns>
-        /// <exception cref="ArgumentNullException">if resultType is null</exception>
-        /// <exception cref="PSInvalidCastException">if the conversion failed</exception>
+        /// <exception cref="ArgumentNullException">if resultType is null.</exception>
+        /// <exception cref="PSInvalidCastException">if the conversion failed.</exception>
         public static object ConvertTo(object valueToConvert, Type resultType)
         {
             return ConvertTo(valueToConvert, resultType, true, CultureInfo.InvariantCulture, null);
@@ -1605,8 +1605,8 @@ namespace System.Management.Automation
         /// <param name="resultType">Type to convert valueToConvert.</param>
         /// <param name="formatProvider">To be used in custom type conversions, to call parse and to call Convert.ChangeType.</param>
         /// <returns>Converted value.</returns>
-        /// <exception cref="ArgumentNullException">if resultType is null</exception>
-        /// <exception cref="PSInvalidCastException">if the conversion failed</exception>
+        /// <exception cref="ArgumentNullException">if resultType is null.</exception>
+        /// <exception cref="PSInvalidCastException">if the conversion failed.</exception>
         public static object ConvertTo(object valueToConvert, Type resultType, IFormatProvider formatProvider)
         {
             return ConvertTo(valueToConvert, resultType, true, formatProvider, null);
@@ -4975,8 +4975,8 @@ namespace System.Management.Automation
         /// TypeTable will be used to do the conversion.
         /// .</param>
         /// <returns>The value converted.</returns>
-        /// <exception cref="ArgumentNullException">if resultType is null</exception>
-        /// <exception cref="PSInvalidCastException">if the conversion failed</exception>
+        /// <exception cref="ArgumentNullException">if resultType is null.</exception>
+        /// <exception cref="PSInvalidCastException">if the conversion failed.</exception>
         internal static object ConvertTo(
             object valueToConvert,
             Type resultType,
