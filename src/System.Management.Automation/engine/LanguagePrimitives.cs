@@ -411,7 +411,7 @@ namespace System.Management.Automation
 
         private static GetEnumerableDelegate GetOrCalculateEnumerable(Type type)
         {
-            GetEnumerableDelegate getEnumerable = null;
+            GetEnumerableDelegate getEnumerable;
             lock (s_getEnumerableCache)
             {
                 if (!s_getEnumerableCache.TryGetValue(type, out getEnumerable))
@@ -1015,7 +1015,7 @@ namespace System.Management.Automation
 
         private static int NumericCompareDecimal(decimal decimalNumber, object otherNumber)
         {
-            object otherDecimal = null;
+            object otherDecimal;
             try
             {
                 otherDecimal = Convert.ChangeType(otherNumber, typeof(Decimal), CultureInfo.InvariantCulture);
@@ -1413,7 +1413,7 @@ namespace System.Management.Automation
             {
                 if (assembly.FullName == assemblyName)
                 {
-                    Type converterType = null;
+                    Type converterType;
                     try
                     {
                         converterType = assembly.GetType(typeName, false, false);
@@ -3207,7 +3207,7 @@ namespace System.Management.Automation
                                                              IFormatProvider formatProvider,
                                                              TypeTable backupTable)
         {
-            Exception exception = null;
+            Exception exception;
 
             try
             {
@@ -3667,12 +3667,12 @@ namespace System.Management.Automation
                                     IFormatProvider formatProvider,
                                     TypeTable backupTable)
             {
-                IList resultAsList = null;
+                IList resultAsList;
                 Array array = null;
 
                 try
                 {
-                    int listSize = 0;
+                    int listSize;
                     if (IsScalar)
                     {
                         listSize = 1;
@@ -3775,7 +3775,7 @@ namespace System.Management.Automation
                 try
                 {
                     ExecutionContext ecFromTLS = LocalPipeline.GetExecutionContextFromTLS();
-                    object result = null;
+                    object result;
 
                     if (ecFromTLS == null || ecFromTLS.LanguageMode == PSLanguageMode.FullLanguage)
                     {
@@ -3934,7 +3934,7 @@ namespace System.Management.Automation
                                     IFormatProvider formatProvider,
                                     TypeTable backupTable)
             {
-                object result = null;
+                object result;
 
                 if (tryfirstConverter != null)
                 {
@@ -4178,7 +4178,7 @@ namespace System.Management.Automation
         private static ConversionData CacheConversion<T>(Type fromType, Type toType, PSConverter<T> converter, ConversionRank rank)
         {
             ConversionTypePair pair = new ConversionTypePair(fromType, toType);
-            ConversionData data = null;
+            ConversionData data;
             lock (s_converterCache)
             {
                 if (!s_converterCache.TryGetValue(pair, out data))
@@ -4199,7 +4199,7 @@ namespace System.Management.Automation
         {
             lock (s_converterCache)
             {
-                ConversionData result = null;
+                ConversionData result;
                 s_converterCache.TryGetValue(new ConversionTypePair(fromType, toType), out result);
                 return result;
             }
@@ -5029,7 +5029,7 @@ namespace System.Management.Automation
 
                 try
                 {
-                    parse = toType.GetMethod("Parse", parseFlags, null, new Type[1] { typeof(string) }, null);
+                    parse = toType.GetMethod("Parse", parseFlags, null, new[] { typeof(string) }, null);
                 }
                 catch (AmbiguousMatchException e)
                 {
@@ -5419,8 +5419,8 @@ namespace System.Management.Automation
                 return CacheConversion(fromType, toType, ConvertNoConversion, ConversionRank.None);
             }
 
-            PSConverter<object> valueDependentConversion = null;
-            ConversionRank valueDependentRank = ConversionRank.None;
+            PSConverter<object> valueDependentConversion;
+            ConversionRank valueDependentRank;
             ConversionData conversionData = FigureLanguageConversion(fromType, toType, out valueDependentConversion, out valueDependentRank);
             if (conversionData != null)
             {
