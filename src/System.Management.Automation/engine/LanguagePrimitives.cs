@@ -296,7 +296,7 @@ namespace System.Management.Automation
     public static class LanguagePrimitives
     {
         [TraceSource("ETS", "Extended Type System")]
-        private static PSTraceSource s_tracer = PSTraceSource.GetTracer("ETS", "Extended Type System");
+        private static readonly PSTraceSource s_tracer = PSTraceSource.GetTracer("ETS", "Extended Type System");
 
         internal delegate void MemberNotFoundError(PSObject pso, DictionaryEntry property, Type resultType);
 
@@ -359,8 +359,8 @@ namespace System.Management.Automation
         /// </summary>
         private class EnumerableTWrapper : IEnumerable
         {
-            private object _enumerable;
-            private Type _enumerableType;
+            private readonly object _enumerable;
+            private readonly Type _enumerableType;
             private DynamicMethod _getEnumerator;
 
             internal EnumerableTWrapper(object enumerable, Type enumerableType)
@@ -407,7 +407,7 @@ namespace System.Management.Automation
         }
 
         private delegate IEnumerable GetEnumerableDelegate(object obj);
-        private static Dictionary<Type, GetEnumerableDelegate> s_getEnumerableCache = new Dictionary<Type, GetEnumerableDelegate>(32);
+        private static readonly Dictionary<Type, GetEnumerableDelegate> s_getEnumerableCache = new Dictionary<Type, GetEnumerableDelegate>(32);
 
         private static GetEnumerableDelegate GetOrCalculateEnumerable(Type type)
         {
@@ -1453,7 +1453,7 @@ namespace System.Management.Automation
         // CIM name string to .NET namestring mapping table
         // (Considered using the MI routines but they didn't do quite the right thing.
         //
-        private static Dictionary<string, string> s_nameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) {
+        private static readonly Dictionary<string, string> s_nameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) {
             { "SInt8",          "SByte" },
             { "UInt8",          "Byte" },
             { "SInt16",         "Int16" },
@@ -1774,11 +1774,11 @@ namespace System.Management.Automation
                     this.hasFlagsAttribute = hasFlagsAttribute;
                 }
 
-                internal String[] names;
-                internal Array values;
-                internal UInt64 allValues;
-                internal bool hasNegativeValue;
-                internal bool hasFlagsAttribute;
+                internal readonly String[] names;
+                internal readonly Array values;
+                internal readonly UInt64 allValues;
+                internal readonly bool hasNegativeValue;
+                internal readonly bool hasFlagsAttribute;
             }
 
             // This static is thread safe based on the lock in GetEnumHashEntry
@@ -4052,8 +4052,8 @@ namespace System.Management.Automation
         [System.Diagnostics.DebuggerDisplay("{from.Name}->{to.Name}")]
         private struct ConversionTypePair
         {
-            internal Type from;
-            internal Type to;
+            internal readonly Type from;
+            internal readonly Type to;
 
             internal ConversionTypePair(Type fromType, Type toType)
             {
@@ -4127,7 +4127,7 @@ namespace System.Management.Automation
             }
         }
 
-        private static Dictionary<ConversionTypePair, ConversionData> s_converterCache
+        private static readonly Dictionary<ConversionTypePair, ConversionData> s_converterCache
             = new Dictionary<ConversionTypePair, ConversionData>(256);
 
         private static ConversionData CacheConversion<T>(Type fromType, Type toType, PSConverter<T> converter, ConversionRank rank)
@@ -4165,24 +4165,24 @@ namespace System.Management.Automation
             return FigureConversion(fromType, toType).Rank;
         }
 
-        private static Type[] s_numericTypes = new Type[] {
+        private static readonly Type[] s_numericTypes = new Type[] {
             typeof(Int16), typeof(Int32), typeof(Int64),
             typeof(UInt16), typeof(UInt32), typeof(UInt64),
             typeof(SByte), typeof(Byte),
             typeof(Single), typeof(Double), typeof(Decimal)
         };
 
-        private static Type[] s_integerTypes = new Type[] {
+        private static readonly Type[] s_integerTypes = new Type[] {
             typeof(Int16), typeof(Int32), typeof(Int64),
             typeof(UInt16), typeof(UInt32), typeof(UInt64),
             typeof(SByte), typeof(Byte)
         };
 
         // Do not reorder the elements of these arrays, we depend on them being ordered by increasing size.
-        private static Type[] s_signedIntegerTypes = new Type[] { typeof(SByte), typeof(Int16), typeof(Int32), typeof(Int64) };
-        private static Type[] s_unsignedIntegerTypes = new Type[] { typeof(Byte), typeof(UInt16), typeof(UInt32), typeof(UInt64) };
+        private static readonly Type[] s_signedIntegerTypes = new Type[] { typeof(SByte), typeof(Int16), typeof(Int32), typeof(Int64) };
+        private static readonly Type[] s_unsignedIntegerTypes = new Type[] { typeof(Byte), typeof(UInt16), typeof(UInt32), typeof(UInt64) };
 
-        private static Type[] s_realTypes = new Type[] { typeof(Single), typeof(Double), typeof(Decimal) };
+        private static readonly Type[] s_realTypes = new Type[] { typeof(Single), typeof(Double), typeof(Decimal) };
 
         internal static void RebuildConversionCache()
         {
@@ -5296,7 +5296,7 @@ namespace System.Management.Automation
             return false;
         }
 
-        private static Dictionary<string, bool> s_possibleTypeConverter = new Dictionary<string, bool>(16);
+        private static readonly Dictionary<string, bool> s_possibleTypeConverter = new Dictionary<string, bool>(16);
 
         // This is the internal dummy type used when an IDictionary is converted to a pscustomobject
         // PS C:\> $ps = [pscustomobject]@{a=10;b=5}
