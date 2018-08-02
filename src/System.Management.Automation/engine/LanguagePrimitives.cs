@@ -433,7 +433,7 @@ namespace System.Management.Automation
         {
             if (type == null) { return false; }
             GetEnumerableDelegate getEnumerable = GetOrCalculateEnumerable(type);
-            return (getEnumerable != ReturnNullEnumerable);
+            return getEnumerable != ReturnNullEnumerable;
         }
 
         /// <summary>
@@ -470,7 +470,7 @@ namespace System.Management.Automation
 
         private static IEnumerable DataTableEnumerable(object obj)
         {
-            return (((DataTable)obj).Rows);
+            return ((DataTable)obj).Rows;
         }
 
         private static IEnumerable TypicalEnumerable(object obj)
@@ -537,7 +537,7 @@ namespace System.Management.Automation
         public static IEnumerator GetEnumerator(object obj)
         {
             var result = s_getEnumeratorSite.Target.Invoke(s_getEnumeratorSite, obj);
-            return (result is EnumerableOps.NonEnumerableObjectEnumerator) ? null : result;
+            return result is EnumerableOps.NonEnumerableObjectEnumerator ? null : result;
         }
 
         #endregion GetEnumerable/GetEnumerator
@@ -646,8 +646,8 @@ namespace System.Management.Automation
             if (first is string firstString)
             {
                 secondString = second as string ?? (string)ConvertTo(second, typeof(string), culture);
-                return (culture.CompareInfo.Compare(firstString, secondString,
-                                                    ignoreCase ? CompareOptions.IgnoreCase : CompareOptions.None) == 0);
+                return culture.CompareInfo.Compare(firstString, secondString,
+                                                   ignoreCase ? CompareOptions.IgnoreCase : CompareOptions.None) == 0;
             }
 
             if (first.Equals(second))
@@ -899,7 +899,7 @@ namespace System.Management.Automation
 
         internal static bool IsTrue(string s)
         {
-            return (s.Length != 0);
+            return s.Length != 0;
         }
 
         internal static bool IsTrue(IList objectArray)
@@ -944,7 +944,7 @@ namespace System.Management.Automation
         /// <returns>true if the object is null</returns>
         internal static bool IsNull(object obj)
         {
-            return (obj == null || obj == AutomationNull.Value);
+            return obj == null || obj == AutomationNull.Value;
         }
 
         /// <summary>
@@ -1034,12 +1034,12 @@ namespace System.Management.Automation
             // Conversion from single or double to decimal might throw
             // if the double is greater than the decimal's maximum so
             // we special case it in NumericCompareDecimal
-            if ((index1 == 10) && ((index2 == 8) || (index2 == 9)))
+            if (index1 == 10 && (index2 == 8 || index2 == 9))
             {
                 return NumericCompareDecimal((decimal)number1, number2);
             }
 
-            if ((index2 == 10) && ((index1 == 8) || (index1 == 9)))
+            if (index2 == 10 && (index1 == 8 || index1 == 9))
             {
                 return -NumericCompareDecimal((decimal)number2, number1);
             }
@@ -1332,7 +1332,7 @@ namespace System.Management.Automation
                 s_tracer.WriteLine("ecFromTLS != null");
                 typesXmlConverter = ecFromTLS.TypeTable.GetTypeConverter(type.FullName);
             }
-            if ((typesXmlConverter == null) && (backupTypeTable != null))
+            if (typesXmlConverter == null && backupTypeTable != null)
             {
                 s_tracer.WriteLine("Using provided TypeTable to get the type converter");
                 typesXmlConverter = backupTypeTable.GetTypeConverter(type.FullName);
@@ -1389,7 +1389,7 @@ namespace System.Management.Automation
                     }
                     catch (Exception e)
                     {
-                        string message = (!(e is TargetInvocationException inner)) || (inner.InnerException == null) ? e.Message : inner.InnerException.Message;
+                        string message = !(e is TargetInvocationException inner) || inner.InnerException == null ? e.Message : inner.InnerException.Message;
                         s_typeConversion.WriteLine("Creating an instance of type \"{0}\" caused an exception to be thrown: \"{1}\"", assemblyQualifiedTypeName, message);
                         return null;
                     }
@@ -1418,7 +1418,7 @@ namespace System.Management.Automation
 
             if (s_nameMap.TryGetValue(typeName, out string mappedType))
             {
-                return ('[' + mappedType + ']');
+                return '[' + mappedType + ']';
             }
 
             // Then check dot net types
@@ -2438,7 +2438,7 @@ namespace System.Management.Automation
                 // first using ConvertTo for the original type
                 object valueConverter = GetConverter(originalType, backupTypeTable);
 
-                if ((valueConverter != null))
+                if (valueConverter != null)
                 {
                     if (valueConverter is TypeConverter valueTypeConverter)
                     {
@@ -2903,7 +2903,7 @@ namespace System.Management.Automation
                                                IFormatProvider formatProvider,
                                                TypeTable backupTable)
         {
-            return ((Int16)valueToConvert) != default(Int16);
+            return (Int16)valueToConvert != default(Int16);
         }
 
         private static bool ConvertInt32ToBool(object valueToConvert,
@@ -2913,7 +2913,7 @@ namespace System.Management.Automation
                                                IFormatProvider formatProvider,
                                                TypeTable backupTable)
         {
-            return ((Int32)valueToConvert) != default(Int32);
+            return (Int32)valueToConvert != default(Int32);
         }
 
         private static bool ConvertInt64ToBool(object valueToConvert,
@@ -2923,7 +2923,7 @@ namespace System.Management.Automation
                                                IFormatProvider formatProvider,
                                                TypeTable backupTable)
         {
-            return ((Int64)valueToConvert) != default(Int64);
+            return (Int64)valueToConvert != default(Int64);
         }
 
         private static bool ConvertUInt16ToBool(object valueToConvert,
@@ -2933,7 +2933,7 @@ namespace System.Management.Automation
                                                IFormatProvider formatProvider,
                                                TypeTable backupTable)
         {
-            return ((UInt16)valueToConvert) != default(UInt16);
+            return (UInt16)valueToConvert != default(UInt16);
         }
 
         private static bool ConvertUInt32ToBool(object valueToConvert,
@@ -2943,7 +2943,7 @@ namespace System.Management.Automation
                                                IFormatProvider formatProvider,
                                                TypeTable backupTable)
         {
-            return ((UInt32)valueToConvert) != default(UInt32);
+            return (UInt32)valueToConvert != default(UInt32);
         }
 
         private static bool ConvertUInt64ToBool(object valueToConvert,
@@ -2953,7 +2953,7 @@ namespace System.Management.Automation
                                                IFormatProvider formatProvider,
                                                TypeTable backupTable)
         {
-            return ((UInt64)valueToConvert) != default(UInt64);
+            return (UInt64)valueToConvert != default(UInt64);
         }
 
         private static bool ConvertSByteToBool(object valueToConvert,
@@ -2963,7 +2963,7 @@ namespace System.Management.Automation
                                                IFormatProvider formatProvider,
                                                TypeTable backupTable)
         {
-            return ((SByte)valueToConvert) != default(SByte);
+            return (SByte)valueToConvert != default(SByte);
         }
 
         private static bool ConvertByteToBool(object valueToConvert,
@@ -2973,7 +2973,7 @@ namespace System.Management.Automation
                                                IFormatProvider formatProvider,
                                                TypeTable backupTable)
         {
-            return ((Byte)valueToConvert) != default(Byte);
+            return (Byte)valueToConvert != default(Byte);
         }
 
         private static bool ConvertSingleToBool(object valueToConvert,
@@ -2983,7 +2983,7 @@ namespace System.Management.Automation
                                                IFormatProvider formatProvider,
                                                TypeTable backupTable)
         {
-            return ((Single)valueToConvert) != default(Single);
+            return (Single)valueToConvert != default(Single);
         }
 
         private static bool ConvertDoubleToBool(object valueToConvert,
@@ -2993,7 +2993,7 @@ namespace System.Management.Automation
                                                IFormatProvider formatProvider,
                                                TypeTable backupTable)
         {
-            return ((Double)valueToConvert) != default(Double);
+            return (Double)valueToConvert != default(Double);
         }
 
         private static bool ConvertDecimalToBool(object valueToConvert,
@@ -3003,7 +3003,7 @@ namespace System.Management.Automation
                                                IFormatProvider formatProvider,
                                                TypeTable backupTable)
         {
-            return ((Decimal)valueToConvert) != default(Decimal);
+            return (Decimal)valueToConvert != default(Decimal);
         }
 
         private static PSConverter<bool> CreateNumericToBoolConverter(Type fromType)
@@ -3683,7 +3683,7 @@ namespace System.Management.Automation
 
             internal ConvertViaNoArgumentConstructor(ConstructorInfo constructor, Type type)
             {
-                var newExpr = (constructor != null) ? Expression.New(constructor) : Expression.New(type);
+                var newExpr = constructor != null ? Expression.New(constructor) : Expression.New(type);
                 _constructor = Expression.Lambda<Func<object>>(newExpr.Cast(typeof(object))).Compile();
             }
 
@@ -4118,7 +4118,7 @@ namespace System.Management.Automation
                 }
                 else
                 {
-                    Dbg.Assert(((Delegate)(data.Converter)).GetMethodInfo().Equals(converter.GetMethodInfo()),
+                    Dbg.Assert(((Delegate)data.Converter).GetMethodInfo().Equals(converter.GetMethodInfo()),
                         "Existing conversion isn't the same as new conversion");
                 }
             }
@@ -4499,7 +4499,7 @@ namespace System.Management.Automation
                     // a custom type converter.  To find those, we consider InternalPSObject=>resultType instead.
                     //
                     // We use a different type because we can't keep PSObject as the from type in the cache.
-                    originalType = (valueToConvert is PSObject) ? typeof(InternalPSObject) : valueToConvert.GetType();
+                    originalType = valueToConvert is PSObject ? typeof(InternalPSObject) : valueToConvert.GetType();
                 }
 
                 data = FigureConversion(originalType, resultType);
@@ -4716,7 +4716,7 @@ namespace System.Management.Automation
 
             if (toType == typeof(StringCollection))
             {
-                ConversionRank rank = (fromType.IsArray || IsTypeEnumerable(fromType)) ? ConversionRank.Language : ConversionRank.LanguageS2A;
+                ConversionRank rank = fromType.IsArray || IsTypeEnumerable(fromType) ? ConversionRank.Language : ConversionRank.LanguageS2A;
                 return CacheConversion<StringCollection>(fromType, toType, ConvertToStringCollection, rank);
             }
 
@@ -5011,7 +5011,7 @@ namespace System.Management.Automation
                     if (typeof(Array) == fromType || typeof(object[]) == fromType ||
                         elementType.IsAssignableFrom(fromType) ||
                         // WinBlue: 423899 : To support scenario like [list[int]]"4"
-                        (FigureConversion(fromType, elementType) != null))
+                        FigureConversion(fromType, elementType) != null)
                     {
                         isScalar = elementType.IsAssignableFrom(fromType);
                         ConstructorInfo[] ctors = toType.GetConstructors();
@@ -5164,7 +5164,7 @@ namespace System.Management.Automation
 
         internal static PSConverter<object> FigurePropertyConversion(Type fromType, Type toType, ref ConversionRank rank)
         {
-            if ((!typeof(PSObject).IsAssignableFrom(fromType)) || (toType.IsAbstract))
+            if (!typeof(PSObject).IsAssignableFrom(fromType) || toType.IsAbstract)
             {
                 return null;
             }
@@ -5316,11 +5316,11 @@ namespace System.Management.Automation
             {
                 var context = LocalPipeline.GetExecutionContextFromTLS();
 
-                if ((context != null) && (context.LanguageMode == PSLanguageMode.ConstrainedLanguage))
+                if (context != null && context.LanguageMode == PSLanguageMode.ConstrainedLanguage)
                 {
-                    if ((toType != typeof(Object)) &&
-                        (toType != typeof(Object[])) &&
-                        (!CoreTypes.Contains(toType)))
+                    if (toType != typeof(Object) &&
+                        toType != typeof(Object[]) &&
+                        !CoreTypes.Contains(toType))
                     {
                         converter = ConvertNotSupportedConversion;
                         rank = ConversionRank.None;
@@ -5485,7 +5485,7 @@ namespace System.Management.Automation
 
             PSObject pso = PSObject.AsPSObject(o);
             var typeNames = pso.InternalTypeNames;
-            if ((typeNames != null) && (typeNames.Count > 0))
+            if (typeNames != null && typeNames.Count > 0)
             {
                 return typeNames[0];
             }
