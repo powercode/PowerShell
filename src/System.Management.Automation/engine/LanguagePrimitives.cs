@@ -59,14 +59,7 @@ namespace System.Management.Automation
                 return null;
             }
 
-            if (sourceValue.BaseObject is PSCustomObject)
-            {
-                return sourceValue;
-            }
-            else
-            {
-                return PSObject.Base(sourceValue);
-            }
+            return sourceValue.BaseObject is PSCustomObject ? sourceValue : PSObject.Base(sourceValue);
         }
 
         /// <summary>
@@ -680,7 +673,8 @@ namespace System.Management.Automation
                     char secondAsUpper = culture.TextInfo.ToUpper(secondString[0]);
                     return firstAsUpper.Equals(secondAsUpper);
                 }
-                else if (secondType == typeof(char))
+
+                if (secondType == typeof(char))
                 {
                     char firstAsUpper = culture.TextInfo.ToUpper((char)first);
                     char secondAsUpper = culture.TextInfo.ToUpper((char)second);
@@ -770,21 +764,19 @@ namespace System.Management.Automation
                 {
                     return 0;
                 }
-                else
+
+                // If it's a positive number, including 0, it's greater than null
+                // for everything else it's less than zero...
+                switch (GetTypeCode(second.GetType()))
                 {
-                    // If it's a positive number, including 0, it's greater than null
-                    // for everything else it's less than zero...
-                    switch (GetTypeCode(second.GetType()))
-                    {
-                        case TypeCode.Int16: return Math.Sign((Int16)second) < 0 ? 1 : -1;
-                        case TypeCode.Int32: return Math.Sign((Int32)second) < 0 ? 1 : -1;
-                        case TypeCode.Int64: return Math.Sign((Int64)second) < 0 ? 1 : -1;
-                        case TypeCode.SByte: return Math.Sign((sbyte)second) < 0 ? 1 : -1;
-                        case TypeCode.Single: return Math.Sign((Single)second) < 0 ? 1 : -1;
-                        case TypeCode.Double: return Math.Sign((Double)second) < 0 ? 1 : -1;
-                        case TypeCode.Decimal: return Math.Sign((Decimal)second) < 0 ? 1 : -1;
-                        default: return -1;
-                    }
+                    case TypeCode.Int16: return Math.Sign((Int16)second) < 0 ? 1 : -1;
+                    case TypeCode.Int32: return Math.Sign((Int32)second) < 0 ? 1 : -1;
+                    case TypeCode.Int64: return Math.Sign((Int64)second) < 0 ? 1 : -1;
+                    case TypeCode.SByte: return Math.Sign((sbyte)second) < 0 ? 1 : -1;
+                    case TypeCode.Single: return Math.Sign((Single)second) < 0 ? 1 : -1;
+                    case TypeCode.Double: return Math.Sign((Double)second) < 0 ? 1 : -1;
+                    case TypeCode.Decimal: return Math.Sign((Decimal)second) < 0 ? 1 : -1;
+                    default: return -1;
                 }
             }
 
@@ -1218,12 +1210,7 @@ namespace System.Management.Automation
                 return true;
             }
 
-            if (type == typeof(TimeSpan))
-            {
-                return true;
-            }
-
-            return false;
+            return type == typeof(TimeSpan);
         }
 
         /// <summary>
@@ -1233,15 +1220,7 @@ namespace System.Management.Automation
         /// <returns>true if type is one of boolean types, false otherwise</returns>
         internal static bool IsBooleanType(Type type)
         {
-            if (type == typeof(bool) ||
-                type == typeof(Nullable<bool>))
-            {
-                return true;
-            }
-            else
-            {
-                return false;
-            }
+            return type == typeof(bool) || type == typeof(Nullable<bool>);
         }
 
         /// <summary>
@@ -1251,14 +1230,7 @@ namespace System.Management.Automation
         /// <returns>true if type is one of switch parameter types, false otherwise</returns>
         internal static bool IsSwitchParameterType(Type type)
         {
-            if (type == typeof(SwitchParameter) || type == typeof(Nullable<SwitchParameter>))
-            {
-                return true;
-            }
-            else
-            {
-                return false;
-            }
+            return type == typeof(SwitchParameter) || type == typeof(Nullable<SwitchParameter>);
         }
 
         /// <summary>
@@ -1269,14 +1241,7 @@ namespace System.Management.Automation
         /// false otherwise</returns>
         internal static bool IsBoolOrSwitchParameterType(Type type)
         {
-            if (IsBooleanType(type) || IsSwitchParameterType(type))
-            {
-                return true;
-            }
-            else
-            {
-                return false;
-            }
+            return IsBooleanType(type) || IsSwitchParameterType(type);
         }
 
         /// <summary>
@@ -1922,14 +1887,7 @@ namespace System.Management.Automation
                     {
                         // If flags is not set, then see if this value is in the list
                         // of valid values.
-                        if (Array.IndexOf(enumHashEntry.Values, enumValue) >= 0)
-                        {
-                            isDefined = true;
-                        }
-                        else
-                        {
-                            isDefined = false;
-                        }
+                        isDefined = Array.IndexOf(enumHashEntry.Values, enumValue) >= 0;
                     }
                 } while (false);
 
@@ -2067,16 +2025,8 @@ namespace System.Management.Automation
                 string[] names = enumHashEntry.Names;
                 Array values = enumHashEntry.Values;
                 UInt64 returnUInt64 = 0;
-                StringComparison ignoreCaseOpt;
 
-                if (ignoreCase)
-                {
-                    ignoreCaseOpt = StringComparison.OrdinalIgnoreCase;
-                }
-                else
-                {
-                    ignoreCaseOpt = StringComparison.Ordinal;
-                }
+                var ignoreCaseOpt = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
                 for (int i = 0; i < sourceValueEntries.Length; i++)
                 {
@@ -2568,10 +2518,8 @@ namespace System.Management.Automation
                                     valueToConvert.ToString(), resultType.ToString(), e.Message);
                             }
                         }
-                        else
-                        {
-                            s_typeConversion.WriteLine("Destination type's converter cannot convert from originalType.");
-                        }
+
+                        s_typeConversion.WriteLine("Destination type's converter cannot convert from originalType.");
                     }
                     if (valueConverter is PSTypeConverter valuePSTypeConverter)
                     {
@@ -4375,28 +4323,26 @@ namespace System.Management.Automation
                     // Win8:649519
                     return SetObjectProperties(o, dictionary, resultType, memberNotFoundErrorAction, memberSetValueErrorAction, enableMethodCall: false);
                 }
-                else
-                {
-                    // Support PSObject to Strong type conversion.
-                    if (baseObj is PSObject psBaseObject)
-                    {
-                        Dictionary<string, object> properties = new Dictionary<string, object>();
-                        foreach (var item in psBaseObject.Properties)
-                        {
-                            properties.Add(item.Name, item.Value);
-                        }
 
-                        try
-                        {
-                            return SetObjectProperties(o, properties, resultType, memberNotFoundErrorAction, memberSetValueErrorAction, false, formatProvider, recursion, ignoreUnknownMembers);
-                        }
-                        catch (InvalidOperationException exception)
-                        {
-                            throw new PSInvalidCastException("ConvertToFinalInvalidCastException", exception,
-                                 ExtendedTypeSystem.InvalidCastException,
-                                 psObject.ToString(), ObjectToTypeNameString(psObject),
-                                 resultType.ToString());
-                        }
+                // Support PSObject to Strong type conversion.
+                if (baseObj is PSObject psBaseObject)
+                {
+                    Dictionary<string, object> properties = new Dictionary<string, object>();
+                    foreach (var item in psBaseObject.Properties)
+                    {
+                        properties.Add(item.Name, item.Value);
+                    }
+
+                    try
+                    {
+                        return SetObjectProperties(o, properties, resultType, memberNotFoundErrorAction, memberSetValueErrorAction, false, formatProvider, recursion, ignoreUnknownMembers);
+                    }
+                    catch (InvalidOperationException exception)
+                    {
+                        throw new PSInvalidCastException("ConvertToFinalInvalidCastException", exception,
+                                                         ExtendedTypeSystem.InvalidCastException,
+                                                         psObject.ToString(), ObjectToTypeNameString(psObject),
+                                                         resultType.ToString());
                     }
                 }
             }
@@ -4763,10 +4709,8 @@ namespace System.Management.Automation
                 {
                     return CacheConversion<Hashtable>(fromType, toType, ConvertIDictionaryToHashtable, ConversionRank.Language);
                 }
-                else
-                {
-                    return null;
-                }
+
+                return null;
             }
 
             if (toType == typeof(PSReference))
