@@ -1075,7 +1075,7 @@ namespace System.Management.Automation
         /// <returns>An object of the specified type, if the conversion was successful.  Returns null otherwise.</returns>
         internal static T FromObjectAs<T>(Object castObject)
         {
-            T returnType = default(T);
+            T returnType;
 
             // First, see if we can cast the direct type
             if (!(castObject is PSObject wrapperObject))
@@ -5328,8 +5328,8 @@ namespace System.Management.Automation
                 return CacheConversion(fromType, toType, ConvertToPSObject, ConversionRank.PSObject);
             }
 
-            PSConverter<object> converter = null;
-            ConversionRank rank = ConversionRank.None;
+            PSConverter<object> converter;
+            ConversionRank rank;
 
             // If we've ever used ConstrainedLanguage, check if the target type is allowed
             if (ExecutionContext.HasEverUsedConstrainedLanguage)
