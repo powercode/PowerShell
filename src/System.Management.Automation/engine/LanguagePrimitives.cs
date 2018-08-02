@@ -3262,9 +3262,11 @@ namespace System.Management.Automation
             try
             {
                 Type resultElementType = resultType == typeof(Array) ? typeof(object) : resultType.GetElementType();
-                ArrayList result = new ArrayList();
-                // false means no further recursions and therefore no cycles
-                result.Add(ConvertTo(valueToConvert, resultElementType, false, formatProvider, backupTable));
+                ArrayList result = new ArrayList
+                {
+                    // false means no further recursions and therefore no cycles
+                    ConvertTo(valueToConvert, resultElementType, false, formatProvider, backupTable)
+                };
                 return result.ToArray(resultElementType);
             }
             catch (Exception e)
