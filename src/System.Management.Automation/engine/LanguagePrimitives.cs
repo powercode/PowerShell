@@ -1153,16 +1153,6 @@ namespace System.Management.Automation
         }
 
         /// <summary>
-        /// Verifies if type is an unsigned integer
-        /// </summary>
-        /// <param name="typeCode">type code to check</param>
-        /// <returns>true if type is an unsigned integer, false otherwise</returns>
-        internal static bool IsUnsignedInteger(TypeCode typeCode)
-        {
-            return (s_typeCodeTraits[(int)typeCode] & TypeCodeTraits.UnsignedInteger) != 0;
-        }
-
-        /// <summary>
         /// Verifies if type is integer
         /// </summary>
         /// <param name="typeCode">type code to check</param>
@@ -1249,40 +1239,6 @@ namespace System.Management.Automation
         internal static bool IsBoolOrSwitchParameterType(Type type)
         {
             return IsBooleanType(type) || IsSwitchParameterType(type);
-        }
-
-        /// <summary>
-        /// Do the necessary conversions when using property or array assignment to a generic dictionary:
-        ///
-        ///     $dict.Prop = value
-        ///     $dict[$Prop] = value
-        ///
-        /// The property typically won't need conversion, but it could.  The value is more likely in
-        /// need of conversion.
-        /// </summary>
-        /// <param name="dictionary">The dictionary that potentially implement <see cref="IDictionary&lt;TKey,TValue&gt;"/></param>
-        /// <param name="key">The object representing the key</param>
-        /// <param name="value">The value to assign</param>
-        internal static void DoConversionsForSetInGenericDictionary(IDictionary dictionary, ref object key, ref object value)
-        {
-            foreach (Type i in dictionary.GetType().GetInterfaces())
-            {
-                if (i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IDictionary<,>))
-                {
-                    // If we get here, we know the target implements IDictionary.  We will assume
-                    // that the non-generic implementation of the indexer property just forwards
-                    // to the generic version, after checking the types of the key and value.
-                    // This assumption holds for System.Collections.Generic.Dictionary<TKey,TValue>.
-
-                    // If we did not make this assumption, we would be forced to generate code
-                    // to call the generic indexer directly, somewhat analogous to what we do
-                    // in GetEnumeratorFromIEnumeratorT.
-
-                    Type[] genericArguments = i.GetGenericArguments();
-                    key = ConvertTo(key, genericArguments[0], CultureInfo.InvariantCulture);
-                    value = ConvertTo(value, genericArguments[1], CultureInfo.InvariantCulture);
-                }
-            }
         }
 
         #region type converter
@@ -1902,18 +1858,6 @@ namespace System.Management.Automation
             /// Throws if the enumType enumeration has no negative values, but the enumValue is not
             /// defined in enumType.
             /// </summary>
-            /// <param name="enumType">some enumeration</param>
-            /// <param name="enumValue">supposed to be an integer</param>
-            /// <param name="errorId">the error id to be used when throwing an exception</param>
-            internal static void ThrowForUndefinedEnum(string errorId, object enumValue, Type enumType)
-            {
-                ThrowForUndefinedEnum(errorId, enumValue, enumValue, enumType);
-            }
-
-            /// <summary>
-            /// Throws if the enumType enumeration has no negative values, but the enumValue is not
-            /// defined in enumType.
-            /// </summary>
             /// <param name="errorId">The error id to be used when throwing an exception</param>
             /// <param name="enumValue">value to validate</param>
             /// <param name="valueToUseToThrow">value to use while throwing an exception</param>
@@ -2262,20 +2206,6 @@ namespace System.Management.Automation
             }
         }
 #endif
-
-        // System.Configuration.CommaDelimitedStringCollection is derived from the StringCollection class
-        private static System.Configuration.CommaDelimitedStringCollection ConvertToCommaDelimitedStringCollection(object valueToConvert,
-                                                                                                                   Type resultType,
-                                                                                                                   bool recursion,
-                                                                                                                   PSObject originalValueToConvert,
-                                                                                                                   IFormatProvider formatProvider,
-                                                                                                                   TypeTable backupTable)
-        {
-            s_typeConversion.WriteLine("Standard type conversion to a CommaDelimitedStringCollection.");
-            var commaDelimitedStringCollection = new System.Configuration.CommaDelimitedStringCollection();
-            AddItemsToCollection(valueToConvert, resultType, formatProvider, backupTable, commaDelimitedStringCollection);
-            return commaDelimitedStringCollection;
-        }
 
 #if !UNIX
         private static DirectoryEntry ConvertToADSI(object valueToConvert,
@@ -4075,8 +4005,6 @@ namespace System.Management.Automation
                                            PSObject originalValueToConvert,
                                            IFormatProvider formatProvider,
                                            TypeTable backupTable);
-
-        internal delegate object PSNullConverter(object nullOrAutomationNull);
 
         internal interface ConversionData
         {
