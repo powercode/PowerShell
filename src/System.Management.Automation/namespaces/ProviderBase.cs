@@ -1067,6 +1067,18 @@ namespace System.Management.Automation.Provider
         #region protected members
 
         /// <summary>
+        /// Providers with the DerivedPSObject capabilities gets called to create a custom
+        /// PSObject.
+        /// </summary>
+        /// <param name="item"></param>
+        /// <param name="path"></param>
+        /// <returns></returns>
+        protected virtual PSObject CreateProviderItemObject(object item, string path)
+        {
+            throw new PSNotImplementedException("The provider did not override CreateProviderItemObject.");
+        }
+
+        /// <summary>
         /// Gives the provider the opportunity to initialize itself.
         /// </summary>
         /// <param name="providerInfo">
@@ -1713,12 +1725,7 @@ namespace System.Management.Automation.Provider
             string path,
             bool isContainer)
         {
-            PSObject result = WrapOutputInPSObject(item, path);
-
-            // Now add the IsContainer
-
-            result.AddOrSetProperty("PSIsContainer", isContainer ? Boxed.True : Boxed.False);
-            providerBaseTracer.WriteLine("Attaching {0} = {1}", "PSIsContainer", isContainer);
+            PSObject result = WrapOutputInPSObject(item, path, isContainer);
 
             Diagnostics.Assert(
                 Context != null,
@@ -1760,6 +1767,9 @@ namespace System.Management.Automation.Provider
         /// <param name="path">
         /// The path to the item.
         /// </param>
+        /// <param name="isContainer">
+        /// Set if a PSISContainer property should be added to the result.
+        /// </param>
         /// <returns>
         /// A PSObject that wraps the item and has path information attached
         /// as notes.
@@ -1769,23 +1779,31 @@ namespace System.Management.Automation.Provider
         /// </exception>
         private PSObject WrapOutputInPSObject(
             object item,
-            string path)
+            string path,
+            bool? isContainer = null)
         {
             if (item == null)
             {
                 throw PSTraceSource.NewArgumentNullException("item");
             }
-            PSObject result = new PSObject(item);
 
             Diagnostics.Assert(
                 ProviderInfo != null,
                 "The ProviderInfo should always be set");
 
+            if (CmdletProviderManagementIntrinsics.CheckProviderCapabilities(ProviderCapabilities.DerivedPSObject, ProviderInfo))
+            {
+                var res = CreateProviderItemObject(item, path);
+                return res;
+            }
+
+            PSObject result = new PSObject(item);
+
+
             // Move the TypeNames to the wrapping object if the wrapped object
             // was an PSObject
 
-            PSObject mshObj = item as PSObject;
-            if (mshObj != null)
+            if (item is PSObject mshObj)
             {
                 result.InternalTypeNames = new ConsolidatedString(mshObj.InternalTypeNames);
             }
@@ -1800,29 +1818,15 @@ namespace System.Management.Automation.Provider
 
             // Now get the parent path and child name
 
-            NavigationCmdletProvider navProvider = this as NavigationCmdletProvider;
-            if (navProvider != null && path != null)
+            if (this is NavigationCmdletProvider navProvider && path != null)
             {
                 // Get the parent path
 
-                string parentPath = null;
-
-                if (PSDriveInfo != null)
-                {
-                    parentPath = navProvider.GetParentPath(path, PSDriveInfo.Root, Context);
-                }
-                else
-                {
-                    parentPath = navProvider.GetParentPath(path, String.Empty, Context);
-                }
-
-                string providerQualifiedParentPath = String.Empty;
-
-                if (!String.IsNullOrEmpty(parentPath))
-                {
-                    providerQualifiedParentPath =
-                        LocationGlobber.GetProviderQualifiedPath(parentPath, ProviderInfo);
-                }
+                var root = PSDriveInfo != null ? PSDriveInfo.Root : string.Empty;
+                var parentPath = navProvider.GetParentPath(path, root, Context);
+                var providerQualifiedParentPath = !string.IsNullOrEmpty(parentPath)
+                                                      ? LocationGlobber.GetProviderQualifiedPath(parentPath, ProviderInfo)
+                                                      : string.Empty;
                 result.AddOrSetProperty("PSParentPath", providerQualifiedParentPath);
                 providerBaseTracer.WriteLine("Attaching {0} = {1}", "PSParentPath", providerQualifiedParentPath);
 
@@ -1832,6 +1836,7 @@ namespace System.Management.Automation.Provider
 
                 result.AddOrSetProperty("PSChildName", childName);
                 providerBaseTracer.WriteLine("Attaching {0} = {1}", "PSChildName", childName);
+
             }
 
             // PSDriveInfo
@@ -1846,6 +1851,13 @@ namespace System.Management.Automation.Provider
 
             result.AddOrSetProperty(this.ProviderInfo.GetNotePropertyForProviderCmdlets("PSProvider"));
             providerBaseTracer.WriteLine("Attaching {0} = {1}", "PSProvider", this.ProviderInfo);
+
+            if (isContainer.HasValue)
+            {
+                // Now add the IsContainer
+                result.AddOrSetProperty("PSIsContainer", isContainer.Value ? Boxed.True : Boxed.False);
+                providerBaseTracer.WriteLine("Attaching {0} = {1}", "PSIsContainer", isContainer);
+            }
 
             return result;
         } // WrapOutputInPSObject

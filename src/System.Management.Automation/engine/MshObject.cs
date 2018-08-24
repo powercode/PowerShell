@@ -22,7 +22,9 @@ using System.Management.Automation.Runspaces;
 using System.Runtime.Serialization;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using Microsoft.Management.Infrastructure;
+using Microsoft.PowerShell.Commands;
 #if !UNIX
 using System.DirectoryServices;
 using System.Management;
@@ -72,6 +74,8 @@ namespace System.Management.Automation
             TypeTable table = msjObj.GetTypeTable();
             return TypeTableGetMemberDelegate<T>(msjObj, table, name);
         }
+
+        internal bool IsDerived => this.GetType() != typeof(PSObject);
 
         private static T TypeTableGetMemberDelegate<T>(PSObject msjObj, TypeTable typeTableToUse, string name) where T : PSMemberInfo
         {
@@ -127,7 +131,7 @@ namespace System.Management.Automation
                 PSObject.memberResolution.WriteLine("Serialized adapted member: {0}.", adaptedMember == null ? "not found" : adaptedMember.Name);
                 return adaptedMember;
             }
-            T retValue = msjObj.InternalAdapter.BaseGetMember<T>(msjObj._immediateBaseObject, name);
+            T retValue = msjObj.InternalAdapter.BaseGetMember<T>(msjObj, name);
             PSObject.memberResolution.WriteLine("Adapted member: {0}.", retValue == null ? "not found" : retValue.Name);
             return retValue;
         }
@@ -164,6 +168,19 @@ namespace System.Management.Automation
                 return TransformMemberInfoCollection<PSPropertyInfo, T>(msjObj.adaptedMembers);
             }
             PSMemberInfoInternalCollection<T> retValue = msjObj.InternalAdapter.BaseGetMembers<T>(msjObj._immediateBaseObject);
+            var derivedMembers = msjObj.GetDerivedMembers();
+            if (derivedMembers != null)
+            {
+                foreach (var mem in derivedMembers)
+                {
+                    if (mem is T t)
+                    {
+                        retValue.Add(t);
+                    }
+                }
+
+            }
+
             PSObject.memberResolution.WriteLine("Adapted members: {0}.", retValue.VisibleCount);
             return retValue;
         }
@@ -186,7 +203,7 @@ namespace System.Management.Automation
             // Don't lookup dotnet member if the object doesn't insist.
             if (msjObj.InternalBaseDotNetAdapter != null)
             {
-                T retValue = msjObj.InternalBaseDotNetAdapter.BaseGetMember<T>(msjObj._immediateBaseObject, name);
+                T retValue = msjObj.InternalBaseDotNetAdapter.BaseGetMember<T>(msjObj, name);
                 PSObject.memberResolution.WriteLine("DotNet member: {0}.", retValue == null ? "not found" : retValue.Name);
                 return retValue;
             }
@@ -686,8 +703,7 @@ namespace System.Management.Automation
 
         internal static bool HasInstanceMembers(object obj, out PSMemberInfoInternalCollection<PSMemberInfo> instanceMembers)
         {
-            var psobj = obj as PSObject;
-            if (psobj != null)
+            if (obj is PSObject psobj)
             {
                 lock (psobj)
                 {
@@ -790,6 +806,12 @@ namespace System.Management.Automation
             }
         }
         private PSMemberInfoIntegratingCollection<PSPropertyInfo> _properties;
+
+        /// <summary>
+        /// Extension point for derived types to provide extra properties
+        /// </summary>
+        /// <returns></returns>
+        protected virtual IList<PSMemberInfo> GetDerivedMembers() => null;
 
         /// <summary>
         /// Gets the Method collection, or the members that are actually methods.
@@ -1008,15 +1030,24 @@ namespace System.Management.Automation
             return returnValue;
         }
 
-        internal static PSMemberInfo GetStaticCLRMember(object obj, string methodName)
+        internal static (PSMemberInfo memberInfo, bool onDerivedPSObject) GetStaticCLRMember(object obj, string methodName)
         {
-            obj = PSObject.Base(obj);
-            if (obj == null || methodName == null || methodName.Length == 0)
+            if (string.IsNullOrEmpty(methodName))
             {
-                return null;
+                return (null, false);
+            }
+
+            if (obj is PSObject psObj && psObj.IsDerived)
+            {
+                return (dotNetStaticAdapter.BaseGetMember<PSMemberInfo>(psObj.GetType(), methodName), true);
+            }
+            var baseObj = PSObject.Base(obj);
+            if (baseObj == null)
+            {
+                return (null, false);
             }
             var objType = obj as Type ?? obj.GetType();
-            return dotNetStaticAdapter.BaseGetMember<PSMemberInfo>(objType, methodName);
+            return (dotNetStaticAdapter.BaseGetMember<PSMemberInfo>(objType, methodName), false);
         }
 
         /// <summary>

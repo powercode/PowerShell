@@ -26,7 +26,7 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <DefineConstants>$(DefineConstants);CORECLR</DefineConstants>
+    <DefineConstants>TRACE;CORECLR;CORECLR;ENABLE_BINDER_DEBUG_LOGGING </DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

@@ -150,5 +150,11 @@ namespace System.Management.Automation.Provider
         /// transaction to it, an exception is thrown.
         /// </summary>
         Transactions = 0x40,
+
+        /// <summary>
+        /// The providers supports creating objects derived from PSObjects, for more
+        /// efficient storage of provider properties
+        /// </summary>
+        DerivedPSObject = 0x80,
     } // ProviderCapabilities
 } // namespace System.Management.Automation

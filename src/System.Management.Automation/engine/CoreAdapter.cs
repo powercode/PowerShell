@@ -372,6 +372,15 @@ namespace System.Management.Automation
         {
             try
             {
+                if (obj is PSObject t && t.IsDerived)
+                {
+                    var res = this.GetMember<T>(t, memberName);
+                    if (res != null)
+                    {
+                        return res;
+                    }
+                }
+
                 return this.GetMember<T>(obj, memberName);
             }
             catch (ExtendedTypeSystemException) { throw; }

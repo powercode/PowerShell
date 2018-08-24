@@ -1468,6 +1468,7 @@ namespace System.Management.Automation
             PSMethodInfo targetMethod = null;
             object targetBase = null;
             PSObject targetAsPSObject = null;
+            bool onDerivedPSObject = false;
 
             do
             {
@@ -1491,7 +1492,9 @@ namespace System.Management.Automation
 
                 if (callStatic)
                 {
-                    targetMethod = PSObject.GetStaticCLRMember(target, methodName) as PSMethod;
+                    PSMemberInfo targetMember;
+                    (targetMember, onDerivedPSObject) = PSObject.GetStaticCLRMember(target, methodName);
+                    targetMethod = targetMember as PSMethod;
                 }
                 else
                 {

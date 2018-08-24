@@ -180,7 +180,7 @@ namespace System.Management.Automation.Language
             return restrictions;
         }
 
-        internal static BindingRestrictions PSGetTypeRestriction(this DynamicMetaObject obj)
+        internal static BindingRestrictions PSGetTypeRestriction(this DynamicMetaObject obj, bool onDerivedPSBaseObject = false)
         {
             if (obj.Restrictions != BindingRestrictions.Empty)
             {
@@ -192,7 +192,7 @@ namespace System.Management.Automation.Language
                 return BindingRestrictions.GetInstanceRestriction(obj.Expression, obj.Value);
             }
 
-            var baseValue = PSObject.Base(obj.Value);
+            var baseValue = onDerivedPSBaseObject ? obj.Value : PSObject.Base(obj.Value);
             if (baseValue == null)
             {
                 Diagnostics.Assert(obj.Value == AutomationNull.Value, "PSObject.Base should only return null for AutomationNull.Value");
@@ -212,16 +212,19 @@ namespace System.Management.Automation.Language
                     BindingRestrictions.GetTypeRestriction(Expression.Call(CachedReflectionInfo.PSObject_Base, obj.Expression),
                                                            baseValue.GetType()));
             }
-            else if (baseValue is PSObject)
+            else if (baseValue is PSObject psobj)
             {
-                // We have an empty custom object.  The restrictions must check this explicitly, otherwise we have
-                // a simple type test on PSObject, which obviously tests true for many objects.
-                // So we end up with:
-                //     newObj.GetType() == typeof(PSObject) && PSObject.Base(newObj) == newObj
+                if (!onDerivedPSBaseObject)
+                {
+                    // We have an empty custom object.  The restrictions must check this explicitly, otherwise we have
+                    // a simple type test on PSObject, which obviously tests true for many objects.
+                    // So we end up with:
+                    //     newObj.GetType() == typeof(PSObject) && PSObject.Base(newObj) == newObj
 
-                restrictions = restrictions.Merge(
-                    BindingRestrictions.GetExpressionRestriction(
-                        Expression.Equal(Expression.Call(CachedReflectionInfo.PSObject_Base, obj.Expression), obj.Expression)));
+                    restrictions = restrictions.Merge(
+                        BindingRestrictions.GetExpressionRestriction(
+                            Expression.Equal(Expression.Call(CachedReflectionInfo.PSObject_Base, obj.Expression), obj.Expression)));
+                }
             }
 
             return restrictions;
@@ -5007,16 +5010,19 @@ namespace System.Management.Automation.Language
             }
 
             // Defer COM objects or arguments wrapped in PSObjects
-            if (target.Value is PSObject && (PSObject.Base(target.Value) != target.Value))
+            if (target.Value is PSObject pso)
             {
-                Object baseObject = PSObject.Base(target.Value);
-                if (baseObject != null && Marshal.IsComObject(baseObject))
+                if (PSObject.Base(pso) != pso)
                 {
-                    // We unwrap only if the 'base' is a COM object. It's unnecessary to unwrap in other cases,
-                    // especially in the case of strings, we would lose instance members on the PSObject.
-                    // Therefore, we need to use a stricter restriction to make sure PSObject 'target' with other
-                    // base types doesn't get unwrapped.
-                    return this.DeferForPSObject(target, targetIsComObject: true).WriteToDebugLog(this);
+                    Object baseObject = PSObject.Base(pso);
+                    if (baseObject != null && Marshal.IsComObject(baseObject))
+                    {
+                        // We unwrap only if the 'base' is a COM object. It's unnecessary to unwrap in other cases,
+                        // especially in the case of strings, we would lose instance members on the PSObject.
+                        // Therefore, we need to use a stricter restriction to make sure PSObject 'target' with other
+                        // base types doesn't get unwrapped.
+                        return this.DeferForPSObject(target, targetIsComObject: true).WriteToDebugLog(this);
+                    }
                 }
             }
 
@@ -5028,18 +5034,18 @@ namespace System.Management.Automation.Language
                 return result.WriteToDebugLog(this);
             }
 
-            object targetValue = PSObject.Base(target.Value);
+            var targetValueBase = PSObject.Base(target.Value);
+            var derivedPSObject = target.Value is PSObject psobj && typeof(PSObject) != psobj.GetType() ? psobj : null;
 
-            if (targetValue == null)
+
+            if (targetValueBase == null && derivedPSObject == null)
             {
                 // PSGetTypeRestriction will actually create an instance restriction because the targetValue is null.
                 return PropertyDoesntExist(target, target.PSGetTypeRestriction()).WriteToDebugLog(this);
             }
 
-            BindingRestrictions restrictions;
-            PSMemberInfo memberInfo;
             Expression expr = null;
-            if (_hasInstanceMember && TryGetInstanceMember(target.Value, Name, out memberInfo))
+            if (_hasInstanceMember && TryGetInstanceMember(target.Value, Name, out PSMemberInfo memberInfo))
             {
                 // If there is an instance member, we generate (roughly) the following:
                 //     PSMemberInfo memberInfo;
@@ -5074,14 +5080,15 @@ namespace System.Management.Automation.Language
 
             bool canOptimize;
             Type aliasConversionType;
-            memberInfo = GetPSMemberInfo(target, out restrictions, out canOptimize, out aliasConversionType, MemberTypes.Property);
+            bool onDerivedPSObject;
+            (memberInfo, onDerivedPSObject) = GetPSMemberInfo(target, out BindingRestrictions restrictions, out canOptimize, out aliasConversionType, MemberTypes.Property);
 
             if (!canOptimize)
             {
                 Diagnostics.Assert(memberInfo == null, "We don't bother returning members if we can't optimize.");
                 return new DynamicMetaObject(
                     WrapGetMemberInTry(Expression.Call(CachedReflectionInfo.PSGetMemberBinder_GetAdaptedValue,
-                                                       GetTargetExpr(target, typeof(object)),
+                                                       GetTargetExpr(target, typeof(object), onDerivedPSObject),
                                                        Expression.Constant(Name))),
                     restrictions).WriteToDebugLog(this);
             }
@@ -5116,7 +5123,7 @@ namespace System.Management.Automation.Language
                         {
                             // For static property access, the target expr must be null.  For non-static, we must convert
                             // because target.Expression is typeof(object) because this is a dynamic site.
-                            var targetExpr = _static ? null : GetTargetExpr(target, adapterData.member.DeclaringType);
+                            var targetExpr = _static ? null : GetTargetExpr(target, adapterData.member.DeclaringType, onDerivedPSObject);
                             var propertyAccessor = adapterData.member as PropertyInfo;
                             if (propertyAccessor != null)
                             {
@@ -5176,10 +5183,10 @@ namespace System.Management.Automation.Language
                 }
             }
 
-            if (targetValue is IDictionary)
+            if (targetValueBase is IDictionary)
             {
                 Type genericTypeArg = null;
-                bool isGeneric = IsGenericDictionary(targetValue, ref genericTypeArg);
+                bool isGeneric = IsGenericDictionary(targetValueBase, ref genericTypeArg);
 
                 if (!isGeneric || genericTypeArg != null)
                 {
@@ -5197,7 +5204,7 @@ namespace System.Management.Automation.Language
                         : CachedReflectionInfo.PSGetMemberBinder_TryGetIDictionaryValue;
                     expr = Expression.Block(new[] { temp },
                         Expression.Condition(
-                            Expression.Call(method, GetTargetExpr(target, method.GetParameters()[0].ParameterType), Expression.Constant(Name), temp),
+                            Expression.Call(method, GetTargetExpr(target, method.GetParameters()[0].ParameterType, onDerivedPSObject), Expression.Constant(Name), temp),
                             temp,
                             expr.Cast(typeof(object))));
                 }
@@ -5240,17 +5247,18 @@ namespace System.Management.Automation.Language
         /// Get the actual value, as an expression, of the object represented by target.  This
         /// will get the base object if it's a psobject, plus correctly handle Nullable.
         /// </summary>
-        internal static Expression GetTargetExpr(DynamicMetaObject target, Type castToType = null)
+        internal static Expression GetTargetExpr(DynamicMetaObject target, Type castToType = null, bool onDerivedPSObject = false)
         {
             var expr = target.Expression;
             var value = target.Value;
 
             // If the target value is actually a deserialized PSObject, we should use the original value
             var psobj = value as PSObject;
-            if (psobj != null && psobj != AutomationNull.Value && !psobj.isDeserialized)
+            if (psobj != null && psobj != AutomationNull.Value && !psobj.isDeserialized && !onDerivedPSObject)
             {
                 expr = Expression.Call(CachedReflectionInfo.PSObject_Base, expr);
                 value = PSObject.Base(value);
+
             }
 
             var type = castToType ?? ((value != null) ? value.GetType() : typeof(object));
@@ -5408,7 +5416,7 @@ namespace System.Management.Automation.Language
         /// <summary>
         /// Resolve the alias, throwing an exception if a cycle is detected while resolving the alias.
         /// </summary>
-        private PSMemberInfo ResolveAlias(PSAliasProperty alias, DynamicMetaObject target, HashSet<string> aliases,
+        private (PSMemberInfo memberInfo, bool onDerivedPSObject) ResolveAlias(PSAliasProperty alias, DynamicMetaObject target, HashSet<string> aliases,
             List<BindingRestrictions> aliasRestrictions)
         {
             Diagnostics.Assert(aliasRestrictions != null, "aliasRestrictions cannot be null");
@@ -5433,15 +5441,14 @@ namespace System.Management.Automation.Language
             // can resolve that. In that case we simply return without further evaluation.
             if (binder.HasInstanceMember)
             {
-                return null;
+                return (null, false);
             }
 
-            PSMemberInfo result = binder.GetPSMemberInfo(target, out restrictions, out canOptimize, out aliasConversionType,
-                                                         MemberTypes.Property, aliases, aliasRestrictions);
+            var result = binder.GetPSMemberInfo(target, out restrictions, out canOptimize, out aliasConversionType, MemberTypes.Property, aliases, aliasRestrictions);
             return result;
         }
 
-        internal PSMemberInfo GetPSMemberInfo(DynamicMetaObject target,
+        internal (PSMemberInfo memberInfo, bool onDerivedPSObject) GetPSMemberInfo(DynamicMetaObject target,
                                               out BindingRestrictions restrictions,
                                               out bool canOptimize,
                                               out Type aliasConversionType,
@@ -5449,10 +5456,12 @@ namespace System.Management.Automation.Language
                                               HashSet<string> aliases = null,
                                               List<BindingRestrictions> aliasRestrictions = null)
         {
+            bool onDerivedPSObject = false;
             aliasConversionType = null;
             bool hasTypeTableMember;
             bool hasInstanceMember;
             BindingRestrictions versionRestriction;
+            PSMemberInfo memberInfo = null;
             lock (this)
             {
                 versionRestriction = BinderUtils.GetVersionCheck(this, _version);
@@ -5460,29 +5469,30 @@ namespace System.Management.Automation.Language
                 hasInstanceMember = _hasInstanceMember;
             }
 
+            var targetValue = target.Value;
             if (_static)
             {
                 restrictions = target.PSGetStaticMemberRestriction();
                 restrictions = restrictions.Merge(versionRestriction);
                 canOptimize = true;
-
-                return PSObject.GetStaticCLRMember(target.Value, Name);
+                var res = PSObject.GetStaticCLRMember(targetValue, Name);
+                return res;
             }
 
             canOptimize = false;
 
             PSMemberInfo unused;
-            Diagnostics.Assert(!TryGetInstanceMember(target.Value, Name, out unused),
+            Diagnostics.Assert(!TryGetInstanceMember(targetValue, Name, out unused),
                                 "shouldn't get here if there is an instance member");
 
-            PSMemberInfo memberInfo = null;
+
             ConsolidatedString typenames = null;
             var context = LocalPipeline.GetExecutionContextFromTLS();
             var typeTable = context != null ? context.TypeTable : null;
 
             if (hasTypeTableMember)
             {
-                typenames = PSObject.GetTypeNames(target.Value);
+                typenames = PSObject.GetTypeNames(targetValue);
                 if (typeTable != null)
                 {
                     memberInfo = typeTable.GetMembers<PSMemberInfo>(typenames)[Name];
@@ -5508,24 +5518,48 @@ namespace System.Management.Automation.Language
             //   See the comments about 'three interesting cases' in PSInvokeMemberBinder.FallbackInvokeMember for more info.
             //
             // - If not, we want to use the base object, so that we might generate optimized code.
-            var psobj = target.Value as PSObject;
-            bool isTargetDeserializedObject = (psobj != null) && (psobj.isDeserialized);
+
+            var psobj = targetValue as PSObject;
+            var isDerivedPSObject = psobj?.IsDerived ?? false;
+            bool isTargetDeserializedObject = psobj?.isDeserialized ?? false;
+
             object value = isTargetDeserializedObject ? target.Value : PSObject.Base(target.Value);
 
             var adapterSet = PSObject.GetMappedAdapter(value, typeTable);
+            var adapterSetOriginalAdapter = adapterSet.OriginalAdapter;
             if (memberInfo == null)
             {
-                canOptimize = adapterSet.OriginalAdapter.CanSiteBinderOptimize(memberTypeToOperateOn);
-                // Don't bother looking for the member if we're not going to use it.
-                if (canOptimize)
+                if (isDerivedPSObject)
                 {
-                    memberInfo = adapterSet.OriginalAdapter.BaseGetMember<PSMemberInfo>(value, Name);
+                    var dotNetInstanceAdapter = PSObject.dotNetInstanceAdapter;
+                    canOptimize = dotNetInstanceAdapter.CanSiteBinderOptimize(memberTypeToOperateOn);
+                    if (canOptimize)
+                    {
+                        memberInfo = dotNetInstanceAdapter.BaseGetMember<PSMemberInfo>(psobj, Name);
+                        onDerivedPSObject = memberInfo != null;
+                    }
+                }
+                if (memberInfo == null)
+                {
+                    canOptimize = adapterSetOriginalAdapter.CanSiteBinderOptimize(memberTypeToOperateOn);
+                    // Don't bother looking for the member if we're not going to use it.
+                    if (canOptimize)
+                    {
+                        memberInfo = adapterSetOriginalAdapter.BaseGetMember<PSMemberInfo>(value, Name);
+                    }
                 }
             }
 
             if (memberInfo == null && canOptimize && adapterSet.DotNetAdapter != null)
             {
-                memberInfo = adapterSet.DotNetAdapter.BaseGetMember<PSMemberInfo>(value, Name);
+                if (isDerivedPSObject)
+                {
+                    memberInfo = adapterSet.DotNetAdapter.BaseGetMember<PSMemberInfo>(value, Name);
+                    onDerivedPSObject = true;
+                }
+                if (memberInfo == null) {
+                    memberInfo = adapterSet.DotNetAdapter.BaseGetMember<PSMemberInfo>(value, Name);
+                }
             }
 
             // The member came from the type table or an adapter and isn't instance based, so the restriction will start
@@ -5547,7 +5581,7 @@ namespace System.Management.Automation.Language
                     aliasRestrictions = new List<BindingRestrictions>();
                 }
 
-                memberInfo = ResolveAlias(alias, target, aliases, aliasRestrictions);
+                (memberInfo, onDerivedPSObject) = ResolveAlias(alias, target, aliases, aliasRestrictions);
                 if (memberInfo == null)
                 {
                     // this can happen in the cases where referenced name of the alias property
@@ -5562,7 +5596,7 @@ namespace System.Management.Automation.Language
                 }
             }
 
-            if (_classScope != null && (target.LimitType == _classScope || target.LimitType.IsSubclassOf(_classScope)) && adapterSet.OriginalAdapter == PSObject.dotNetInstanceAdapter)
+            if (_classScope != null && (target.LimitType == _classScope || target.LimitType.IsSubclassOf(_classScope)) && adapterSetOriginalAdapter == PSObject.dotNetInstanceAdapter)
             {
                 List<MethodBase> candidateMethods = null;
                 foreach (var member in _classScope.GetMembers(BindingFlags.Instance | BindingFlags.FlattenHierarchy | BindingFlags.NonPublic))
@@ -5578,7 +5612,7 @@ namespace System.Management.Automation.Language
                             if ((getMethod == null || getMethod.IsFamily || getMethod.IsPublic) &&
                                 (setMethod == null || setMethod.IsFamily || setMethod.IsPublic))
                             {
-                                memberInfo = new PSProperty(this.Name, PSObject.dotNetInstanceAdapter, target.Value, new DotNetAdapter.PropertyCacheEntry(propertyInfo));
+                                memberInfo = new PSProperty(this.Name, PSObject.dotNetInstanceAdapter, targetValue, new DotNetAdapter.PropertyCacheEntry(propertyInfo));
                             }
                         }
                         else
@@ -5588,7 +5622,7 @@ namespace System.Management.Automation.Language
                             {
                                 if (fieldInfo.IsFamily)
                                 {
-                                    memberInfo = new PSProperty(this.Name, PSObject.dotNetInstanceAdapter, target.Value, new DotNetAdapter.PropertyCacheEntry(fieldInfo));
+                                    memberInfo = new PSProperty(this.Name, PSObject.dotNetInstanceAdapter, targetValue, new DotNetAdapter.PropertyCacheEntry(fieldInfo));
                                 }
                             }
                             else
@@ -5639,7 +5673,7 @@ namespace System.Management.Automation.Language
 
             // We always need a type check, even if we'll be using the PSTypeNames because our generated code may contain
             // conversions that don't work for arbitrary types.
-            restrictions = restrictions.Merge(target.PSGetTypeRestriction());
+            restrictions = restrictions.Merge(target.PSGetTypeRestriction(onDerivedPSObject));
 
             // If the target value is actually a deserialized PSObject, add a check to ensure that's the case. This check
             // should be done after the type check.
@@ -5663,7 +5697,7 @@ namespace System.Management.Automation.Language
                             Expression.Call(CachedReflectionInfo.PSGetMemberBinder_IsTypeNameSame, target.Expression.Cast(typeof(object)), Expression.Constant(typenames.Key))));
             }
 
-            return memberInfo;
+            return (memberInfo, onDerivedPSObject);
         }
 
         #region Runtime helper methods
@@ -5991,7 +6025,8 @@ namespace System.Management.Automation.Language
             BindingRestrictions restrictions;
             bool canOptimize;
             Type aliasConversionType;
-            memberInfo = _getMemberBinder.GetPSMemberInfo(target, out restrictions, out canOptimize, out aliasConversionType, MemberTypes.Property);
+            bool onDerivedPSObject;
+            (memberInfo, onDerivedPSObject) = _getMemberBinder.GetPSMemberInfo(target, out restrictions, out canOptimize, out aliasConversionType, MemberTypes.Property);
 
             restrictions = restrictions.Merge(value.PSGetTypeRestriction());
 
@@ -6509,8 +6544,11 @@ namespace System.Management.Automation.Language
             BindingRestrictions restrictions;
             bool canOptimize;
             Type aliasConversionType;
-            var methodInfo = _getMemberBinder.GetPSMemberInfo(target, out restrictions, out canOptimize, out aliasConversionType, MemberTypes.Method) as PSMethodInfo;
+
+            var (memInfo, onDerivedPSObject) = _getMemberBinder.GetPSMemberInfo(target, out restrictions, out canOptimize, out aliasConversionType, MemberTypes.Method);
+            var methodInfo = memInfo as PSMethodInfo;
             restrictions = args.Aggregate(restrictions, (current, arg) => current.Merge(arg.PSGetMethodArgumentRestriction()));
+
 
             // If the process has ever used ConstrainedLanguage, then we need to add the language mode
             // to the binding restrictions, and check whether it is allowed. We can't limit
@@ -6539,7 +6577,7 @@ namespace System.Management.Automation.Language
                 {
                     call = Expression.Call(
                         CachedReflectionInfo.PSInvokeMemberBinder_InvokeAdaptedSetMember,
-                        PSGetMemberBinder.GetTargetExpr(target, typeof(object)),
+                        PSGetMemberBinder.GetTargetExpr(target, typeof(object), onDerivedPSObject),
                         Expression.Constant(Name),
                         Expression.NewArrayInit(typeof(object),
                                                 args.Take(args.Length - 1).Select(arg => arg.Expression.Cast(typeof(object)))),
@@ -6549,7 +6587,7 @@ namespace System.Management.Automation.Language
                 {
                     call = Expression.Call(
                         CachedReflectionInfo.PSInvokeMemberBinder_InvokeAdaptedMember,
-                        PSGetMemberBinder.GetTargetExpr(target, typeof(object)),
+                        PSGetMemberBinder.GetTargetExpr(target, typeof(object), onDerivedPSObject),
                         Expression.Constant(Name),
                         Expression.NewArrayInit(typeof(object),
                                                 args.Select(arg => arg.Expression.Cast(typeof(object)))));

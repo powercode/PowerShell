@@ -7,9 +7,11 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
+using System.Dynamic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Management.Automation;
 using System.Management.Automation.Internal;
 using System.Management.Automation.Provider;
@@ -22,6 +24,7 @@ using Microsoft.Win32.SafeHandles;
 using Dbg = System.Management.Automation;
 using System.Runtime.InteropServices;
 using System.Management.Automation.Runspaces;
+using System.Management.Automation.Language;
 
 namespace Microsoft.PowerShell.Commands
 {
@@ -31,7 +34,7 @@ namespace Microsoft.PowerShell.Commands
     /// Defines the implementation of a File System Provider.  This provider
     /// allows for stateless namespace navigation of the file system.
     /// </summary>
-    [CmdletProvider(FileSystemProvider.ProviderName, ProviderCapabilities.Credentials | ProviderCapabilities.Filter | ProviderCapabilities.ShouldProcess)]
+    [CmdletProvider(FileSystemProvider.ProviderName, ProviderCapabilities.Credentials | ProviderCapabilities.Filter | ProviderCapabilities.ShouldProcess | ProviderCapabilities.DerivedPSObject)]
     [OutputType(typeof(FileSecurity), ProviderCmdlet = ProviderCmdlet.SetAcl)]
     [OutputType(typeof(String), typeof(PathInfo), ProviderCmdlet = ProviderCmdlet.ResolvePath)]
     [OutputType(typeof(PathInfo), ProviderCmdlet = ProviderCmdlet.PushLocation)]
@@ -139,6 +142,12 @@ namespace Microsoft.PowerShell.Commands
             }
 
             return null;
+        }
+
+        /// <inheritdoc />
+        protected override PSObject CreateProviderItemObject(object item, string path)
+        {
+            return new FileSystemPSObject((FileSystemInfo)item, this, PSDriveInfo);
         }
 
         /// <summary>
@@ -7106,6 +7115,107 @@ namespace Microsoft.PowerShell.Commands
 
             return null;
         }
+    }
+
+    /// <summary>
+    /// A.
+    /// </summary>
+    public class FileSystemPSObject : PSObject, IDynamicMetaObjectProvider
+    {
+        private PSDriveInfo _drive;
+        private FileSystemProvider _provider;
+
+        internal FileSystemInfo FileSystemInfo => (FileSystemInfo)BaseObject;
+        /// <summary>
+        /// Gets the PSChildName of the provider item.
+        /// </summary>
+        public string PSChildName => _provider.GetChildName(FileSystemInfo.FullName, _provider.Context);
+
+        /// <summary>
+        /// Gets the PSPath of the provider item.
+        /// </summary>
+        public string PSPath => LocationGlobber.GetProviderQualifiedPath(FileSystemInfo.FullName, _provider.ProviderInfo);
+
+        /// <summary>
+        /// Gets the PSParentPath of the provider item.
+        /// </summary>
+        public string PSParentPath
+        {
+            get
+            {
+                var root = _drive?.Root ?? string.Empty;
+                var parentPath = _provider.GetParentPath(FileSystemInfo.FullName, root, _provider.Context);
+                var providerQualifiedParentPath = !string.IsNullOrEmpty(parentPath)
+                                                      ? LocationGlobber.GetProviderQualifiedPath(parentPath, _provider.ProviderInfo)
+                                                      : string.Empty;
+
+                return providerQualifiedParentPath;
+            }
+        }
+
+        /// <summary>
+        /// Gets the PSIsContainer of the provider item.
+        /// </summary>
+        public bool PSIsContainer => BaseObject is DirectoryInfo;
+
+        /// <summary>
+        /// Gets the ProviderInfo for the item.
+        /// </summary>
+        public ProviderInfo PSProvider => _provider.ProviderInfo;
+
+        /// <summary>
+        /// Gets the ProviderInfo for the item.
+        /// </summary>
+        public PSDriveInfo PSDrive => _drive;
+        internal FileSystemPSObject(FileSystemInfo item, FileSystemProvider provider, PSDriveInfo drive) : base(item)
+        {
+            _drive = drive;
+            _provider = provider;
+        }
+
+
+        /// <inheritdoc/>
+        protected override IList<PSMemberInfo> GetDerivedMembers()
+        {
+            PSProperty GetProperty(string name) => new PSAdaptedProperty(
+                name,
+                PSObject.dotNetInstanceAdapter,
+                FileSystemInfo,
+                new DotNetAdapter.PropertyCacheEntry(typeof(FileSystemPSObject).GetProperty(name)));
+
+            var res = new List<PSMemberInfo>();
+            foreach (var mem in PropertyNames)
+            {
+                res.Add(GetProperty(mem));
+            }
+
+            return res;
+        }
+
+        private static string[] PropertyNames = { nameof(PSPath), nameof(PSChildName), nameof(PSParentPath), nameof(PSProvider), nameof(PSDrive), nameof(PSIsContainer) };
+
+        internal class PSFileSystemInfoDynamicMetaObject : PSDynamicMetaObject
+        {
+            internal PSFileSystemInfoDynamicMetaObject(Expression expression, FileSystemPSObject value) : base(expression, value)
+            {
+            }
+
+            public override DynamicMetaObject BindGetMember(GetMemberBinder binder)
+            {
+                foreach (var name in PropertyNames)
+                {
+                    if (binder.Name == name)
+                    {
+                        var psGetMemberBinder = (binder as PSGetMemberBinder ?? PSGetMemberBinder.Get(binder.Name, (Type)null, false));
+                        return psGetMemberBinder.FallbackGetMember(this);
+                    }
+                }
+                return base.BindGetMember(binder);
+            }
+        }
+
+        /// <inheritdoc />
+        DynamicMetaObject IDynamicMetaObjectProvider.GetMetaObject(Expression parameter) => new PSFileSystemInfoDynamicMetaObject(parameter, this);
     }
 
     #endregion
