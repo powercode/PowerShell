@@ -956,14 +956,14 @@ namespace System.Management.Automation
             {
                 // Loop through the unbound parameters and find a parameter in the specified parameter set
                 // that has a position greater than or equal to the positionalParameterIndex
-
+                var parameterSetDataCollection = new List<ParameterSetSpecificMetadata>(10);
                 foreach (MergedCompiledCommandParameter parameter in unboundParameters)
                 {
                     bool isInParameterSet = (parameter.Parameter.ParameterSetFlags & validParameterSetFlag) != 0 || parameter.Parameter.IsInAllSets;
 
                     if (isInParameterSet)
                     {
-                        var parameterSetDataCollection = parameter.Parameter.GetMatchingParameterSetData(validParameterSetFlag);
+                        parameter.Parameter.GetMatchingParameterSetData(validParameterSetFlag, parameterSetDataCollection);
                         foreach (ParameterSetSpecificMetadata parameterSetData in parameterSetDataCollection)
                         {
                             // Skip ValueFromRemainingArguments parameters

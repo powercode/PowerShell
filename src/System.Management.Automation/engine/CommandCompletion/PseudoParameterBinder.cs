@@ -478,6 +478,7 @@ namespace System.Management.Automation.Language
             // Process the bound parameters
             if (bindingInfo.BoundParameters != null)
             {
+                var parameterSetDataCollection = new List<ParameterSetSpecificMetadata>(10);
                 foreach (KeyValuePair<string, MergedCompiledCommandParameter> item in bindingInfo.BoundParameters)
                 {
                     CompiledCommandParameter parameter = item.Value.Parameter;
@@ -539,7 +540,9 @@ namespace System.Management.Automation.Language
                     else
                     {
                         bool takesValueFromPipeline = false;
-                        foreach (ParameterSetSpecificMetadata parameterSet in parameter.GetMatchingParameterSetData(bindingInfo.ValidParameterSetsFlags))
+
+                        parameter.GetMatchingParameterSetData(bindingInfo.ValidParameterSetsFlags, parameterSetDataCollection);
+                        foreach (ParameterSetSpecificMetadata parameterSet in parameterSetDataCollection)
                         {
                             if (parameterSet.ValueFromPipeline)
                             {
@@ -1873,7 +1876,7 @@ namespace System.Management.Automation.Language
             }
 
             var unboundParametersCopy = new List<MergedCompiledCommandParameter>(_unboundParameters);
-
+            var parameterSetDataCollection = new List<ParameterSetSpecificMetadata>(10);
             foreach (MergedCompiledCommandParameter unboundParam in unboundParametersCopy)
             {
                 bool isInParameterSet = (unboundParam.Parameter.ParameterSetFlags & _currentParameterSetFlag) != 0 ||
@@ -1883,7 +1886,7 @@ namespace System.Management.Automation.Language
                     continue;
                 }
 
-                var parameterSetDataCollection = unboundParam.Parameter.GetMatchingParameterSetData(_currentParameterSetFlag);
+                unboundParam.Parameter.GetMatchingParameterSetData(_currentParameterSetFlag, parameterSetDataCollection);
                 foreach (ParameterSetSpecificMetadata parameterSetData in parameterSetDataCollection)
                 {
                     if (!parameterSetData.ValueFromRemainingArguments)
@@ -1927,7 +1930,7 @@ namespace System.Management.Automation.Language
             }
 
             var unboundParametersCopy = new List<MergedCompiledCommandParameter>(_unboundParameters);
-
+            var parameterSetDataCollection = new List<ParameterSetSpecificMetadata>(10);
             foreach (MergedCompiledCommandParameter unboundParam in unboundParametersCopy)
             {
                 if (!unboundParam.Parameter.IsPipelineParameterInSomeParameterSet)
@@ -1940,7 +1943,7 @@ namespace System.Management.Automation.Language
                     continue;
                 }
 
-                var parameterSetDataCollection = unboundParam.Parameter.GetMatchingParameterSetData(_currentParameterSetFlag);
+                unboundParam.Parameter.GetMatchingParameterSetData(_currentParameterSetFlag, parameterSetDataCollection);
                 foreach (ParameterSetSpecificMetadata parameterSetData in parameterSetDataCollection)
                 {
                     // We don't assume the 'ValueFromPipelineByPropertyName' parameters get bound

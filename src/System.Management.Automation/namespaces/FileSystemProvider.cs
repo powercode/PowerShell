@@ -5196,7 +5196,7 @@ namespace Microsoft.PowerShell.Commands
         /// </returns>
         private Stack<string> TokenizePathToStack(string path, string basePath)
         {
-            Stack<string> tokenizedPathStack = new Stack<string>();
+            Stack<string> tokenizedPathStack = new Stack<string>(DefaultPathStackCapacity);
 
             string tempPath = path;
             string previousParent = path;
@@ -5260,7 +5260,7 @@ namespace Microsoft.PowerShell.Commands
         /// </returns>
         private Stack<string> NormalizeThePath(string basepath, Stack<string> tokenizedPathStack)
         {
-            Stack<string> normalizedPathStack = new Stack<string>();
+            Stack<string> normalizedPathStack = new Stack<string>(DefaultPathStackCapacity);
             String currentPath = basepath;
 
             while (tokenizedPathStack.Count > 0)

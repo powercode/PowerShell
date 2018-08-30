@@ -897,6 +897,11 @@ namespace System.Management.Automation.Provider
         #region private members
 
         /// <summary>
+        /// The default stack size used when tokenizing a path.
+        /// </summary>
+        protected const int DefaultPathStackCapacity = 20;
+
+        /// <summary>
         /// When a path contains both forward slash and backslash, we may introduce some errors by
         /// normalizing the path. This method does some smart checks to reduce the chances of making
         /// those errors.
@@ -973,7 +978,7 @@ namespace System.Management.Automation.Provider
         /// </returns>
         private Stack<string> TokenizePathToStack(string path, string basePath)
         {
-            Stack<string> tokenizedPathStack = new Stack<string>();
+            Stack<string> tokenizedPathStack = new Stack<string>(DefaultPathStackCapacity);
             string tempPath = path;
             string previousParent = path;
 
@@ -1032,7 +1037,7 @@ namespace System.Management.Automation.Provider
             Stack<string> tokenizedPathStack, string path,
             string basePath, bool allowNonExistingPaths)
         {
-            Stack<string> normalizedPathStack = new Stack<string>();
+            Stack<string> normalizedPathStack = new Stack<string>(DefaultPathStackCapacity);
 
             while (tokenizedPathStack.Count > 0)
             {

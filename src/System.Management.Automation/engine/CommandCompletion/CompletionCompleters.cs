@@ -1532,15 +1532,15 @@ namespace System.Management.Automation
             bool isDefaultParameterSetValid = defaultParameterSetFlag != 0 &&
                                               (defaultParameterSetFlag & validParameterSetFlags) != 0;
             MergedCompiledCommandParameter positionalParam = null;
-
+            var parameterSetDataCollection = new List<ParameterSetSpecificMetadata>(10);
             foreach (MergedCompiledCommandParameter param in parameters)
             {
                 bool isInParameterSet = (param.Parameter.ParameterSetFlags & validParameterSetFlags) != 0 || param.Parameter.IsInAllSets;
                 if (!isInParameterSet)
                     continue;
 
-                var parameterSetDataCollection = param.Parameter.GetMatchingParameterSetData(validParameterSetFlags);
-                foreach (ParameterSetSpecificMetadata parameterSetData in parameterSetDataCollection)
+                param.Parameter.GetMatchingParameterSetData(validParameterSetFlags, parameterSetDataCollection);
+                foreach (var parameterSetData in parameterSetDataCollection)
                 {
                     // in the first pass, we skip the remaining argument ones
                     if (parameterSetData.ValueFromRemainingArguments)
@@ -1597,8 +1597,8 @@ namespace System.Management.Automation
                     if (!isInParameterSet)
                         continue;
 
-                    var parameterSetDataCollection = param.Parameter.GetMatchingParameterSetData(validParameterSetFlags);
-                    foreach (ParameterSetSpecificMetadata parameterSetData in parameterSetDataCollection)
+                    param.Parameter.GetMatchingParameterSetData(validParameterSetFlags, parameterSetDataCollection);
+                    foreach (var parameterSetData in parameterSetDataCollection)
                     {
                         // in the second pass, we check the remaining argument ones
                         if (parameterSetData.ValueFromRemainingArguments)

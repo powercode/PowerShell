@@ -383,12 +383,10 @@ namespace System.Management.Automation
         /// <param name="parameterSetFlags">
         /// The parameter sets to get the parameter set data for.
         /// </param>
-        /// <returns>
-        /// A collection for all parameter set specified data for the parameter sets specified by
-        /// the <paramref name="parameterSetFlags"/>.
-        /// </returns>
-        internal IEnumerable<ParameterSetSpecificMetadata> GetMatchingParameterSetData(uint parameterSetFlags)
+        /// <param name="output">A collection for all parameter set specified data for the parameter sets specified by the <paramref name="parameterSetFlags"/>.</param>
+        internal void GetMatchingParameterSetData(uint parameterSetFlags, IList<ParameterSetSpecificMetadata> output)
         {
+            output.Clear();
             foreach (ParameterSetSpecificMetadata setData in ParameterSetData.Values)
             {
                 // If the parameter is in all sets, then remember the data, but
@@ -396,13 +394,13 @@ namespace System.Management.Automation
 
                 if (setData.IsInAllSets)
                 {
-                    yield return setData;
+                    output.Add(setData);
                 }
                 else
                 {
                     if ((setData.ParameterSetFlag & parameterSetFlags) != 0)
                     {
-                        yield return setData;
+                        output.Add(setData);
                     }
                 }
             }

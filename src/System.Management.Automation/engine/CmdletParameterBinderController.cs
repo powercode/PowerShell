@@ -302,6 +302,7 @@ namespace System.Management.Automation
                 parameterSetsTakingPipeInput |= entry.Key.Parameter.ParameterSetFlags;
             }
 
+            var matchingParameterSetMetadata = new List<ParameterSetSpecificMetadata>(10);
             foreach (MergedCompiledCommandParameter parameter in UnboundParameters)
             {
                 // If a parameter doesn't take pipeline input at all, we can skip it
@@ -310,10 +311,9 @@ namespace System.Management.Automation
                     continue;
                 }
 
-                var matchingParameterSetMetadata =
-                    parameter.Parameter.GetMatchingParameterSetData(_currentParameterSetFlag);
+                parameter.Parameter.GetMatchingParameterSetData(_currentParameterSetFlag, matchingParameterSetMetadata);
 
-                foreach (ParameterSetSpecificMetadata parameterSetMetadata in matchingParameterSetMetadata)
+                foreach (var parameterSetMetadata in matchingParameterSetMetadata)
                 {
                     if (parameterSetMetadata.ValueFromPipeline || parameterSetMetadata.ValueFromPipelineByPropertyName)
                     {
@@ -1855,7 +1855,7 @@ namespace System.Management.Automation
             bool missingAMandatoryParameterInAllSet = false;
 
             // See if any of the unbound parameters are mandatory
-
+            var matchingParameterSetMetadata = new List<ParameterSetSpecificMetadata>(10);
             foreach (MergedCompiledCommandParameter parameter in UnboundParameters)
             {
                 // If a parameter is never mandatory, we can skip lots of work here.
@@ -1864,12 +1864,12 @@ namespace System.Management.Automation
                     continue;
                 }
 
-                var matchingParameterSetMetadata = parameter.Parameter.GetMatchingParameterSetData(_currentParameterSetFlag);
+                parameter.Parameter.GetMatchingParameterSetData(_currentParameterSetFlag, matchingParameterSetMetadata);
 
                 uint parameterMandatorySets = 0;
                 bool thisParameterMissing = false;
 
-                foreach (ParameterSetSpecificMetadata parameterSetMetadata in matchingParameterSetMetadata)
+                foreach (var parameterSetMetadata in matchingParameterSetMetadata)
                 {
                     uint newMandatoryParameterSetFlag = NewParameterSetPromptingData(promptingData, parameter, parameterSetMetadata, defaultParameterSet, isPipelineInputExpected);
 
@@ -3479,6 +3479,7 @@ namespace System.Management.Automation
             // satisfy the 'validParameterSets' will be bound. If parameters from more than
             // one sets got bound, then "parameter set cannot be resolved" error will be thrown,
             // which is expected.
+            var parameterSetData = new List<ParameterSetSpecificMetadata>(10);
 
             for (int i = UnboundParameters.Count - 1; i >= 0; i--)
             {
@@ -3496,11 +3497,11 @@ namespace System.Management.Automation
                 }
 
                 // Get the appropriate parameter set data
-                var parameterSetData = parameter.Parameter.GetMatchingParameterSetData(validParameterSets);
+                parameter.Parameter.GetMatchingParameterSetData(validParameterSets, parameterSetData);
 
                 bool bindResult = false;
 
-                foreach (ParameterSetSpecificMetadata parameterSetMetadata in parameterSetData)
+                foreach (var parameterSetMetadata in parameterSetData)
                 {
                     // In the first phase we try to bind the value from the pipeline without
                     // type coercion
