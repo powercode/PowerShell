@@ -1056,7 +1056,7 @@ namespace Microsoft.PowerShell.Commands
         }
 
         /// <summary>
-        /// ContextTracker that does not work for the case when pre- and post context is 0.
+        /// This parameter specifies the current pipeline object.
         /// </summary>
         private sealed class NoContextTracker : IContextTracker
         {
@@ -1429,6 +1429,8 @@ namespace Microsoft.PowerShell.Commands
 
         private int _inputRecordNumber;
 
+
+
         /// <summary>
         /// Read command line parameters.
         /// </summary>
@@ -1466,7 +1468,6 @@ namespace Microsoft.PowerShell.Commands
                     }
                 }
             }
-
             _noContextTracker = new NoContextTracker();
             _globalContextTracker = GetContextTracker();
         }
@@ -1527,8 +1528,9 @@ namespace Microsoft.PowerShell.Commands
                 // No results in any files.
                 if (Quiet)
                 {
-                    var res = List ? null : Boxed.False;
+                    var res = _list ? null : Boxed.False;
                     WriteObject(res);
+
                 }
             }
             else
