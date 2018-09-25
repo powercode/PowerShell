@@ -12,6 +12,7 @@ using System.Management.Automation;
 using System.Management.Automation.Internal;
 using System.Globalization;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 
 namespace Microsoft.PowerShell.Commands
 {
@@ -1838,6 +1839,268 @@ namespace Microsoft.PowerShell.Commands
             }
 
             return ok;
+        }
+    }
+        
+    internal struct MatchInfoGroupColorInfo : IComparable<MatchInfoGroupColorInfo>, IComparable
+    {        
+        public bool IsStart { get; }
+        public int GroupId { get; }
+        public int Index { get; }
+        public string Color { get; }
+
+
+     
+        /// <inheritdoc />
+        public override string ToString() => IsStart ? $"Start of {GroupId} at {Index}" : $"End of {GroupId} at {Index}";        
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="MatchInfoGroupColorInfo"/> class.
+        /// </summary>        
+        public MatchInfoGroupColorInfo(int index, int groupId, bool isStart, string color)
+        {
+            Index = index;
+            GroupId = groupId;
+            IsStart = isStart;
+            Color = color;
+        }
+
+        public int CompareTo(MatchInfoGroupColorInfo other)
+        {
+            var indexComparison = Index.CompareTo(other.Index);
+            if (indexComparison != 0) return indexComparison;
+            return IsStart.CompareTo(other.IsStart);            
+        }
+
+        public int CompareTo(object obj)
+        {
+            if (ReferenceEquals(null, obj)) return 1;
+            return obj is MatchInfoGroupColorInfo other ? CompareTo(other) : throw new ArgumentException($"Object must be of type {nameof(MatchInfoGroupColorInfo)}");
+        }
+    }
+
+    /// <summary>
+    /// Formatter for MatchInfo
+    /// </summary>
+    public class MatchInfoFormatter {
+
+        private const string NoColor = "\x1b[0m";
+        private const string DarkGray = "\x1b[90m";
+        private const string BrightRed = "\x1b[91m";
+        private const string BrightGreen = "\x1b[92m";
+        private const string BrightYellow = "\x1b[93m";
+        private const string BrightBlue = "\x1b[94m";
+        private const string BrightMagenta = "\x1b[95m";
+        private const string BrightCyan = "\x1b[96m";
+        private const string White = "\x1b[97m";
+        private const string Black = "\x1b[30m";
+
+        static readonly string[] s_groupColors =
+        {
+            NoColor,
+            BrightYellow,
+            BrightMagenta,
+            BrightCyan,
+            DarkGray,
+            BrightBlue,
+            BrightGreen,
+            BrightRed
+        };
+
+        string[,] s_colorNames2 = {
+            //name      abbrev VT100Color
+            {"yellow",  "ye",  BrightYellow},
+            {"magenta", "ma",  BrightMagenta},
+            {"gray",    "gy",  DarkGray},
+            {"green",   "gn",  BrightGreen},
+            {"blue",    "be",  BrightBlue},
+            {"red",     "re",  BrightRed},
+            {"cyan",    "cy",  BrightCyan},
+            {"white",   "wh",  White},
+            {"black",   "bk",  Black},
+            {"nocolor", "no",  NoColor},
+        };
+
+        private static readonly Dictionary<string, string> s_colorNameToColor = new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase)
+        {
+            {"nocolor", NoColor},
+            {"yellow", BrightYellow},
+            {"ye", BrightYellow},
+            {"magenta", BrightMagenta},
+            {"ma", BrightMagenta},
+            {"cyan", BrightCyan},
+            {"cy", BrightCyan},
+            {"gray", DarkGray},
+            {"gy", DarkGray},
+            {"blue", BrightBlue},
+            {"bl", BrightBlue},
+            {"green", BrightGreen},
+            {"gn", BrightGreen},
+            {"red", BrightRed},
+            {"re", BrightRed},
+        };
+
+        static readonly string[] s_colorNames = { "ye", "yellow", "gy", "red", "re", "bl", "gn", "nocolor", "magenta", "gray", "green", "blue", "ma", "cy", "cyan" };
+
+        private static string GetGroupColor(int index)
+        {
+            var colorsLength = s_groupColors.Length;
+            return index > colorsLength ? s_groupColors[colorsLength - 1] : s_groupColors[index];
+        }
+
+        private static string GetGroupColor(string groupName)
+        {
+            if (s_colorNameToColor.TryGetValue(groupName, out var color))
+            {
+                return color;
+            }
+
+            return NoColor;
+        }
+
+        private static List<MatchInfoGroupColorInfo> GetGroupInfo(MatchInfo matchInfo)
+        {
+            var text = matchInfo.Line;
+            var re = new Regex(matchInfo.Pattern);
+
+            bool IsColorName(string regexGroupName) => s_colorNames.Any(c => c.Equals(regexGroupName, StringComparison.OrdinalIgnoreCase));
+
+            var namedColors = matchInfo.Matches[0].Groups.Count != 1 && re.GetGroupNames().Skip(1).All(IsColorName);
+
+            Match match = matchInfo.Matches[0];
+            var matchList = new List<MatchInfoGroupColorInfo>(match.Groups.Count) { new MatchInfoGroupColorInfo(0, 0, true, NoColor) };
+
+            for (var i = 0; i < match.Groups.Count; i++)
+            {
+                var g = match.Groups[i];
+                string color = namedColors
+                    ? GetGroupColor(re.GroupNameFromNumber(i))
+                    : GetGroupColor(i + 1);
+
+                matchList.Add(new MatchInfoGroupColorInfo(g.Index, i + 1, true, color));
+                matchList.Add(new MatchInfoGroupColorInfo(g.Index + g.Length, i + 1, false, NoColor));
+            }
+
+            matchList.Sort();
+            matchList.Add(new MatchInfoGroupColorInfo(text.Length, 0, false, NoColor));
+
+            return matchList;
+        }
+
+        private static void AppendFormattedMatchInfo(StringBuilder builder, MatchInfo matchInfo)
+        {
+            string text = matchInfo.Line;
+
+            var matchList = GetGroupInfo(matchInfo);
+
+            var colorStack = new Stack<string>(matchList.Count);
+            for (var j = 0; j < matchList.Count - 2; j++)
+            {
+                var currentInfo = matchList[j];
+                var end = matchList[j + 1].Index;
+                var startIndex = currentInfo.Index;
+                var length = end - startIndex;
+
+
+                if (currentInfo.IsStart)
+                {
+                    var c = currentInfo.Color;
+                    colorStack.Push(c);
+
+                    if (length != 0)
+                    {
+                        if (j != 0)
+                        {
+                            builder.Append(c);
+                        }
+
+                        var t = text.Substring(startIndex, length);
+                        builder.Append(t);
+                    }
+                }
+                else
+                {
+                    colorStack.Pop();
+                    var c = colorStack.Peek();
+
+                    if (length > 0)
+                    {
+                        var t = text.Substring(startIndex, length);
+                        builder.Append(c);
+                        builder.Append(t);
+                    }
+                }
+            }
+
+            builder.Append(NoColor);
+        }
+
+        private static void AppendFormattedLine(StringBuilder builder, MatchInfo matchInfo, string displayPath, int lineNumber, string line, string prefix, bool isMatchLine)
+        {
+            if (matchInfo.Path != "InputStream")
+            {
+                builder.Append(prefix).Append(displayPath).Append(':').Append(lineNumber).Append(':');
+            }
+            else
+            {
+                builder.Append(prefix);
+            }            
+            if (isMatchLine)
+            {
+                AppendFormattedMatchInfo(builder, matchInfo);
+            }
+            else
+            {
+                builder.Append(line);
+            }
+        }
+
+        /// <summary>
+        /// Formats a MatchInfo
+        /// </summary>
+        /// <param name="matchInfo"></param>
+        /// <param name="currentDirectory"></param>
+        /// <param name="supportsVirtualTerminal"></param>
+        /// <returns></returns>
+        public static string Format(MatchInfo matchInfo, string currentDirectory, bool supportsVirtualTerminal)
+        {
+            var builder = new StringBuilder();
+
+            if (!supportsVirtualTerminal)
+            {
+                return matchInfo.ToString(currentDirectory);
+            }
+
+            var displayPath = string.IsNullOrEmpty(currentDirectory) ? matchInfo.Path : matchInfo.RelativePath(currentDirectory);
+            var matchInfoContext = matchInfo.Context;
+            if (matchInfoContext == null)
+            {
+                AppendFormattedLine(builder, matchInfo, displayPath, matchInfo.LineNumber, matchInfo.Line, "", isMatchLine: true);
+                return builder.ToString();
+            }
+
+
+            var displayPreContext = matchInfoContext.DisplayPreContext;
+            var displayLineNumber = matchInfo.LineNumber - displayPreContext.Length;
+            for (var index = 0; index < displayPreContext.Length; index++)
+            {
+                var contextLine = displayPreContext[index];
+                AppendFormattedLine(builder, matchInfo, displayPath, displayLineNumber, contextLine, "  ", isMatchLine: false);
+                displayLineNumber += 1;
+            }
+
+            AppendFormattedLine(builder, matchInfo, displayPath, displayLineNumber, matchInfo.Line, "> ", isMatchLine: true);
+            displayLineNumber += 1;
+
+            var displayPostContext = matchInfoContext.DisplayPostContext;
+            for (var index = 0; index < displayPostContext.Length; index++)
+            {
+                var contextLine = displayPostContext[index];
+                AppendFormattedLine(builder, matchInfo, displayPath, displayLineNumber, contextLine, "  ", isMatchLine: false);
+                displayLineNumber += 1;
+            }
+
+            return builder.ToString();
         }
     }
 }
