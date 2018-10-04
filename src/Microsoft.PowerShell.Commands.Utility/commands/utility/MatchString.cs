@@ -5,6 +5,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Management.Automation;
@@ -26,11 +27,13 @@ namespace Microsoft.PowerShell.Commands
         /// <summary>
         /// Gets or sets the lines found before a match.
         /// </summary>
+        [SuppressMessage("Microsoft.Performance", "CA1819:PropertiesShouldNotReturnArrays")]
         public string[] PreContext { get; set; }
 
         /// <summary>
         /// Gets or sets the lines found after a match.
         /// </summary>
+        [SuppressMessage("Microsoft.Performance", "CA1819:PropertiesShouldNotReturnArrays")]
         public string[] PostContext { get; set; }
 
         /// <summary>
@@ -38,6 +41,7 @@ namespace Microsoft.PowerShell.Commands
         /// overlapping context and thus can be used to
         /// display contiguous match regions.
         /// </summary>
+        [SuppressMessage("Microsoft.Performance", "CA1819:PropertiesShouldNotReturnArrays")]
         public string[] DisplayPreContext { get; set; }
 
         /// <summary>
@@ -45,6 +49,7 @@ namespace Microsoft.PowerShell.Commands
         /// overlapping context and thus can be used to
         /// display contiguous match regions.
         /// </summary>
+        [SuppressMessage("Microsoft.Performance", "CA1819:PropertiesShouldNotReturnArrays")]
         public string[] DisplayPostContext { get; set; }
 
         /// <summary>
@@ -1429,8 +1434,6 @@ namespace Microsoft.PowerShell.Commands
 
         private int _inputRecordNumber;
 
-
-
         /// <summary>
         /// Read command line parameters.
         /// </summary>
@@ -1468,6 +1471,7 @@ namespace Microsoft.PowerShell.Commands
                     }
                 }
             }
+
             _noContextTracker = new NoContextTracker();
             _globalContextTracker = GetContextTracker();
         }
@@ -1528,9 +1532,8 @@ namespace Microsoft.PowerShell.Commands
                 // No results in any files.
                 if (Quiet)
                 {
-                    var res = _list ? null : Boxed.False;
+                    var res = List ? null : Boxed.False;
                     WriteObject(res);
-
                 }
             }
             else
