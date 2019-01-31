@@ -469,9 +469,10 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             {
                 foreach (MshResolvedExpressionParameterAssociation property in allProperties)
                 {
-                    if (!property.ResolvedExpression.ToString().Equals(RemotingConstants.ComputerNameNoteProperty, StringComparison.OrdinalIgnoreCase) &&
-                        !property.ResolvedExpression.ToString().Equals(RemotingConstants.ShowComputerNameNoteProperty, StringComparison.OrdinalIgnoreCase) &&
-                        !property.ResolvedExpression.ToString().Equals(RemotingConstants.RunspaceIdNoteProperty, StringComparison.OrdinalIgnoreCase))
+                    string resolvedExpressionString = property.ResolvedExpression.ToString();
+                    if (!resolvedExpressionString.Equals(RemotingConstants.ComputerNameNoteProperty, StringComparison.OrdinalIgnoreCase) &&
+                        !resolvedExpressionString.Equals(RemotingConstants.ShowComputerNameNoteProperty, StringComparison.OrdinalIgnoreCase) &&
+                        !resolvedExpressionString.Equals(RemotingConstants.RunspaceIdNoteProperty, StringComparison.OrdinalIgnoreCase))
                     {
                         return false;
                     }
@@ -483,10 +484,11 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             {
                 foreach (MshResolvedExpressionParameterAssociation property in allProperties)
                 {
-                    if (!property.ResolvedExpression.ToString().Equals(RemotingConstants.ComputerNameNoteProperty, StringComparison.OrdinalIgnoreCase) &&
-                        !property.ResolvedExpression.ToString().Equals(RemotingConstants.ShowComputerNameNoteProperty, StringComparison.OrdinalIgnoreCase) &&
-                        !property.ResolvedExpression.ToString().Equals(RemotingConstants.RunspaceIdNoteProperty, StringComparison.OrdinalIgnoreCase)
-                        && !property.ResolvedExpression.ToString().Equals(RemotingConstants.SourceJobInstanceId, StringComparison.OrdinalIgnoreCase))
+                    string resolvedExpressionString = property.ResolvedExpression.ToString();
+                    if (!resolvedExpressionString.Equals(RemotingConstants.ComputerNameNoteProperty, StringComparison.OrdinalIgnoreCase) &&
+                        !resolvedExpressionString.Equals(RemotingConstants.ShowComputerNameNoteProperty, StringComparison.OrdinalIgnoreCase) &&
+                        !resolvedExpressionString.Equals(RemotingConstants.RunspaceIdNoteProperty, StringComparison.OrdinalIgnoreCase)
+                        && !resolvedExpressionString.Equals(RemotingConstants.SourceJobInstanceId, StringComparison.OrdinalIgnoreCase))
                     {
                         return false;
                     }
@@ -498,11 +500,12 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             {
                 foreach (MshResolvedExpressionParameterAssociation property in allProperties)
                 {
-                    if (!property.ResolvedExpression.ToString().Equals(RemotingConstants.ComputerNameNoteProperty, StringComparison.OrdinalIgnoreCase) &&
-                        !property.ResolvedExpression.ToString().Equals(RemotingConstants.ShowComputerNameNoteProperty, StringComparison.OrdinalIgnoreCase) &&
-                        !property.ResolvedExpression.ToString().Equals(RemotingConstants.RunspaceIdNoteProperty, StringComparison.OrdinalIgnoreCase) &&
-                        !property.ResolvedExpression.ToString().Equals(RemotingConstants.SourceJobInstanceId, StringComparison.OrdinalIgnoreCase) &&
-                        !property.ResolvedExpression.ToString().Equals(RemotingConstants.SourceLength, StringComparison.OrdinalIgnoreCase))
+                    string resolvedExpressionString = property.ResolvedExpression.ToString();
+                    if (!resolvedExpressionString.Equals(RemotingConstants.ComputerNameNoteProperty, StringComparison.OrdinalIgnoreCase) &&
+                        !resolvedExpressionString.Equals(RemotingConstants.ShowComputerNameNoteProperty, StringComparison.OrdinalIgnoreCase) &&
+                        !resolvedExpressionString.Equals(RemotingConstants.RunspaceIdNoteProperty, StringComparison.OrdinalIgnoreCase) &&
+                        !resolvedExpressionString.Equals(RemotingConstants.SourceJobInstanceId, StringComparison.OrdinalIgnoreCase) &&
+                        !resolvedExpressionString.Equals(RemotingConstants.SourceLength, StringComparison.OrdinalIgnoreCase))
                     {
                         return false;
                     }

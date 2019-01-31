@@ -128,7 +128,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
         private static List<string> GetPropertyNamesFromView(PSObject source, PSMemberViewTypes viewType)
         {
-            Collection<CollectionEntry<PSMemberInfo>> memberCollection =
+            var memberCollection =
                 PSObject.GetMemberCollection(viewType);
 
             PSMemberInfoIntegratingCollection<PSMemberInfo> membersToSearch =
@@ -137,7 +137,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             ReadOnlyPSMemberInfoCollection<PSMemberInfo> matchedMembers =
                 membersToSearch.Match("*", PSMemberTypes.Properties);
 
-            List<string> retVal = new List<string>();
+            List<string> retVal = new List<string>(matchedMembers.Count);
             foreach (PSMemberInfo member in matchedMembers)
             {
                 retVal.Add(member.Name);

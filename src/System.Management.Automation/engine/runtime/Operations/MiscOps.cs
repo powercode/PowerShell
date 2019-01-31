@@ -2710,8 +2710,16 @@ namespace System.Management.Automation
                 else
                 {
                     // Target is not a collection so return a Collection<targetType>
-                    Type resultCollectionType = typeof(Collection<>).MakeGenericType(targetType);
-                    resultCollection = PSObject.AsPSObject(Activator.CreateInstance(resultCollectionType));
+                    if (enumerator is IList listSource){
+                        Type resultCollectionType = typeof(Collection<>).MakeGenericType(targetType);
+                        Type listType = typeof(List<>).MakeGenericType(targetType);
+                        var list = Activator.CreateInstance(listType, listSource.Count);
+                        resultCollection = PSObject.AsPSObject(Activator.CreateInstance(resultCollectionType, new object[]{list}));
+                    }
+                    else {
+                        Type resultCollectionType = typeof(Collection<>).MakeGenericType(targetType);
+                        resultCollection = PSObject.AsPSObject(Activator.CreateInstance(resultCollectionType, new object[]{list}));
+                    }
 
                     while (MoveNext(context, enumerator))
                     {
@@ -2733,7 +2741,8 @@ namespace System.Management.Automation
 
             // If the expression is a script block, it will be executed in the current scope
             // once on each element.
-            var result = new Collection<PSObject>();
+            var result = expression is IList list ? new Collection<PSOBject>(new List<PSObject>(list.Count)) : new Collection<PSObject>();
+
             ScriptBlock sb = expression as ScriptBlock;
             if (sb != null)
             {

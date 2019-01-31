@@ -16,22 +16,16 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
         internal override void Initialize(TerminatingErrorContext terminatingErrorContext, PSPropertyExpressionFactory mshExpressionFactory, TypeInfoDataBase db, ViewDefinition view, FormattingCommandLineParameters formatParameters)
         {
             base.Initialize(terminatingErrorContext, mshExpressionFactory, db, view, formatParameters);
-            if ((this.dataBaseInfo != null) && (this.dataBaseInfo.view != null))
-            {
-                _listBody = (ListControlBody)this.dataBaseInfo.view.mainControl;
-            }
+            _listBody = (ListControlBody)dataBaseInfo?.view?.mainControl;
         }
 
         internal override void Initialize(TerminatingErrorContext errorContext, PSPropertyExpressionFactory expressionFactory,
                                     PSObject so, TypeInfoDataBase db, FormattingCommandLineParameters parameters)
         {
             base.Initialize(errorContext, expressionFactory, so, db, parameters);
-            if ((this.dataBaseInfo != null) && (this.dataBaseInfo.view != null))
-            {
-                _listBody = (ListControlBody)this.dataBaseInfo.view.mainControl;
-            }
+            _listBody = (ListControlBody)dataBaseInfo?.view?.mainControl;
 
-            this.inputParameters = parameters;
+            inputParameters = parameters;
             SetUpActiveProperties(so);
         }
 
@@ -48,16 +42,23 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             Diagnostics.Assert(so.Properties[RemotingConstants.ComputerNameNoteProperty] != null,
                 "PrepareForRemoteObjects cannot be called when the object does not contain ComputerName property.");
 
-            if ((dataBaseInfo != null) && (dataBaseInfo.view != null) && (dataBaseInfo.view.mainControl != null))
+            var viewMainControl = dataBaseInfo?.view?.mainControl;
+            if (viewMainControl != null)
             {
-                _listBody = (ListControlBody)this.dataBaseInfo.view.mainControl.Copy();
+                _listBody = (ListControlBody)viewMainControl.Copy();
                 // build up the definition for computer name.
-                ListControlItemDefinition cnListItemDefinition = new ListControlItemDefinition();
-                cnListItemDefinition.label = new TextToken();
-                cnListItemDefinition.label.text = RemotingConstants.ComputerNameNoteProperty;
-                FieldPropertyToken fpt = new FieldPropertyToken();
-                fpt.expression = new ExpressionToken(RemotingConstants.ComputerNameNoteProperty, false);
-                cnListItemDefinition.formatTokenList.Add(fpt);
+                var cnListItemDefinition = new ListControlItemDefinition
+                {
+                    label = new TextToken
+                    {
+                        text = RemotingConstants.ComputerNameNoteProperty
+                    }
+                };
+                var fieldPropertyToken = new FieldPropertyToken
+                {
+                    expression = new ExpressionToken(RemotingConstants.ComputerNameNoteProperty, false)
+                };
+                cnListItemDefinition.formatTokenList.Add(fieldPropertyToken);
 
                 _listBody.defaultEntryDefinition.itemDefinitionList.Add(cnListItemDefinition);
             }
@@ -72,66 +73,48 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
         internal override FormatEntryData GeneratePayload(PSObject so, int enumerationLimit)
         {
-            FormatEntryData fed = new FormatEntryData();
-
-            if (this.dataBaseInfo.view != null)
-                fed.formatEntryInfo = GenerateListViewEntryFromDataBaseInfo(so, enumerationLimit);
-            else
-                fed.formatEntryInfo = GenerateListViewEntryFromProperties(so, enumerationLimit);
-            return fed;
+            return new FormatEntryData
+            {
+                formatEntryInfo = dataBaseInfo.view != null 
+                    ? GenerateListViewEntryFromDataBaseInfo(so, enumerationLimit)
+                    : GenerateListViewEntryFromProperties(so, enumerationLimit)
+            };
         }
 
         private ListViewEntry GenerateListViewEntryFromDataBaseInfo(PSObject so, int enumerationLimit)
         {
             ListViewEntry lve = new ListViewEntry();
 
-            ListControlEntryDefinition activeListControlEntryDefinition =
-                GetActiveListControlEntryDefinition(_listBody, so);
+            var activeListControlEntryDefinition = GetActiveListControlEntryDefinition(_listBody, so);
+            DisplayResourceManagerCache dbDisplayResourceManagerCache = dataBaseInfo.db.displayResourceManagerCache;
+            var listControlItemDefinitions = activeListControlEntryDefinition.itemDefinitionList;
 
-            foreach (ListControlItemDefinition listItem in activeListControlEntryDefinition.itemDefinitionList)
+            for (var index = 0; index < listControlItemDefinitions.Count; index++)
             {
+                ListControlItemDefinition listItem = listControlItemDefinitions[index];
                 if (!EvaluateDisplayCondition(so, listItem.conditionToken))
                     continue;
 
-                ListViewField lvf = new ListViewField();
-                PSPropertyExpressionResult result;
-                lvf.formatPropertyField = GenerateFormatPropertyField(listItem.formatTokenList, so, enumerationLimit, out result);
+                var propertyField = GenerateFormatPropertyField(listItem.formatTokenList, so, enumerationLimit, out PSPropertyExpressionResult result);
+                string label = listItem.label != null
+                    ? dbDisplayResourceManagerCache.GetTextTokenString(listItem.label) // if the directive provides one, we use it
+                    : result != null
+                        ? result.ResolvedExpression.ToString() // if we got a valid match from the Mshexpression, use it as a label
+                        : listItem.formatTokenList[0] is FieldPropertyToken fpt
+                            ? expressionFactory.CreateFromExpressionToken(fpt.expression, dataBaseInfo.view.loadingInfo).ToString()
+                            : listItem.formatTokenList[0] is TextToken tt
+                                ? dbDisplayResourceManagerCache.GetTextTokenString(tt)
+                                : string.Empty;
 
-                // we need now to provide a label
-                if (listItem.label != null)
+                var lvf = new ListViewField
                 {
-                    // if the directive provides one, we use it
-                    lvf.label = this.dataBaseInfo.db.displayResourceManagerCache.GetTextTokenString(listItem.label);
-                }
-                else if (result != null)
-                {
-                    // if we got a valid match from the Mshexpression, use it as a label
-                    lvf.label = result.ResolvedExpression.ToString();
-                }
-                else
-                {
-                    // we did fail getting a result (i.e. property does not exist on the object)
+                    formatPropertyField = propertyField,
+                    label = label
+                };
 
-                    // we try to fall back and see if we have an un-resolved PSPropertyExpression
-                    FormatToken token = listItem.formatTokenList[0];
-                    FieldPropertyToken fpt = token as FieldPropertyToken;
-                    if (fpt != null)
-                    {
-                        PSPropertyExpression ex = this.expressionFactory.CreateFromExpressionToken(fpt.expression, this.dataBaseInfo.view.loadingInfo);
-
-                        // use the un-resolved PSPropertyExpression string as a label
-                        lvf.label = ex.ToString();
-                    }
-                    else
-                    {
-                        TextToken tt = token as TextToken;
-                        if (tt != null)
-                            // we had a text token, use it as a label (last resort...)
-                            lvf.label = this.dataBaseInfo.db.displayResourceManagerCache.GetTextTokenString(tt);
-                    }
-                }
                 lve.listViewFieldList.Add(lvf);
             }
+
             return lve;
         }
 
@@ -139,7 +122,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
         {
             // see if we have an override that matches
             var typeNames = so.InternalTypeNames;
-            TypeMatch match = new TypeMatch(expressionFactory, this.dataBaseInfo.db, typeNames);
+            TypeMatch match = new TypeMatch(expressionFactory, dataBaseInfo.db, typeNames);
             foreach (ListControlEntryDefinition x in listBody.optionalEntryList)
             {
                 if (match.PerfectMatch(new TypeMatchItem(x, x.appliesTo, so)))
@@ -151,84 +134,75 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             {
                 return match.BestMatch as ListControlEntryDefinition;
             }
-            else
+
+            Collection<string> typesWithoutPrefix = Deserializer.MaskDeserializationPrefix(typeNames);
+            if (typesWithoutPrefix != null)
             {
-                Collection<string> typesWithoutPrefix = Deserializer.MaskDeserializationPrefix(typeNames);
-                if (typesWithoutPrefix != null)
+                match = new TypeMatch(expressionFactory, dataBaseInfo.db, typesWithoutPrefix);
+                foreach (ListControlEntryDefinition x in listBody.optionalEntryList)
                 {
-                    match = new TypeMatch(expressionFactory, this.dataBaseInfo.db, typesWithoutPrefix);
-                    foreach (ListControlEntryDefinition x in listBody.optionalEntryList)
+                    if (match.PerfectMatch(new TypeMatchItem(x, x.appliesTo)))
                     {
-                        if (match.PerfectMatch(new TypeMatchItem(x, x.appliesTo)))
-                        {
-                            return x;
-                        }
-                    }
-                    if (match.BestMatch != null)
-                    {
-                        return match.BestMatch as ListControlEntryDefinition;
+                        return x;
                     }
                 }
-
-                // we do not have any override, use default
-                return listBody.defaultEntryDefinition;
+                if (match.BestMatch != null)
+                {
+                    return match.BestMatch as ListControlEntryDefinition;
+                }
             }
+
+            // we do not have any override, use default
+            return listBody.defaultEntryDefinition;
         }
 
         private ListViewEntry GenerateListViewEntryFromProperties(PSObject so, int enumerationLimit)
         {
             // compute active properties every time
-            if (this.activeAssociationList == null)
+            if (activeAssociationList == null)
             {
                 SetUpActiveProperties(so);
             }
 
-            ListViewEntry lve = new ListViewEntry();
+            var listViewEntry = new ListViewEntry();
 
-            for (int k = 0; k < this.activeAssociationList.Count; k++)
+            for (int k = 0; k < activeAssociationList.Count; k++)
             {
-                MshResolvedExpressionParameterAssociation a = this.activeAssociationList[k];
-                ListViewField lvf = new ListViewField();
+                MshResolvedExpressionParameterAssociation a = activeAssociationList[k];
 
-                if (a.OriginatingParameter != null)
-                {
-                    object key = a.OriginatingParameter.GetEntry(FormatParameterDefinitionKeys.LabelEntryKey);
+                MshParameter aOriginatingParameter = a.OriginatingParameter;
 
-                    if (key != AutomationNull.Value)
-                    {
-                        lvf.propertyName = (string)key;
-                    }
-                    else
-                    {
-                        lvf.propertyName = a.ResolvedExpression.ToString();
-                    }
-                }
-                else
-                {
-                    lvf.propertyName = a.ResolvedExpression.ToString();
-                }
+                var key = aOriginatingParameter?.GetEntry(FormatParameterDefinitionKeys.LabelEntryKey);
+                string lvfPropertyName = key == null
+                    ? a.ResolvedExpression.ToString()
+                    : key != AutomationNull.Value
+                        ? (string)key
+                        : a.ResolvedExpression.ToString();
 
-                FieldFormattingDirective directive = null;
-                if (a.OriginatingParameter != null)
+
+                var listViewField = new ListViewField
                 {
-                    directive = a.OriginatingParameter.GetEntry(FormatParameterDefinitionKeys.FormatStringEntryKey) as FieldFormattingDirective;
-                }
-                lvf.formatPropertyField.propertyValue = this.GetExpressionDisplayValue(so, enumerationLimit, a.ResolvedExpression, directive);
-                lve.listViewFieldList.Add(lvf);
+                    propertyName = lvfPropertyName
+                };
+
+                var formattingDirective = aOriginatingParameter?.GetEntry(FormatParameterDefinitionKeys.FormatStringEntryKey) as FieldFormattingDirective;
+                
+                listViewField.formatPropertyField.propertyValue = GetExpressionDisplayValue(so, enumerationLimit, a.ResolvedExpression, formattingDirective);
+                listViewEntry.listViewFieldList.Add(listViewField);
             }
 
-            this.activeAssociationList = null;
-            return lve;
+            activeAssociationList = null;
+            return listViewEntry;
         }
 
         private void SetUpActiveProperties(PSObject so)
         {
             List<MshParameter> mshParameterList = null;
 
-            if (this.inputParameters != null)
-                mshParameterList = this.inputParameters.mshParameterList;
+            if (inputParameters != null)
+                mshParameterList = inputParameters.mshParameterList;
 
-            this.activeAssociationList = AssociationManager.SetupActiveProperties(mshParameterList, so, this.expressionFactory);
+            activeAssociationList = AssociationManager.SetupActiveProperties(mshParameterList, so, expressionFactory);
         }
     }
 }

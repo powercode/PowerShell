@@ -97,12 +97,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             try
             {
                 PSPropertyInfo streamProperty = so.Properties[streamFlag];
-                if (streamProperty != null && streamProperty.Value is bool)
-                {
-                    return (bool)streamProperty.Value;
-                }
-
-                return false;
+                return streamProperty?.Value is bool b && b;
             }
             catch (ExtendedTypeSystemException)
             {

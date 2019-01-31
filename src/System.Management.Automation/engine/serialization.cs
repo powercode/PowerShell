@@ -1862,8 +1862,8 @@ namespace System.Management.Automation
             }
         }
 
-        private Collection<CollectionEntry<PSMemberInfo>> _extendedMembersCollection;
-        private Collection<CollectionEntry<PSMemberInfo>> ExtendedMembersCollection
+        private List<CollectionEntry<PSMemberInfo>> _extendedMembersCollection;
+        private List<CollectionEntry<PSMemberInfo>> ExtendedMembersCollection
         {
             get {
                 return _extendedMembersCollection ??
@@ -1872,8 +1872,8 @@ namespace System.Management.Automation
             }
         }
 
-        private Collection<CollectionEntry<PSPropertyInfo>> _allPropertiesCollection;
-        private Collection<CollectionEntry<PSPropertyInfo>> AllPropertiesCollection
+        private List<CollectionEntry<PSPropertyInfo>> _allPropertiesCollection;
+        private List<CollectionEntry<PSPropertyInfo>> AllPropertiesCollection
         {
             get {
                 return _allPropertiesCollection ??
@@ -5446,7 +5446,7 @@ namespace System.Management.Automation
             return null;
         }
 
-        internal static PSMemberInfoInternalCollection<PSPropertyInfo> GetSpecificPropertiesToSerialize(PSObject source, Collection<CollectionEntry<PSPropertyInfo>> allPropertiesCollection, TypeTable typeTable)
+        internal static PSMemberInfoInternalCollection<PSPropertyInfo> GetSpecificPropertiesToSerialize(PSObject source, List<CollectionEntry<PSPropertyInfo>> allPropertiesCollection, TypeTable typeTable)
         {
             if (source == null)
             {
@@ -5468,7 +5468,7 @@ namespace System.Management.Automation
                         source,
                         allPropertiesCollection);
 
-                Collection<string> namesOfPropertiesToSerialize = source.GetSpecificPropertiesToSerialize(typeTable);
+                var namesOfPropertiesToSerialize = source.GetSpecificPropertiesToSerialize(typeTable);
                 foreach (string propertyName in namesOfPropertiesToSerialize)
                 {
                     PSPropertyInfo property = allProperties[propertyName];

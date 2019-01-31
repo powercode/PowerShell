@@ -67,23 +67,11 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
         private void InitializeFormatErrorManager()
         {
-            FormatErrorPolicy formatErrorPolicy = new FormatErrorPolicy();
-            if (parameters != null && parameters.showErrorsAsMessages.HasValue)
+            var formatErrorPolicy = new FormatErrorPolicy
             {
-                formatErrorPolicy.ShowErrorsAsMessages = parameters.showErrorsAsMessages.Value;
-            }
-            else
-            {
-                formatErrorPolicy.ShowErrorsAsMessages = this.dataBaseInfo.db.defaultSettingsSection.formatErrorPolicy.ShowErrorsAsMessages;
-            }
-            if (parameters != null && parameters.showErrorsInFormattedOutput.HasValue)
-            {
-                formatErrorPolicy.ShowErrorsInFormattedOutput = parameters.showErrorsInFormattedOutput.Value;
-            }
-            else
-            {
-                formatErrorPolicy.ShowErrorsInFormattedOutput = this.dataBaseInfo.db.defaultSettingsSection.formatErrorPolicy.ShowErrorsInFormattedOutput;
-            }
+                ShowErrorsAsMessages = parameters?.showErrorsAsMessages ?? dataBaseInfo.db.defaultSettingsSection.formatErrorPolicy.ShowErrorsAsMessages,
+                ShowErrorsInFormattedOutput = parameters?.showErrorsInFormattedOutput ?? dataBaseInfo.db.defaultSettingsSection.formatErrorPolicy.ShowErrorsInFormattedOutput
+            };
 
             _errorManager = new FormatErrorManager(formatErrorPolicy);
         }
@@ -91,7 +79,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
         private void InitializeGroupBy()
         {
             // first check if there is an override from the command line
-            if (parameters != null && parameters.groupByParameter != null)
+            if (parameters?.groupByParameter != null)
             {
                 // get the expression to use
                 PSPropertyExpression groupingKeyExpression = parameters.groupByParameter.GetEntry(FormatParameterDefinitionKeys.ExpressionEntryKey) as PSPropertyExpression;
@@ -109,19 +97,15 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             }
 
             // check if we have a view to initialize from
-            if (this.dataBaseInfo.view != null)
+            if (dataBaseInfo.view != null)
             {
-                GroupBy gb = this.dataBaseInfo.view.groupBy;
-                if (gb == null)
-                {
-                    return;
-                }
-                if (gb.startGroup == null || gb.startGroup.expression == null)
+                GroupBy gb = dataBaseInfo.view.groupBy;
+                if (gb?.startGroup?.expression == null)
                 {
                     return;
                 }
 
-                PSPropertyExpression ex = this.expressionFactory.CreateFromExpressionToken(gb.startGroup.expression, this.dataBaseInfo.view.loadingInfo);
+                PSPropertyExpression ex = expressionFactory.CreateFromExpressionToken(gb.startGroup.expression, dataBaseInfo.view.loadingInfo);
 
                 _groupingManager = new GroupingInfoManager();
                 _groupingManager.Initialize(ex, null);
@@ -131,16 +115,15 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
         private void InitializeAutoSize()
         {
             // check the autosize flag first
-            if (parameters != null && parameters.autosize.HasValue)
+            if (parameters?.autosize != null)
             {
                 _autosize = parameters.autosize.Value;
                 return;
             }
             // check if we have a view with autosize checked
-            if (this.dataBaseInfo.view != null && this.dataBaseInfo.view.mainControl != null)
+            if (dataBaseInfo.view?.mainControl != null)
             {
-                ControlBody controlBody = this.dataBaseInfo.view.mainControl as ControlBody;
-                if (controlBody != null && controlBody.autosize.HasValue)
+                if (dataBaseInfo.view.mainControl is ControlBody controlBody && controlBody.autosize.HasValue)
                 {
                     _autosize = controlBody.autosize.Value;
                 }
@@ -176,15 +159,12 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             // we need to determine how to display the group header
             ControlBase control = null;
             TextToken labelTextToken = null;
-            if (this.dataBaseInfo.view != null && this.dataBaseInfo.view.groupBy != null)
+            if (dataBaseInfo.view?.groupBy?.startGroup != null)
             {
-                if (this.dataBaseInfo.view.groupBy.startGroup != null)
-                {
-                    // NOTE: from the database constraints, only one of the
-                    // two will be non null
-                    control = this.dataBaseInfo.view.groupBy.startGroup.control;
-                    labelTextToken = this.dataBaseInfo.view.groupBy.startGroup.labelTextToken;
-                }
+                // NOTE: from the database constraints, only one of the
+                // two will be non null
+                control = dataBaseInfo.view.groupBy.startGroup.control;
+                labelTextToken = dataBaseInfo.view.groupBy.startGroup.labelTextToken;
             }
 
             startGroup.groupingEntry = new GroupingEntry();
@@ -202,11 +182,11 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
                     formatErrorObject = new StringFormatError();
                 }
 
-                string currentGroupingValueDisplay = PSObjectHelper.SmartToString(so, this.expressionFactory, enumerationLimit, formatErrorObject);
+                string currentGroupingValueDisplay = PSObjectHelper.SmartToString(so, expressionFactory, enumerationLimit, formatErrorObject);
 
-                if (formatErrorObject != null && formatErrorObject.exception != null)
+                if (formatErrorObject?.exception != null)
                 {
-                    // if we did no thave any errors in the expression evaluation
+                    // if we did no have any errors in the expression evaluation
                     // we might have errors in the formatting, if present
                     _errorManager.LogStringFormatError(formatErrorObject);
                     if (_errorManager.DisplayFormatErrorString)
@@ -223,33 +203,32 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
                 // determine what the label should be. If we have a label from the
                 // database, let's use it, else fall back to the string provided
                 // by the grouping manager
-                string label;
-                if (labelTextToken != null)
-                    label = this.dataBaseInfo.db.displayResourceManagerCache.GetTextTokenString(labelTextToken);
-                else
-                    label = _groupingManager.GroupingKeyDisplayName;
+                string label = labelTextToken != null 
+                    ? dataBaseInfo.db.displayResourceManagerCache.GetTextTokenString(labelTextToken)
+                    : _groupingManager.GroupingKeyDisplayName;
 
                 ftf.text = StringUtil.Format(FormatAndOut_format_xxx.GroupStartDataIndentedAutoGeneratedLabel, label);
 
                 fe.formatValueList.Add(ftf);
 
-                FormatPropertyField fpf = new FormatPropertyField();
+                var fpf = new FormatPropertyField
+                {
+                    propertyValue = currentGroupingValueDisplay
+                };
 
-                fpf.propertyValue = currentGroupingValueDisplay;
                 fe.formatValueList.Add(fpf);
             }
             else
             {
                 // NOTE: we set a max depth to protect ourselves from infinite loops
                 const int maxTreeDepth = 50;
-                ComplexControlGenerator controlGenerator =
-                                new ComplexControlGenerator(this.dataBaseInfo.db,
-                                        this.dataBaseInfo.view.loadingInfo,
-                                        this.expressionFactory,
-                                        this.dataBaseInfo.view.formatControlDefinitionHolder.controlDefinitionList,
-                                        this.ErrorManager,
-                                        enumerationLimit,
-                                        this.errorContext);
+                var controlGenerator =
+                                new ComplexControlGenerator(dataBaseInfo.db,
+                                        dataBaseInfo.view.loadingInfo,
+                                        expressionFactory,
+                                        dataBaseInfo.view.formatControlDefinitionHolder.controlDefinitionList,
+                                        ErrorManager,
+                                        enumerationLimit);
 
                 controlGenerator.GenerateFormatEntries(maxTreeDepth,
                     control, firstObjectInGroup, startGroup.groupingEntry.formatValueList);
@@ -333,8 +312,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
         protected string GetExpressionDisplayValue(PSObject so, int enumerationLimit, PSPropertyExpression ex,
                     FieldFormattingDirective directive)
         {
-            PSPropertyExpressionResult resolvedExpression;
-            return GetExpressionDisplayValue(so, enumerationLimit, ex, directive, out resolvedExpression);
+            return GetExpressionDisplayValue(so, enumerationLimit, ex, directive, out PSPropertyExpressionResult _);
         }
 
         protected string GetExpressionDisplayValue(PSObject so, int enumerationLimit, PSPropertyExpression ex,
@@ -362,7 +340,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
                         retVal = _errorManager.ErrorString;
                     }
                 }
-                else if (formatErrorObject != null && formatErrorObject.exception != null)
+                else if (formatErrorObject?.exception != null)
                 {
                     // if we did no thave any errors in the expression evaluation
                     // we might have errors in the formatting, if present
@@ -381,11 +359,10 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             if (conditionToken == null)
                 return true;
 
-            PSPropertyExpression ex = this.expressionFactory.CreateFromExpressionToken(conditionToken, this.dataBaseInfo.view.loadingInfo);
-            PSPropertyExpressionResult expressionResult;
-            bool retVal = DisplayCondition.Evaluate(so, ex, out expressionResult);
+            PSPropertyExpression ex = expressionFactory.CreateFromExpressionToken(conditionToken, dataBaseInfo.view.loadingInfo);
+            bool retVal = DisplayCondition.Evaluate(so, ex, out PSPropertyExpressionResult expressionResult);
 
-            if (expressionResult != null && expressionResult.Exception != null)
+            if (expressionResult?.Exception != null)
             {
                 _errorManager.LogPSPropertyExpressionFailedResult(expressionResult, so);
             }
@@ -414,17 +391,14 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             if (formatTokenList.Count != 0)
             {
                 FormatToken token = formatTokenList[0];
-                FieldPropertyToken fpt = token as FieldPropertyToken;
-                if (fpt != null)
+                if (token is FieldPropertyToken fpt)
                 {
-                    PSPropertyExpression ex = this.expressionFactory.CreateFromExpressionToken(fpt.expression, this.dataBaseInfo.view.loadingInfo);
-                    fpf.propertyValue = this.GetExpressionDisplayValue(so, enumerationLimit, ex, fpt.fieldFormattingDirective, out result);
+                    PSPropertyExpression ex = expressionFactory.CreateFromExpressionToken(fpt.expression, dataBaseInfo.view.loadingInfo);
+                    fpf.propertyValue = GetExpressionDisplayValue(so, enumerationLimit, ex, fpt.fieldFormattingDirective, out result);
                 }
-                else
+                else if (token is TextToken tt)
                 {
-                    TextToken tt = token as TextToken;
-                    if (tt != null)
-                        fpf.propertyValue = this.dataBaseInfo.db.displayResourceManagerCache.GetTextTokenString(tt);
+                    fpf.propertyValue = dataBaseInfo.db.displayResourceManagerCache.GetTextTokenString(tt);
                 }
             }
             else

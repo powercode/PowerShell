@@ -187,9 +187,9 @@ namespace System.Management.Automation
             return null;
         }
 
-        private static readonly Collection<CollectionEntry<PSMemberInfo>> s_memberCollection = GetMemberCollection(PSMemberViewTypes.All);
-        private static readonly Collection<CollectionEntry<PSMethodInfo>> s_methodCollection = GetMethodCollection();
-        private static readonly Collection<CollectionEntry<PSPropertyInfo>> s_propertyCollection = GetPropertyCollection(PSMemberViewTypes.All);
+        private static readonly List<CollectionEntry<PSMemberInfo>> s_memberCollection = GetMemberCollection(PSMemberViewTypes.All);
+        private static readonly List<CollectionEntry<PSMethodInfo>> s_methodCollection = GetMethodCollection();
+        private static readonly List<CollectionEntry<PSPropertyInfo>> s_propertyCollection = GetPropertyCollection(PSMemberViewTypes.All);
 
         /// <summary>
         /// A collection of delegates to get Extended/Adapted/Dotnet members based on the
@@ -199,7 +199,7 @@ namespace System.Management.Automation
         /// A filter to select Extended/Adapted/Dotnet view of the object
         /// </param>
         /// <returns></returns>
-        internal static Collection<CollectionEntry<PSMemberInfo>> GetMemberCollection(PSMemberViewTypes viewType)
+        internal static List<CollectionEntry<PSMemberInfo>> GetMemberCollection(PSMemberViewTypes viewType)
         {
             return GetMemberCollection(viewType, null);
         }
@@ -215,11 +215,11 @@ namespace System.Management.Automation
         /// Backup type table to use if there is no execution context associated with the current thread
         /// </param>
         /// <returns></returns>
-        internal static Collection<CollectionEntry<PSMemberInfo>> GetMemberCollection(
+        internal static List<CollectionEntry<PSMemberInfo>> GetMemberCollection(
             PSMemberViewTypes viewType,
             TypeTable backupTypeTable)
         {
-            Collection<CollectionEntry<PSMemberInfo>> returnValue = new Collection<CollectionEntry<PSMemberInfo>>();
+            var returnValue = new List<CollectionEntry<PSMemberInfo>>();
             if ((viewType & PSMemberViewTypes.Extended) == PSMemberViewTypes.Extended)
             {
                 if (backupTypeTable == null)
@@ -258,9 +258,9 @@ namespace System.Management.Automation
             return returnValue;
         }
 
-        private static Collection<CollectionEntry<PSMethodInfo>> GetMethodCollection()
+        private static List<CollectionEntry<PSMethodInfo>> GetMethodCollection()
         {
-            Collection<CollectionEntry<PSMethodInfo>> returnValue = new Collection<CollectionEntry<PSMethodInfo>>
+            var returnValue = new List<CollectionEntry<PSMethodInfo>>
             {
                 new CollectionEntry<PSMethodInfo>(
                     PSObject.TypeTableGetMembersDelegate<PSMethodInfo>,
@@ -292,7 +292,7 @@ namespace System.Management.Automation
         /// A filter to select Extended/Adapted/Dotnet view of the object
         /// </param>
         /// <returns></returns>
-        internal static Collection<CollectionEntry<PSPropertyInfo>> GetPropertyCollection(
+        internal static List<CollectionEntry<PSPropertyInfo>> GetPropertyCollection(
             PSMemberViewTypes viewType)
         {
             return GetPropertyCollection(viewType, null);
@@ -309,18 +309,18 @@ namespace System.Management.Automation
         /// Backup type table to use if there is no execution context associated with the current thread
         /// </param>
         /// <returns></returns>
-        internal static Collection<CollectionEntry<PSPropertyInfo>> GetPropertyCollection(
+        internal static List<CollectionEntry<PSPropertyInfo>> GetPropertyCollection(
             PSMemberViewTypes viewType,
             TypeTable backupTypeTable)
         {
-            Collection<CollectionEntry<PSPropertyInfo>> returnValue = new Collection<CollectionEntry<PSPropertyInfo>>();
+            var returnValue = new List<CollectionEntry<PSPropertyInfo>>();
             if ((viewType & PSMemberViewTypes.Extended) == PSMemberViewTypes.Extended)
             {
                 if (backupTypeTable == null)
                 {
                     returnValue.Add(new CollectionEntry<PSPropertyInfo>(
-                        PSObject.TypeTableGetMembersDelegate<PSPropertyInfo>,
-                        PSObject.TypeTableGetMemberDelegate<PSPropertyInfo>,
+                        TypeTableGetMembersDelegate<PSPropertyInfo>,
+                        TypeTableGetMemberDelegate<PSPropertyInfo>,
                         true, true, "type table members"));
                 }
                 else

@@ -3044,9 +3044,9 @@ namespace System.Management.Automation
         internal PSMemberInfoInternalCollection<PSMemberInfo> internalMembers;
         private readonly PSObject _constructorPSObject;
 
-        private static readonly Collection<CollectionEntry<PSMemberInfo>> s_emptyMemberCollection = new Collection<CollectionEntry<PSMemberInfo>>();
-        private static readonly Collection<CollectionEntry<PSMethodInfo>> s_emptyMethodCollection = new Collection<CollectionEntry<PSMethodInfo>>();
-        private static readonly Collection<CollectionEntry<PSPropertyInfo>> s_emptyPropertyCollection = new Collection<CollectionEntry<PSPropertyInfo>>();
+        private static readonly List<CollectionEntry<PSMemberInfo>> s_emptyMemberCollection = new List<CollectionEntry<PSMemberInfo>>();
+        private static readonly List<CollectionEntry<PSMethodInfo>> s_emptyMethodCollection = new List<CollectionEntry<PSMethodInfo>>();
+        private static readonly List<CollectionEntry<PSPropertyInfo>> s_emptyPropertyCollection = new List<CollectionEntry<PSPropertyInfo>>();
 
         /// <summary>
         /// Initializes a new instance of PSMemberSet with no initial members
@@ -3102,37 +3102,40 @@ namespace System.Management.Automation
             _methods = new PSMemberInfoIntegratingCollection<PSMethodInfo>(this, s_emptyMethodCollection);
         }
 
-        private static readonly Collection<CollectionEntry<PSMemberInfo>> s_typeMemberCollection = GetTypeMemberCollection();
-        private static readonly Collection<CollectionEntry<PSMethodInfo>> s_typeMethodCollection = GetTypeMethodCollection();
-        private static readonly Collection<CollectionEntry<PSPropertyInfo>> s_typePropertyCollection = GetTypePropertyCollection();
+        private static readonly List<CollectionEntry<PSMemberInfo>> s_typeMemberCollection = GetTypeMemberCollection();
+        private static readonly List<CollectionEntry<PSMethodInfo>> s_typeMethodCollection = GetTypeMethodCollection();
+        private static readonly List<CollectionEntry<PSPropertyInfo>> s_typePropertyCollection = GetTypePropertyCollection();
 
-        private static Collection<CollectionEntry<PSMemberInfo>> GetTypeMemberCollection()
+        private static List<CollectionEntry<PSMemberInfo>> GetTypeMemberCollection()
         {
-            Collection<CollectionEntry<PSMemberInfo>> returnValue = new Collection<CollectionEntry<PSMemberInfo>>();
-            returnValue.Add(new CollectionEntry<PSMemberInfo>(
-                PSObject.TypeTableGetMembersDelegate<PSMemberInfo>,
-                PSObject.TypeTableGetMemberDelegate<PSMemberInfo>,
-                true, true, "type table members"));
+            var returnValue = new List<CollectionEntry<PSMemberInfo>>
+            {
+                new CollectionEntry<PSMemberInfo>(PSObject.TypeTableGetMembersDelegate<PSMemberInfo>,
+                    PSObject.TypeTableGetMemberDelegate<PSMemberInfo>,
+                    true, true, "type table members")
+            };
             return returnValue;
         }
 
-        private static Collection<CollectionEntry<PSMethodInfo>> GetTypeMethodCollection()
+        private static List<CollectionEntry<PSMethodInfo>> GetTypeMethodCollection()
         {
-            Collection<CollectionEntry<PSMethodInfo>> returnValue = new Collection<CollectionEntry<PSMethodInfo>>();
-            returnValue.Add(new CollectionEntry<PSMethodInfo>(
-                PSObject.TypeTableGetMembersDelegate<PSMethodInfo>,
-                PSObject.TypeTableGetMemberDelegate<PSMethodInfo>,
-                true, true, "type table members"));
+            var returnValue = new List<CollectionEntry<PSMethodInfo>>
+            {
+                new CollectionEntry<PSMethodInfo>(PSObject.TypeTableGetMembersDelegate<PSMethodInfo>,
+                    PSObject.TypeTableGetMemberDelegate<PSMethodInfo>,
+                    true, true, "type table members")
+            };
             return returnValue;
         }
 
-        private static Collection<CollectionEntry<PSPropertyInfo>> GetTypePropertyCollection()
+        private static List<CollectionEntry<PSPropertyInfo>> GetTypePropertyCollection()
         {
-            Collection<CollectionEntry<PSPropertyInfo>> returnValue = new Collection<CollectionEntry<PSPropertyInfo>>();
-            returnValue.Add(new CollectionEntry<PSPropertyInfo>(
-                PSObject.TypeTableGetMembersDelegate<PSPropertyInfo>,
-                PSObject.TypeTableGetMemberDelegate<PSPropertyInfo>,
-                true, true, "type table members"));
+            var returnValue = new List<CollectionEntry<PSPropertyInfo>>
+            {
+                new CollectionEntry<PSPropertyInfo>(PSObject.TypeTableGetMembersDelegate<PSPropertyInfo>,
+                    PSObject.TypeTableGetMemberDelegate<PSPropertyInfo>,
+                    true, true, "type table members")
+            };
             return returnValue;
         }
 
@@ -3645,7 +3648,10 @@ namespace System.Management.Automation
         internal static PSMemberInfoInternalCollection<T> Match<T>(PSMemberInfoInternalCollection<T> memberList, string name, WildcardPattern nameMatch, PSMemberTypes memberTypes)
             where T : PSMemberInfo
         {
-            PSMemberInfoInternalCollection<T> returnValue = new PSMemberInfoInternalCollection<T>();
+            PSMemberInfoInternalCollection<T> returnValue = null;
+
+            PSMemberInfoInternalCollection<T> GetReturnValue() => returnValue ?? (returnValue = new PSMemberInfoInternalCollection<T>());
+
             if (memberList == null)
             {
                 throw PSTraceSource.NewArgumentNullException("memberList");
@@ -3661,7 +3667,7 @@ namespace System.Management.Automation
                 T member = memberList[name];
                 if (member != null && (member.MemberType & memberTypes) != 0)
                 {
-                    returnValue.Add(member);
+                    GetReturnValue().Add(member);
                 }
 
                 return returnValue;
@@ -3671,11 +3677,21 @@ namespace System.Management.Automation
             {
                 if (nameMatch.IsMatch(member.Name) && ((member.MemberType & memberTypes) != 0))
                 {
-                    returnValue.Add(member);
+                    GetReturnValue().Add(member);
                 }
             }
 
             return returnValue;
+        }
+
+        internal static bool IsMemberMatch<T>(T member, string name, WildcardPattern nameMatch, PSMemberTypes memberTypes) where T : MemberInfo
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                throw PSTraceSource.NewArgumentException("name");
+            }
+
+            return false;
         }
     }
 
@@ -3684,6 +3700,10 @@ namespace System.Management.Automation
     /// </summary>
     public abstract class PSMemberInfoCollection<T> : IEnumerable<T> where T : PSMemberInfo
     {
+        /// <summary>
+        /// An always empty member collection.
+        /// </summary>
+        protected static readonly ReadOnlyPSMemberInfoCollection<T> EmptyMembers = new ReadOnlyPSMemberInfoCollection<T>(new PSMemberInfoInternalCollection<T>());
         #region ctor
 
         /// <summary>
@@ -4153,8 +4173,9 @@ namespace System.Management.Automation
                 throw PSTraceSource.NewArgumentException("name");
             }
 
-            PSMemberInfoInternalCollection<T> internalMembers = GetInternalMembers(matchOptions);
-            return new ReadOnlyPSMemberInfoCollection<T>(MemberMatch.Match(internalMembers, name, MemberMatch.GetNamePattern(name), memberTypes));
+            var internalMembers = GetInternalMembers(matchOptions);
+            var matches = MemberMatch.Match(internalMembers, name, MemberMatch.GetNamePattern(name), memberTypes);
+            return matches == null ? EmptyMembers : new ReadOnlyPSMemberInfoCollection<T>(matches);
         }
 
         private PSMemberInfoInternalCollection<T> GetInternalMembers(MshMemberMatchOptions matchOptions)
@@ -4394,12 +4415,12 @@ namespace System.Management.Automation
 
         #region Constructor, fields and properties
 
-        internal Collection<CollectionEntry<T>> Collections { get; }
+        internal List<CollectionEntry<T>> Collections { get; }
 
         private readonly PSObject _mshOwner;
         private readonly PSMemberSet _memberSetOwner;
 
-        internal PSMemberInfoIntegratingCollection(object owner, Collection<CollectionEntry<T>> collections)
+        internal PSMemberInfoIntegratingCollection(object owner, List<CollectionEntry<T>> collections)
         {
             if (owner == null)
             {
@@ -4688,8 +4709,7 @@ namespace System.Management.Automation
                         // if it is a reserved name, ensures the value is loaded.
                         EnsureReservedMemberIsLoaded(name);
                         delegateOwner = _mshOwner;
-                        PSMemberInfoInternalCollection<PSMemberInfo> instanceMembers;
-                        if (PSObject.HasInstanceMembers(_mshOwner, out instanceMembers))
+                        if (PSObject.HasInstanceMembers(_mshOwner, out PSMemberInfoInternalCollection<PSMemberInfo> instanceMembers))
                         {
                             member = instanceMembers[name];
                             if (member is T memberAsT)
@@ -4882,8 +4902,14 @@ namespace System.Management.Automation
 
                 WildcardPattern nameMatch = MemberMatch.GetNamePattern(name);
                 PSMemberInfoInternalCollection<T> allMembers = GetIntegratedMembers(matchOptions);
-                ReadOnlyPSMemberInfoCollection<T> returnValue = new ReadOnlyPSMemberInfoCollection<T>(MemberMatch.Match(allMembers, name, nameMatch, memberTypes));
-                PSObject.memberResolution.WriteLine("{0} total matches.", returnValue.Count);
+                PSMemberInfoInternalCollection<T> matches = MemberMatch.Match(allMembers, name, nameMatch, memberTypes);
+                if (matches == null)
+                {
+                    PSObject.memberResolution.WriteLine("0 total matches.");
+                    return EmptyMembers;
+                }
+                var returnValue = new ReadOnlyPSMemberInfoCollection<T>(matches);
+                PSObject.memberResolution.WriteLine($"{returnValue.Count} total matches.");
                 return returnValue;
             }
         }

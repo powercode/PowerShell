@@ -13,6 +13,7 @@ using System.Management.Automation.Internal;
 using System.Globalization;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using Microsoft.PowerShell.Commands.Internal.Format;
 
 namespace Microsoft.PowerShell.Commands
 {
@@ -75,6 +76,7 @@ namespace Microsoft.PowerShell.Commands
     /// <summary>
     /// The object returned by select-string representing the result of a match.
     /// </summary>
+    [Formatter(typeof(MatchInfoFormatter))]
     public class MatchInfo
     {
         private static string s_inputStream = "InputStream";
@@ -1852,7 +1854,7 @@ namespace Microsoft.PowerShell.Commands
 
      
         /// <inheritdoc />
-        public override string ToString() => IsStart ? $"Start of {GroupId} at {Index}" : $"End of {GroupId} at {Index}";        
+        public override string ToString() => IsStart ? $"Start of {GroupId} at {Index}" : $"End of {GroupId} at {Index}";
 
         /// <summary>
         /// Initializes a new instance of the <see cref="MatchInfoGroupColorInfo"/> class.
@@ -1868,8 +1870,20 @@ namespace Microsoft.PowerShell.Commands
         public int CompareTo(MatchInfoGroupColorInfo other)
         {
             var indexComparison = Index.CompareTo(other.Index);
-            if (indexComparison != 0) return indexComparison;
-            return IsStart.CompareTo(other.IsStart);            
+            if (indexComparison != 0)
+            {
+                return indexComparison;
+            }
+
+            var groupComparison = IsStart || other.IsStart
+                ? other.GroupId.CompareTo(GroupId)
+                : GroupId.CompareTo(other.GroupId);
+            if (groupComparison != 0)
+            {
+                return groupComparison;
+            }
+
+            return -IsStart.CompareTo(other.IsStart);
         }
 
         public int CompareTo(object obj)
@@ -1882,8 +1896,8 @@ namespace Microsoft.PowerShell.Commands
     /// <summary>
     /// Formatter for MatchInfo
     /// </summary>
-    public class MatchInfoFormatter {
-
+    public class MatchInfoFormatter : IObjectFormatter
+    {
         private const string NoColor = "\x1b[0m";
         private const string DarkGray = "\x1b[90m";
         private const string BrightRed = "\x1b[91m";
@@ -1892,8 +1906,6 @@ namespace Microsoft.PowerShell.Commands
         private const string BrightBlue = "\x1b[94m";
         private const string BrightMagenta = "\x1b[95m";
         private const string BrightCyan = "\x1b[96m";
-        private const string White = "\x1b[97m";
-        private const string Black = "\x1b[30m";
 
         static readonly string[] s_groupColors =
         {
@@ -1904,43 +1916,24 @@ namespace Microsoft.PowerShell.Commands
             DarkGray,
             BrightBlue,
             BrightGreen,
-            BrightRed
+            BrightRed,
         };
 
-        string[,] s_colorNames2 = {
-            //name      abbrev VT100Color
-            {"yellow",  "ye",  BrightYellow},
-            {"magenta", "ma",  BrightMagenta},
-            {"gray",    "gy",  DarkGray},
-            {"green",   "gn",  BrightGreen},
-            {"blue",    "be",  BrightBlue},
-            {"red",     "re",  BrightRed},
-            {"cyan",    "cy",  BrightCyan},
-            {"white",   "wh",  White},
-            {"black",   "bk",  Black},
-            {"nocolor", "no",  NoColor},
-        };
+        private readonly bool _uiSupportsVirtualTerminal;
+        private readonly string _currentDirectory;
+        private readonly Dictionary<string, Regex> _patternCache = new Dictionary<string, Regex>();
 
-        private static readonly Dictionary<string, string> s_colorNameToColor = new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase)
+        /// <summary>
+        /// Initializes a new instance if the <see cref="MatchInfoFormatter"/> class.
+        /// </summary>
+        /// <param name="engineIntrinsics"></param>
+        public MatchInfoFormatter(EngineIntrinsics engineIntrinsics)
         {
-            {"nocolor", NoColor},
-            {"yellow", BrightYellow},
-            {"ye", BrightYellow},
-            {"magenta", BrightMagenta},
-            {"ma", BrightMagenta},
-            {"cyan", BrightCyan},
-            {"cy", BrightCyan},
-            {"gray", DarkGray},
-            {"gy", DarkGray},
-            {"blue", BrightBlue},
-            {"bl", BrightBlue},
-            {"green", BrightGreen},
-            {"gn", BrightGreen},
-            {"red", BrightRed},
-            {"re", BrightRed},
-        };
-
-        static readonly string[] s_colorNames = { "ye", "yellow", "gy", "red", "re", "bl", "gn", "nocolor", "magenta", "gray", "green", "blue", "ma", "cy", "cyan" };
+            var sessionState = engineIntrinsics.SessionState;
+            _currentDirectory = sessionState.Path.CurrentFileSystemLocation.ProviderPath;
+            var host = (System.Management.Automation.Internal.Host.InternalHost)sessionState.PSVariable.GetValue("global:Host");
+            _uiSupportsVirtualTerminal = host.UI.SupportsVirtualTerminal;
+        }
 
         private static string GetGroupColor(int index)
         {
@@ -1948,37 +1941,33 @@ namespace Microsoft.PowerShell.Commands
             return index > colorsLength ? s_groupColors[colorsLength - 1] : s_groupColors[index];
         }
 
-        private static string GetGroupColor(string groupName)
+        Regex GetPatternRegex(string pattern)
         {
-            if (s_colorNameToColor.TryGetValue(groupName, out var color))
+            if (!_patternCache.TryGetValue(pattern, out var regex))
             {
-                return color;
+                regex = new Regex(pattern);
+                _patternCache.Add(pattern, regex);
             }
 
-            return NoColor;
+            return regex;
         }
 
-        private static List<MatchInfoGroupColorInfo> GetGroupInfo(MatchInfo matchInfo)
+        private List<MatchInfoGroupColorInfo> GetGroupInfo(MatchInfo matchInfo)
         {
             var text = matchInfo.Line;
-            var re = new Regex(matchInfo.Pattern);
-
-            bool IsColorName(string regexGroupName) => s_colorNames.Any(c => c.Equals(regexGroupName, StringComparison.OrdinalIgnoreCase));
-
-            var namedColors = matchInfo.Matches[0].Groups.Count != 1 && re.GetGroupNames().Skip(1).All(IsColorName);
-
+            var re = GetPatternRegex(matchInfo.Pattern);
+            
             Match match = matchInfo.Matches[0];
             var matchList = new List<MatchInfoGroupColorInfo>(match.Groups.Count) { new MatchInfoGroupColorInfo(0, 0, true, NoColor) };
 
             for (var i = 0; i < match.Groups.Count; i++)
             {
-                var g = match.Groups[i];
-                string color = namedColors
-                    ? GetGroupColor(re.GroupNameFromNumber(i))
-                    : GetGroupColor(i + 1);
+                var matchGroup = match.Groups[i];
+                var groupId = i + 1;
+                string color = GetGroupColor(groupId);
 
-                matchList.Add(new MatchInfoGroupColorInfo(g.Index, i + 1, true, color));
-                matchList.Add(new MatchInfoGroupColorInfo(g.Index + g.Length, i + 1, false, NoColor));
+                matchList.Add(new MatchInfoGroupColorInfo(matchGroup.Index, groupId, isStart: true, color));
+                matchList.Add(new MatchInfoGroupColorInfo(matchGroup.Index + matchGroup.Length, groupId, isStart: false, NoColor));
             }
 
             matchList.Sort();
@@ -1987,7 +1976,7 @@ namespace Microsoft.PowerShell.Commands
             return matchList;
         }
 
-        private static void AppendFormattedMatchInfo(StringBuilder builder, MatchInfo matchInfo)
+        private void AppendFormattedMatchInfo(StringBuilder builder, MatchInfo matchInfo)
         {
             string text = matchInfo.Line;
 
@@ -2035,7 +2024,7 @@ namespace Microsoft.PowerShell.Commands
             builder.Append(NoColor);
         }
 
-        private static void AppendFormattedLine(StringBuilder builder, MatchInfo matchInfo, string displayPath, int lineNumber, string line, string prefix, bool isMatchLine)
+        private void AppendFormattedLine(StringBuilder builder, MatchInfo matchInfo, string displayPath, int lineNumber, string line, string prefix, bool isMatchLine)
         {
             if (matchInfo.Path != "InputStream")
             {
@@ -2059,19 +2048,17 @@ namespace Microsoft.PowerShell.Commands
         /// Formats a MatchInfo
         /// </summary>
         /// <param name="matchInfo"></param>
-        /// <param name="currentDirectory"></param>
-        /// <param name="supportsVirtualTerminal"></param>
         /// <returns></returns>
-        public static string Format(MatchInfo matchInfo, string currentDirectory, bool supportsVirtualTerminal)
+        public string Format(MatchInfo matchInfo)
         {
-            var builder = new StringBuilder();
-
-            if (!supportsVirtualTerminal)
+            if (!_uiSupportsVirtualTerminal)
             {
-                return matchInfo.ToString(currentDirectory);
+                return matchInfo.ToString(_currentDirectory);
             }
 
-            var displayPath = string.IsNullOrEmpty(currentDirectory) ? matchInfo.Path : matchInfo.RelativePath(currentDirectory);
+            var builder = new StringBuilder();
+
+            var displayPath = string.IsNullOrEmpty(_currentDirectory) ? matchInfo.Path : matchInfo.RelativePath(_currentDirectory);
             var matchInfoContext = matchInfo.Context;
             if (matchInfoContext == null)
             {
@@ -2101,6 +2088,27 @@ namespace Microsoft.PowerShell.Commands
             }
 
             return builder.ToString();
+        }
+
+        /// <inheritdoc />
+        public string Header()
+        {
+            return null;
+        }
+
+        
+        /// <inheritdoc />
+        public string Format(object obj)
+        {
+            return obj is MatchInfo matchInfo
+                ? Format(matchInfo)
+                : throw new ArgumentException();
+        }
+
+        /// <inheritdoc />
+        public string Footer()
+        {
+            return null;
         }
     }
 }

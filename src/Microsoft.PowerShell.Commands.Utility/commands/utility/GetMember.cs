@@ -213,14 +213,13 @@ namespace Microsoft.PowerShell.Commands
             }
             else
             {
-                Collection<CollectionEntry<PSMemberInfo>> memberCollection = PSObject.GetMemberCollection(viewToSearch);
+                var memberCollection = PSObject.GetMemberCollection(viewToSearch);
                 membersToSearch = new PSMemberInfoIntegratingCollection<PSMemberInfo>(this.InputObject, memberCollection);
             }
 
             foreach (string nameElement in this.Name)
             {
-                ReadOnlyPSMemberInfoCollection<PSMemberInfo> readOnlyMembers;
-                readOnlyMembers = membersToSearch.Match(nameElement, memberTypeToSearch, _matchOptions);
+                var readOnlyMembers = membersToSearch.Match(nameElement, memberTypeToSearch, _matchOptions);
 
                 MemberDefinition[] members = new MemberDefinition[readOnlyMembers.Count];
                 int resultCount = 0;
@@ -228,8 +227,7 @@ namespace Microsoft.PowerShell.Commands
                 {
                     if (!Force)
                     {
-                        PSMethod memberAsPSMethod = member as PSMethod;
-                        if ((memberAsPSMethod != null) && (memberAsPSMethod.IsSpecial))
+                        if ((member is PSMethod memberAsPSMethod) && (memberAsPSMethod.IsSpecial))
                         {
                             continue;
                         }

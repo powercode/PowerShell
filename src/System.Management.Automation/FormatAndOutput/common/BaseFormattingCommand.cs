@@ -9,6 +9,7 @@ using System.Linq;
 using System.Management.Automation;
 using System.Management.Automation.Internal;
 using System.Management.Automation.Runspaces;
+using BindingFlags = System.Reflection.BindingFlags;
 
 namespace Microsoft.PowerShell.Commands.Internal.Format
 {
@@ -43,6 +44,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
     /// </summary>
     internal class InnerFormatShapeCommand : InnerFormatShapeCommandBase
     {
+        private (Type type, IObjectFormatter formatter) _lastFormatter;
         /// <summary>
         /// constructor to glue to the CRO
         /// </summary>
@@ -190,6 +192,31 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             {
                 this.WriteObject(fed);
             }
+        }
+
+        IObjectFormatter GetFormatter(PSObject so)
+        {
+            IObjectFormatter formatter = null;
+            var objectType = so.BaseObject.GetType();
+            if (objectType == _lastFormatter.type)
+            {
+                formatter = _lastFormatter.formatter;
+                return formatter;
+            }
+            
+            _lastFormatter.type = objectType;
+            var formatterType = objectType.GetCustomAttributes<FormatterAttribute>(false).FirstOrDefault()?.Formatter;
+            if (formatterType != null)
+            {
+                var ctor = formatterType.GetConstructor(new[] { typeof(EngineIntrinsics) });
+                if (ctor != null)
+                {
+                    formatter = (IObjectFormatter)ctor.Invoke(new object[] { OuterCmdlet().SessionState });
+                    _lastFormatter.formatter = formatter;
+                }
+            }
+
+            return formatter;
         }
 
         /// <summary>

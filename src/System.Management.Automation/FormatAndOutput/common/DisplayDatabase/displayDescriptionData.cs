@@ -12,6 +12,53 @@ using Microsoft.PowerShell.Commands.Internal.Format;
 
 namespace Microsoft.PowerShell.Commands.Internal.Format
 {
+    /// <summary>
+    /// Specifies a formatter for a type.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+    public class FormatterAttribute : Attribute
+    {
+        /// <summary>
+        /// The type of the formatter.
+        /// </summary>
+        public Type Formatter { get; }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="FormatterAttribute"/> class.
+        /// </summary>
+        /// <param name="formatter">The type to format instances of.</param>
+        public FormatterAttribute(Type formatter)
+        {
+            if (!formatter.IsAssignableFrom(typeof(IObjectFormatter)))
+            {
+                throw new ArgumentException("Must be an IFormatter", nameof(formatter));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Projects a set of objects of a type to a set of strings.
+    /// </summary>
+    public interface IObjectFormatter
+    {
+        /// <summary>
+        /// Called at the beginning of each formatting pipeline.
+        /// </summary>
+        string Header();
+
+        /// <summary>
+        /// Called to 
+        /// </summary>
+        /// <param name="obj">The object to format.</param>
+        /// <returns>The formatted view of the object.</returns>
+        string Format(object obj);
+
+        /// <summary>
+        /// Called at the end of each formatting pipeline.
+        /// </summary>
+        string Footer();
+    }
+
     internal enum EnumerableExpansion
     {
         /// <summary>
@@ -312,6 +359,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
         internal int firstLine = 0;
     }
 
+    [DebuggerDisplay("{expressionValue}")]
     internal sealed class ExpressionToken
     {
         internal ExpressionToken() { }
@@ -326,6 +374,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
         internal string expressionValue;
     }
 
+    [DebuggerDisplay("{expression.expressionValue}")]
     internal abstract class PropertyTokenBase : FormatToken
     {
         /// <summary>
@@ -528,6 +577,8 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
         /// main control for the view (e.g. reference to a control or a control body
         /// </summary>
         internal ControlBase mainControl;
+
+        internal Type FormatterType;
 
         /// <summary>
         /// RULE: only valid for list and complex

@@ -16,7 +16,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             PSObject so, TypeInfoDataBase db, FormattingCommandLineParameters parameters)
         {
             base.Initialize(errorContext, expressionFactory, so, db, parameters);
-            this.inputParameters = parameters;
+            inputParameters = parameters;
         }
 
         internal override FormatStartData GenerateStartData(PSObject so)
@@ -28,19 +28,18 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
         internal override FormatEntryData GeneratePayload(PSObject so, int enumerationLimit)
         {
-            FormatEntryData fed = new FormatEntryData();
-
-            if (this.dataBaseInfo.view != null)
-                fed.formatEntryInfo = GenerateComplexViewEntryFromDataBaseInfo(so, enumerationLimit);
-            else
-                fed.formatEntryInfo = GenerateComplexViewEntryFromProperties(so, enumerationLimit);
-            return fed;
+            return new FormatEntryData
+            {
+                formatEntryInfo = dataBaseInfo.view != null 
+                    ? GenerateComplexViewEntryFromDataBaseInfo(so, enumerationLimit)
+                    : GenerateComplexViewEntryFromProperties(so, enumerationLimit)
+            };
         }
 
         private ComplexViewEntry GenerateComplexViewEntryFromProperties(PSObject so, int enumerationLimit)
         {
-            ComplexViewObjectBrowser browser = new ComplexViewObjectBrowser(this.ErrorManager, this.expressionFactory, enumerationLimit);
-            return browser.GenerateView(so, this.inputParameters);
+            ComplexViewObjectBrowser browser = new ComplexViewObjectBrowser(ErrorManager, expressionFactory, enumerationLimit);
+            return browser.GenerateView(so, inputParameters);
         }
 
         private ComplexViewEntry GenerateComplexViewEntryFromDataBaseInfo(PSObject so, int enumerationLimit)
@@ -50,17 +49,16 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
             // NOTE: we set a max depth to protect ourselves from infinite loops
             const int maxTreeDepth = 50;
-            ComplexControlGenerator controlGenerator =
-                            new ComplexControlGenerator(this.dataBaseInfo.db,
-                                    this.dataBaseInfo.view.loadingInfo,
-                                    this.expressionFactory,
-                                    this.dataBaseInfo.view.formatControlDefinitionHolder.controlDefinitionList,
-                                    this.ErrorManager,
-                                    enumerationLimit,
-                                    this.errorContext);
+            var controlGenerator = new ComplexControlGenerator(
+                dataBaseInfo.db,
+                dataBaseInfo.view.loadingInfo,
+                expressionFactory,
+                dataBaseInfo.view.formatControlDefinitionHolder.controlDefinitionList,
+                ErrorManager,
+                enumerationLimit);
 
             controlGenerator.GenerateFormatEntries(maxTreeDepth,
-                this.dataBaseInfo.view.mainControl, so, cve.formatValueList);
+                dataBaseInfo.view.mainControl, so, cve.formatValueList);
             return cve;
         }
     }
@@ -69,15 +67,15 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
     /// class to process a complex control directive and generate
     /// the corresponding formatting tokens
     /// </summary>
-    internal sealed class ComplexControlGenerator
+    internal struct ComplexControlGenerator
     {
-        internal ComplexControlGenerator(TypeInfoDataBase dataBase,
-                                            DatabaseLoadingInfo loadingInfo,
-                                            PSPropertyExpressionFactory expressionFactory,
-                                            List<ControlDefinition> controlDefinitionList,
-                                            FormatErrorManager resultErrorManager,
-                                            int enumerationLimit,
-                                            TerminatingErrorContext errorContext)
+        internal ComplexControlGenerator(
+            TypeInfoDataBase dataBase,
+            DatabaseLoadingInfo loadingInfo,
+            PSPropertyExpressionFactory expressionFactory,
+            List<ControlDefinition> controlDefinitionList,
+            FormatErrorManager resultErrorManager,
+            int enumerationLimit)
         {
             _db = dataBase;
             _loadingInfo = loadingInfo;
@@ -85,7 +83,6 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             _controlDefinitionList = controlDefinitionList;
             _errorManager = resultErrorManager;
             _enumerationLimit = enumerationLimit;
-            _errorContext = errorContext;
         }
 
         internal void GenerateFormatEntries(int maxTreeDepth, ControlBase control,
@@ -107,8 +104,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             ComplexControlBody complexBody = null;
 
             // we might have a reference
-            ControlReference controlReference = control as ControlReference;
-            if (controlReference != null && controlReference.controlType == typeof(ComplexControlBody))
+            if (control is ControlReference controlReference && controlReference.controlType == typeof(ComplexControlBody))
             {
                 // retrieve the reference
                 complexBody = DisplayDataQuery.ResolveControlReference(
@@ -362,8 +358,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
                 return true;
 
             PSPropertyExpression ex = _expressionFactory.CreateFromExpressionToken(conditionToken, _loadingInfo);
-            PSPropertyExpressionResult expressionResult;
-            bool retVal = DisplayCondition.Evaluate(so, ex, out expressionResult);
+            bool retVal = DisplayCondition.Evaluate(so, ex, out PSPropertyExpressionResult expressionResult);
 
             if (expressionResult != null && expressionResult.Exception != null)
             {
@@ -372,13 +367,12 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             return retVal;
         }
 
-        private TypeInfoDataBase _db;
-        private DatabaseLoadingInfo _loadingInfo;
-        private PSPropertyExpressionFactory _expressionFactory;
-        private List<ControlDefinition> _controlDefinitionList;
-        private FormatErrorManager _errorManager;
-        private TerminatingErrorContext _errorContext;
-        private int _enumerationLimit;
+        private readonly TypeInfoDataBase _db;
+        private readonly DatabaseLoadingInfo _loadingInfo;
+        private readonly PSPropertyExpressionFactory _expressionFactory;
+        private readonly List<ControlDefinition> _controlDefinitionList;
+        private readonly FormatErrorManager _errorManager;
+        private readonly int _enumerationLimit;
     }
 
     internal class TraversalInfo

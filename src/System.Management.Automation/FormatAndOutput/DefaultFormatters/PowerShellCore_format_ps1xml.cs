@@ -367,6 +367,12 @@ namespace System.Management.Automation.Runspaces
             yield return new FormatViewDefinition("MatchInfo",
                 CustomControl.Create()
                     .StartEntry()
+                    .AddScriptBlockExpressionBinding(@"[Microsoft.PowerShell.Commands.MatchInfoFormatter]::Format($_, $global:executionContext)")
+                    .EndEntry()
+                    .EndControl());
+            yield return new FormatViewDefinition("NoColor",
+                CustomControl.Create()
+                    .StartEntry()
                         .AddScriptBlockExpressionBinding(@"$_.ToString(((get-location).path))")
                     .EndEntry()
                 .EndControl());

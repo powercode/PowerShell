@@ -17,23 +17,15 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
         internal override void Initialize(TerminatingErrorContext terminatingErrorContext, PSPropertyExpressionFactory mshExpressionFactory, TypeInfoDataBase db, ViewDefinition view, FormattingCommandLineParameters formatParameters)
         {
             base.Initialize(terminatingErrorContext, mshExpressionFactory, db, view, formatParameters);
-            if ((this.dataBaseInfo != null) && (this.dataBaseInfo.view != null))
-            {
-                _tableBody = (TableControlBody)this.dataBaseInfo.view.mainControl;
-            }
+            _tableBody = (TableControlBody)dataBaseInfo?.view?.mainControl;
         }
 
         internal override void Initialize(TerminatingErrorContext errorContext, PSPropertyExpressionFactory expressionFactory,
-                                        PSObject so, TypeInfoDataBase db,
-            FormattingCommandLineParameters parameters)
+                                        PSObject so, TypeInfoDataBase db, FormattingCommandLineParameters parameters)
         {
             base.Initialize(errorContext, expressionFactory, so, db, parameters);
-
-            if ((this.dataBaseInfo != null) && (this.dataBaseInfo.view != null))
-            {
-                _tableBody = (TableControlBody)this.dataBaseInfo.view.mainControl;
-            }
-
+            _tableBody = (TableControlBody)dataBaseInfo?.view?.mainControl;
+            
             List<MshParameter> rawMshParameterList = null;
 
             if (parameters != null)
@@ -42,14 +34,14 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             // check if we received properties from the command line
             if (rawMshParameterList != null && rawMshParameterList.Count > 0)
             {
-                this.activeAssociationList = AssociationManager.ExpandTableParameters(rawMshParameterList, so);
+                activeAssociationList = AssociationManager.ExpandTableParameters(rawMshParameterList, so);
                 return;
             }
 
             // we did not get any properties:
             //try to get properties from the default property set of the object
-            this.activeAssociationList = AssociationManager.ExpandDefaultPropertySet(so, this.expressionFactory);
-            if (this.activeAssociationList.Count > 0)
+            activeAssociationList = AssociationManager.ExpandDefaultPropertySet(so, this.expressionFactory);
+            if (activeAssociationList.Count > 0)
             {
                 // we got a valid set of properties from the default property set..add computername for
                 // remoteobjects (if available)
@@ -62,8 +54,8 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             }
 
             // we failed to get anything from the default property set
-            this.activeAssociationList = AssociationManager.ExpandAll(so);
-            if (this.activeAssociationList.Count > 0)
+            activeAssociationList = AssociationManager.ExpandAll(so);
+            if (activeAssociationList.Count > 0)
             {
                 // Remove PSComputerName and PSShowComputerName from the display as needed.
                 AssociationManager.HandleComputerNameProperties(so, activeAssociationList);
@@ -72,7 +64,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             }
 
             // we were unable to retrieve any properties, so we leave an empty list
-            this.activeAssociationList = new List<MshResolvedExpressionParameterAssociation>();
+            activeAssociationList = new List<MshResolvedExpressionParameterAssociation>();
         }
 
         /// <summary>
@@ -88,24 +80,31 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             Diagnostics.Assert(so.Properties[RemotingConstants.ComputerNameNoteProperty] != null,
                 "PrepareForRemoteObjects cannot be called when the object does not contain ComputerName property.");
 
-            if ((dataBaseInfo != null) && (dataBaseInfo.view != null) && (dataBaseInfo.view.mainControl != null))
+            if (dataBaseInfo?.view?.mainControl != null)
             {
                 // dont change the original format definition in the database..just make a copy and work
                 // with the copy
-                _tableBody = (TableControlBody)this.dataBaseInfo.view.mainControl.Copy();
+                _tableBody = (TableControlBody)dataBaseInfo.view.mainControl.Copy();
 
-                TableRowItemDefinition cnRowDefinition = new TableRowItemDefinition();
-                PropertyTokenBase propToken = new FieldPropertyToken();
-                propToken.expression = new ExpressionToken(RemotingConstants.ComputerNameNoteProperty, false);
+                
+                var propToken = new FieldPropertyToken
+                {
+                    expression = new ExpressionToken(RemotingConstants.ComputerNameNoteProperty, false)
+                };
+                var cnRowDefinition = new TableRowItemDefinition();
                 cnRowDefinition.formatTokenList.Add(propToken);
                 _tableBody.defaultDefinition.rowItemDefinitionList.Add(cnRowDefinition);
 
                 // add header only if there are other header definitions
                 if (_tableBody.header.columnHeaderDefinitionList.Count > 0)
                 {
-                    TableColumnHeaderDefinition cnHeaderDefinition = new TableColumnHeaderDefinition();
-                    cnHeaderDefinition.label = new TextToken();
-                    cnHeaderDefinition.label.text = RemotingConstants.ComputerNameNoteProperty;
+                    var cnHeaderDefinition = new TableColumnHeaderDefinition
+                    {
+                        label = new TextToken
+                        {
+                            text = RemotingConstants.ComputerNameNoteProperty
+                        }
+                    };
                     _tableBody.header.columnHeaderDefinitionList.Add(cnHeaderDefinition);
                 }
             }
@@ -115,10 +114,9 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
         {
             FormatStartData startFormat = base.GenerateStartData(so);
 
-            if (this.dataBaseInfo.view != null)
-                startFormat.shapeInfo = GenerateTableHeaderInfoFromDataBaseInfo(so);
-            else
-                startFormat.shapeInfo = GenerateTableHeaderInfoFromProperties(so);
+            startFormat.shapeInfo = dataBaseInfo.view != null
+                ? GenerateTableHeaderInfoFromDataBaseInfo(so)
+                : GenerateTableHeaderInfoFromProperties(so);
             return startFormat;
         }
 
@@ -140,13 +138,11 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
             if (activeAssociationList.Count > nMax)
             {
-                List<MshResolvedExpressionParameterAssociation> tmp = this.activeAssociationList;
-                this.activeAssociationList = new List<MshResolvedExpressionParameterAssociation>();
+                List<MshResolvedExpressionParameterAssociation> tmp = activeAssociationList;
+                activeAssociationList = new List<MshResolvedExpressionParameterAssociation>();
                 for (int k = 0; k < nMax; k++)
-                    this.activeAssociationList.Add(tmp[k]);
+                    activeAssociationList.Add(tmp[k]);
             }
-
-            return;
         }
 
         private TableHeaderInfo GenerateTableHeaderInfoFromDataBaseInfo(PSObject so)
@@ -155,59 +151,44 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
             bool dummy;
             List<TableRowItemDefinition> activeRowItemDefinitionList = GetActiveTableRowDefinition(_tableBody, so, out dummy);
-            thi.hideHeader = this.HideHeaders;
+            thi.hideHeader = HideHeaders;
 
             int col = 0;
-            foreach (TableRowItemDefinition rowItem in activeRowItemDefinitionList)
+            for (var index = 0; index < activeRowItemDefinitionList.Count; index++)
             {
-                TableColumnInfo ci = new TableColumnInfo();
+                TableRowItemDefinition rowItem = activeRowItemDefinitionList[index];
+                var columnInfo = new TableColumnInfo();
                 TableColumnHeaderDefinition colHeader = null;
                 if (_tableBody.header.columnHeaderDefinitionList.Count > 0)
                     colHeader = _tableBody.header.columnHeaderDefinitionList[col];
 
                 if (colHeader != null)
                 {
-                    ci.width = colHeader.width;
-                    ci.alignment = colHeader.alignment;
+                    columnInfo.width = colHeader.width;
+                    columnInfo.alignment = colHeader.alignment;
                     if (colHeader.label != null)
-                        ci.label = this.dataBaseInfo.db.displayResourceManagerCache.GetTextTokenString(colHeader.label);
+                        columnInfo.label = dataBaseInfo.db.displayResourceManagerCache.GetTextTokenString(colHeader.label);
                 }
 
-                if (ci.alignment == TextAlignment.Undefined)
+                if (columnInfo.alignment == TextAlignment.Undefined)
                 {
-                    ci.alignment = rowItem.alignment;
+                    columnInfo.alignment = rowItem.alignment;
                 }
 
-                if (ci.label == null)
+                if (columnInfo.label == null)
                 {
-                    FormatToken token = null;
-                    if (rowItem.formatTokenList.Count > 0)
-                        token = rowItem.formatTokenList[0];
-                    if (token != null)
-                    {
-                        FieldPropertyToken fpt = token as FieldPropertyToken;
-                        if (fpt != null)
-                        {
-                            ci.label = fpt.expression.expressionValue;
-                        }
-                        else
-                        {
-                            TextToken tt = token as TextToken;
-                            if (tt != null)
-                            {
-                                ci.label = this.dataBaseInfo.db.displayResourceManagerCache.GetTextTokenString(tt);
-                            }
-                        }
-                    }
-                    else
-                    {
-                        ci.label = string.Empty;
-                    }
+                    FormatToken token = rowItem.formatTokenList.Count > 0 ? rowItem.formatTokenList[0] : null;
+                    columnInfo.label = token is FieldPropertyToken fpt
+                        ? fpt.expression.expressionValue
+                        : token is TextToken tt
+                            ? dataBaseInfo.db.displayResourceManagerCache.GetTextTokenString(tt)
+                            : string.Empty;
                 }
 
-                thi.tableColumnInfoList.Add(ci);
+                thi.tableColumnInfoList.Add(columnInfo);
                 col++;
             }
+
             return thi;
         }
 
@@ -215,11 +196,11 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
         {
             TableHeaderInfo thi = new TableHeaderInfo();
 
-            thi.hideHeader = this.HideHeaders;
+            thi.hideHeader = HideHeaders;
 
-            for (int k = 0; k < this.activeAssociationList.Count; k++)
+            for (int k = 0; k < activeAssociationList.Count; k++)
             {
-                MshResolvedExpressionParameterAssociation a = this.activeAssociationList[k];
+                MshResolvedExpressionParameterAssociation a = activeAssociationList[k];
                 TableColumnInfo ci = new TableColumnInfo();
 
                 // set the label of the column
@@ -231,7 +212,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
                 }
                 if (ci.propertyName == null)
                 {
-                    ci.propertyName = this.activeAssociationList[k].ResolvedExpression.ToString();
+                    ci.propertyName = activeAssociationList[k].ResolvedExpression.ToString();
                 }
 
                 // set the width of the table
@@ -276,16 +257,16 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             get
             {
                 // first check command line, it takes the precedence
-                if (this.parameters != null && this.parameters.shapeParameters != null)
+                if (parameters != null && parameters.shapeParameters != null)
                 {
-                    TableSpecificParameters tableSpecific = (TableSpecificParameters)this.parameters.shapeParameters;
+                    TableSpecificParameters tableSpecific = (TableSpecificParameters)parameters.shapeParameters;
                     if (tableSpecific != null && tableSpecific.hideHeaders.HasValue)
                     {
                         return tableSpecific.hideHeaders.Value;
                     }
                 }
                 // if we have a view, get the value out of it
-                if (this.dataBaseInfo.view != null)
+                if (dataBaseInfo.view != null)
                 {
                     return _tableBody.header.hideHeader;
                 }
@@ -318,10 +299,10 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
         internal override FormatEntryData GeneratePayload(PSObject so, int enumerationLimit)
         {
-            FormatEntryData fed = new FormatEntryData();
+            var fed = new FormatEntryData();
 
             TableRowEntry tre;
-            if (this.dataBaseInfo.view != null)
+            if (dataBaseInfo.view != null)
             {
                 tre = GenerateTableRowEntryFromDataBaseInfo(so, enumerationLimit);
             }
@@ -329,19 +310,13 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             {
                 tre = GenerateTableRowEntryFromFromProperties(so, enumerationLimit);
                 // get the global setting for multiline
-                tre.multiLine = this.dataBaseInfo.db.defaultSettingsSection.MultilineTables;
+                tre.multiLine = dataBaseInfo.db.defaultSettingsSection.MultilineTables;
             }
             fed.formatEntryInfo = tre;
 
             // override from command line, if there
-            if (this.parameters != null && this.parameters.shapeParameters != null)
-            {
-                TableSpecificParameters tableSpecific = (TableSpecificParameters)this.parameters.shapeParameters;
-                if (tableSpecific != null && tableSpecific.multiLine.HasValue)
-                {
-                    tre.multiLine = tableSpecific.multiLine.Value;
-                }
-            }
+            var tableSpecific = (TableSpecificParameters) parameters?.shapeParameters;
+            tre.multiLine = tableSpecific?.multiLine ?? false;
             return fed;
         }
 
@@ -349,7 +324,8 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
                                                 out bool multiLine)
         {
             multiLine = tableBody.defaultDefinition.multiLine;
-            if (tableBody.optionalDefinitionList.Count == 0)
+            List<TableRowDefinition> tableBodyOptionalDefinitionList = tableBody.optionalDefinitionList;
+            if (tableBodyOptionalDefinitionList.Count == 0)
             {
                 // we do not have any override, use default
                 return tableBody.defaultDefinition.rowItemDefinitionList;
@@ -359,16 +335,18 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             TableRowDefinition matchingRowDefinition = null;
 
             var typeNames = so.InternalTypeNames;
-            TypeMatch match = new TypeMatch(expressionFactory, this.dataBaseInfo.db, typeNames);
+            TypeMatch match = new TypeMatch(expressionFactory, dataBaseInfo.db, typeNames);
 
-            foreach (TableRowDefinition x in tableBody.optionalDefinitionList)
+            for (var index = 0; index < tableBodyOptionalDefinitionList.Count; index++)
             {
+                TableRowDefinition x = tableBodyOptionalDefinitionList[index];
                 if (match.PerfectMatch(new TypeMatchItem(x, x.appliesTo)))
                 {
                     matchingRowDefinition = x;
                     break;
                 }
             }
+
             if (matchingRowDefinition == null)
             {
                 matchingRowDefinition = match.BestMatch as TableRowDefinition;
@@ -379,9 +357,9 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
                 Collection<string> typesWithoutPrefix = Deserializer.MaskDeserializationPrefix(typeNames);
                 if (typesWithoutPrefix != null)
                 {
-                    match = new TypeMatch(expressionFactory, this.dataBaseInfo.db, typesWithoutPrefix);
+                    match = new TypeMatch(expressionFactory, dataBaseInfo.db, typesWithoutPrefix);
 
-                    foreach (TableRowDefinition x in tableBody.optionalDefinitionList)
+                    foreach (TableRowDefinition x in tableBodyOptionalDefinitionList)
                     {
                         if (match.PerfectMatch(new TypeMatchItem(x, x.appliesTo)))
                         {
@@ -407,21 +385,15 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
                 multiLine = matchingRowDefinition.multiLine;
 
             // we have an override, we need to compute the merge of the active cells
-            List<TableRowItemDefinition> activeRowItemDefinitionList = new List<TableRowItemDefinition>();
+            var activeRowItemDefinitionList = new List<TableRowItemDefinition>();
             int col = 0;
-            foreach (TableRowItemDefinition rowItem in matchingRowDefinition.rowItemDefinitionList)
+            List<TableRowItemDefinition> tableRowItemDefinitions = matchingRowDefinition.rowItemDefinitionList;
+            for (var index = 0; index < tableRowItemDefinitions.Count; index++)
             {
+                TableRowItemDefinition rowItem = tableRowItemDefinitions[index];
                 // check if the row is an override or not
-                if (rowItem.formatTokenList.Count == 0)
-                {
-                    // it's a place holder, use the default
-                    activeRowItemDefinitionList.Add(tableBody.defaultDefinition.rowItemDefinitionList[col]);
-                }
-                else
-                {
-                    // use the override
-                    activeRowItemDefinitionList.Add(rowItem);
-                }
+                var tableRowItemDefinition = rowItem.formatTokenList.Count == 0 ? tableBody.defaultDefinition.rowItemDefinitionList[col] : rowItem;
+                activeRowItemDefinitionList.Add(tableRowItemDefinition);
                 col++;
             }
 
@@ -433,8 +405,9 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             TableRowEntry tre = new TableRowEntry();
 
             List<TableRowItemDefinition> activeRowItemDefinitionList = GetActiveTableRowDefinition(_tableBody, so, out tre.multiLine);
-            foreach (TableRowItemDefinition rowItem in activeRowItemDefinitionList)
+            for (var index = 0; index < activeRowItemDefinitionList.Count; index++)
             {
+                TableRowItemDefinition rowItem = activeRowItemDefinitionList[index];
                 FormatPropertyField fpf = GenerateFormatPropertyField(rowItem.formatTokenList, so, enumerationLimit);
 
                 // get the alignment from the row entry
@@ -450,16 +423,19 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
         private TableRowEntry GenerateTableRowEntryFromFromProperties(PSObject so, int enumerationLimit)
         {
             TableRowEntry tre = new TableRowEntry();
-            for (int k = 0; k < this.activeAssociationList.Count; k++)
+            for (int k = 0; k < activeAssociationList.Count; k++)
             {
-                FormatPropertyField fpf = new FormatPropertyField();
                 FieldFormattingDirective directive = null;
                 if (activeAssociationList[k].OriginatingParameter != null)
                 {
                     directive = activeAssociationList[k].OriginatingParameter.GetEntry(FormatParameterDefinitionKeys.FormatStringEntryKey) as FieldFormattingDirective;
                 }
-                fpf.propertyValue = this.GetExpressionDisplayValue(so, enumerationLimit, this.activeAssociationList[k].ResolvedExpression, directive);
-                tre.formatPropertyFieldList.Add(fpf);
+
+                var formatPropertyField = new FormatPropertyField
+                {
+                    propertyValue = GetExpressionDisplayValue(so, enumerationLimit, activeAssociationList[k].ResolvedExpression, directive)
+                };
+                tre.formatPropertyFieldList.Add(formatPropertyField);
             }
             return tre;
         }
