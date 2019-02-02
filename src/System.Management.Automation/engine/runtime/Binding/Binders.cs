@@ -5382,7 +5382,7 @@ namespace System.Management.Automation.Language
 
             // If the target value is actually a deserialized PSObject, we should use the original value
             var psobj = value as PSObject;
-            if (psobj != null && psobj != AutomationNull.Value && !psobj.isDeserialized)
+            if (psobj != null && psobj != AutomationNull.Value && !psobj.IsDeserialized)
             {
                 expr = Expression.Call(CachedReflectionInfo.PSObject_Base, expr);
                 value = PSObject.Base(value);
@@ -5646,7 +5646,7 @@ namespace System.Management.Automation.Language
             //
             // - If not, we want to use the base object, so that we might generate optimized code.
             var psobj = target.Value as PSObject;
-            bool isTargetDeserializedObject = (psobj != null) && (psobj.isDeserialized);
+            bool isTargetDeserializedObject = (psobj != null) && (psobj.IsDeserialized);
             object value = isTargetDeserializedObject ? target.Value : PSObject.Base(target.Value);
 
             var adapterSet = PSObject.GetMappedAdapter(value, typeTable);
@@ -6757,7 +6757,7 @@ namespace System.Management.Automation.Language
                     // If we get here, then the target value should have 'isDeserialized == false', otherwise we cannot get a .NET methodInfo
                     // from _getMemberBinder.GetPSMemberInfo(). This is because when 'isDeserialized' is true, we use the PSObject to find the
                     // corresponding Adapter -- PSObjectAdapter, which cannot be optimized.
-                    Diagnostics.Assert(psObj.isDeserialized == false,
+                    Diagnostics.Assert(psObj.IsDeserialized == false,
                         "isDeserialized should be false, because if not, we cannot get a .NET method/parameterizedProperty from GetPSMemberInfo");
 
                     restrictions = restrictions.Merge(BindingRestrictions.GetExpressionRestriction(

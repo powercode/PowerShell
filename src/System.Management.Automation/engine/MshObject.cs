@@ -113,7 +113,7 @@ namespace System.Management.Automation
 
         private static T AdapterGetMemberDelegate<T>(PSObject msjObj, string name) where T : PSMemberInfo
         {
-            if (msjObj.isDeserialized)
+            if (msjObj.IsDeserialized)
             {
                 if (msjObj.adaptedMembers == null)
                 {
@@ -152,7 +152,7 @@ namespace System.Management.Automation
 
         private static PSMemberInfoInternalCollection<T> AdapterGetMembersDelegate<T>(PSObject msjObj) where T : PSMemberInfo
         {
-            if (msjObj.isDeserialized)
+            if (msjObj.IsDeserialized)
             {
                 if (msjObj.adaptedMembers == null)
                 {
@@ -579,8 +579,6 @@ namespace System.Management.Automation
         private PSMemberInfoIntegratingCollection<PSPropertyInfo> _properties;
         private PSMemberInfoIntegratingCollection<PSMethodInfo> _methods;
 
-
-
         /// <summary>
         /// If this is non-null return this string as the ToString() for this wrapped object.
         /// </summary>
@@ -598,25 +596,13 @@ namespace System.Management.Automation
         /// </summary>
         internal PSMemberInfoInternalCollection<PSPropertyInfo> clrMembers;
 
-        /// <summary>
-        /// Indicate whether we store the instance members and type names locally
-        /// for this PSObject instance.
-        /// </summary>
-        private bool _storeTypeNameAndInstanceMembersLocally;
-
-        /// <summary>
-        /// This flag is set to true in deserialized shellobject.
-        /// </summary>
-        internal bool isDeserialized;
-        internal bool preserveToString;
-        internal bool preserveToStringSet;
-        private bool _isHelpObject;
-        /// <summary>
-        /// Set to true when the BaseObject is PSCustomObject.
-        /// </summary>
         internal bool immediateBaseObjectIsEmpty;
 
+        private PSObjectFlags _flags;
+
         #endregion instance fields
+
+
 
         internal static PSTraceSource memberResolution = PSTraceSource.GetTracer("MemberResolution", "Traces the resolution from member name to the member. A member can be a property, method, etc.", false);
 
@@ -1051,8 +1037,10 @@ namespace System.Management.Automation
                 return so;
             }
 
-            return new PSObject(obj) { _storeTypeNameAndInstanceMembersLocally = storeTypeNameAndInstanceMembersLocally };
+            return new PSObject(obj) { StoreTypeNameAndInstanceMembersLocally = storeTypeNameAndInstanceMembersLocally };
         }
+
+
 
         /// <summary>
         /// Returns an object that should be used as a key for getting 1) instance members and 2) type names
@@ -1078,7 +1066,7 @@ namespace System.Management.Automation
 
             if (psObjectAboveBase.ImmediateBaseObject is PSCustomObject
                 || psObjectAboveBase.ImmediateBaseObject is string
-                || pso._storeTypeNameAndInstanceMembersLocally)
+                || pso.StoreTypeNameAndInstanceMembersLocally)
             {
                 return psObjectAboveBase;
             }
@@ -1562,12 +1550,12 @@ namespace System.Management.Automation
             if (this.BaseObject is PSCustomObject)
             {
                 returnValue._immediateBaseObject = PSCustomObject.SelfInstance;
-                returnValue.immediateBaseObjectIsEmpty = true;
+                returnValue.ImmediateBaseObjectIsEmpty = true;
             }
             else
             {
                 returnValue._immediateBaseObject = _immediateBaseObject;
-                returnValue.immediateBaseObjectIsEmpty = false;
+                returnValue.ImmediateBaseObjectIsEmpty = false;
             }
 
             // Instance members will be recovered as necessary through the resurrection table.
@@ -1614,7 +1602,7 @@ namespace System.Management.Automation
                 }
             }
 
-            returnValue.hasGeneratedReservedMembers = false;
+            returnValue.HasGeneratedReservedMembers = false;
 
             return returnValue;
         }
@@ -1981,7 +1969,7 @@ namespace System.Management.Automation
 
         internal bool ShouldSerializeAdapter()
         {
-            if (this.isDeserialized)
+            if (this.IsDeserialized)
             {
                 return this.adaptedMembers != null;
             }
@@ -1996,7 +1984,7 @@ namespace System.Management.Automation
 
         private PSMemberInfoInternalCollection<PSPropertyInfo> GetProperties(PSMemberInfoInternalCollection<PSPropertyInfo> serializedMembers, Adapter particularAdapter)
         {
-            if (this.isDeserialized)
+            if (this.IsDeserialized)
             {
                 return serializedMembers;
             }
@@ -2013,9 +2001,9 @@ namespace System.Management.Automation
 
         internal static void CopyDeserializerFields(PSObject source, PSObject target)
         {
-            if (!target.isDeserialized)
+            if (!target.IsDeserialized)
             {
-                target.isDeserialized = source.isDeserialized;
+                target.IsDeserialized = source.IsDeserialized;
                 target.adaptedMembers = source.adaptedMembers;
                 target.clrMembers = source.clrMembers;
             }
@@ -2046,27 +2034,6 @@ namespace System.Management.Automation
             }
         }
 
-
-        internal bool PreserveToString
-        {
-            get
-            {
-                if (preserveToStringSet)
-                {
-                    return preserveToString;
-                }
-
-                preserveToStringSet = true;
-                if (InternalTypeNames.Count == 0)
-                {
-                    return false;
-                }
-
-                preserveToString = false;
-
-                return preserveToString;
-            }
-        }
 
         /// <summary>
         /// Sets the to string value on deserialization.
@@ -2299,16 +2266,148 @@ namespace System.Management.Automation
 
         #endregion
 
-        #region Help formatting
+        internal bool IsDeserialized
+        {
+            get => _flags.HasFlag(PSObjectFlags.IsDeserialized);
+            set
+            {
+                if (value)
+                {
+                    _flags |= PSObjectFlags.IsDeserialized;
+                }
+                else
+                {
+                    _flags &= ~PSObjectFlags.IsDeserialized;
+                }
+            }
+        }
+
+        private bool StoreTypeNameAndInstanceMembersLocally
+        {
+            get => _flags.HasFlag(PSObjectFlags.StoreTypeNameAndInstanceMembersLocally);
+            set
+            {
+                if (value)
+                {
+                    _flags |= PSObjectFlags.StoreTypeNameAndInstanceMembersLocally;
+                }
+                else
+                {
+                    _flags &= ~PSObjectFlags.StoreTypeNameAndInstanceMembersLocally;
+                }
+            }
+        }
 
         internal bool IsHelpObject
         {
-            get => _isHelpObject;
-            set => _isHelpObject = value;
+            get => _flags.HasFlag(PSObjectFlags.IsHelpObject);
+            set
+            {
+                if (value)
+                {
+                    _flags |= PSObjectFlags.IsHelpObject;
+                }
+                else
+                {
+                    _flags &= ~PSObjectFlags.IsHelpObject;
+                }
+            }
         }
 
-        #endregion
-    }
+        internal bool HasGeneratedReservedMembers
+        {
+            get => _flags.HasFlag(PSObjectFlags.HasGeneratedReservedMembers);
+            set
+            {
+                if (value)
+                {
+                    _flags |= PSObjectFlags.HasGeneratedReservedMembers;
+                }
+                else
+                {
+                    _flags &= ~PSObjectFlags.HasGeneratedReservedMembers;
+                }
+            }
+        }
+
+        private bool ImmediateBaseObjectIsEmpty
+        {
+            get => _flags.HasFlag(PSObjectFlags.ImmediateBaseObjectIsEmpty);
+            set
+            {
+                if (value)
+                {
+                    _flags |= PSObjectFlags.ImmediateBaseObjectIsEmpty;
+                }
+                else
+                {
+                    _flags &= ~PSObjectFlags.ImmediateBaseObjectIsEmpty;
+                }
+            }
+        }
+
+        private bool PreserveToString
+        {
+            get
+            {
+                //get => _flags.HasFlag(PSObjectFlags.PreserveToString);
+                if (PreserveToStringSet)
+                {
+                    return _flags.HasFlag(PSObjectFlags.PreserveToString);
+                }
+
+                PreserveToStringSet = true;
+                if (InternalTypeNames.Count == 0)
+                {
+                    return false;
+                }
+
+                _flags &= ~PSObjectFlags.PreserveToString;
+
+                return _flags.HasFlag(PSObjectFlags.PreserveToString);
+            }
+        }
+
+        private bool PreserveToStringSet
+        {
+            get => _flags.HasFlag(PSObjectFlags.PreserveToStringSet);
+            set
+            {
+                if (value)
+                {
+                    _flags |= PSObjectFlags.PreserveToStringSet;
+                }
+                else
+                {
+                    _flags &= ~PSObjectFlags.PreserveToStringSet;
+                }
+            }
+        }
+
+
+        [Flags]
+        enum PSObjectFlags : byte
+        {
+            /// <summary>
+            /// This flag is set in deserialized shellobject.
+            /// </summary>
+            IsDeserialized = 0b00000001,
+            PreserveToString = 0b00000010,
+            PreserveToStringSet = 0b00000100,
+            /// <summary>
+            /// Set to true when the BaseObject is PSCustomObject.
+            /// </summary>
+            HasGeneratedReservedMembers = 0b00001000,
+            ImmediateBaseObjectIsEmpty = 0b00010000,
+            IsHelpObject = 0b00100000,
+            /// <summary>
+            /// Indicate whether we store the instance members and type names locally
+            /// for this PSObject instance.
+            /// </summary>
+            StoreTypeNameAndInstanceMembersLocally = 0b01000000,
+        }
+
+}
 
     /// <summary>
     /// Serves as a placeholder BaseObject when PSObject's

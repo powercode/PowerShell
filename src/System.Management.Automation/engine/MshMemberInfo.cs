@@ -3329,7 +3329,7 @@ namespace System.Management.Automation
 
         private void GenerateInternalMembersFromBase()
         {
-            if (_psObject.isDeserialized)
+            if (_psObject.IsDeserialized)
             {
                 if (_psObject.clrMembers != null)
                 {
@@ -3353,7 +3353,7 @@ namespace System.Management.Automation
         {
             PSMemberInfoInternalCollection<PSMemberInfo> retVal = new PSMemberInfoInternalCollection<PSMemberInfo>();
 
-            if (_psObject.isDeserialized)
+            if (_psObject.IsDeserialized)
             {
                 if (_psObject.adaptedMembers != null)
                 {
@@ -4382,9 +4382,9 @@ namespace System.Management.Automation
 
         private void GenerateAllReservedMembers()
         {
-            if (!_mshOwner.hasGeneratedReservedMembers)
+            if (!_mshOwner.HasGeneratedReservedMembers)
             {
-                _mshOwner.hasGeneratedReservedMembers = true;
+                _mshOwner.HasGeneratedReservedMembers = true;
                 ReservedNameMembers.GeneratePSExtendedMemberSet(_mshOwner);
                 ReservedNameMembers.GeneratePSBaseMemberSet(_mshOwner);
                 ReservedNameMembers.GeneratePSObjectMemberSet(_mshOwner);
