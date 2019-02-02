@@ -1037,19 +1037,17 @@ namespace Microsoft.PowerShell.Commands
             }
 
             // Add note properties for this session if they don't already exist.
-            if (psObject.Properties[RemotingConstants.ComputerNameNoteProperty] == null)
+            if (psObject.RemotingComputerName == null)
             {
-                psObject.Properties.Add(new PSNoteProperty(RemotingConstants.ComputerNameNoteProperty, session.ComputerName));
+                psObject.RemotingComputerName = session.ComputerName;
             }
-
-            if (psObject.Properties[RemotingConstants.RunspaceIdNoteProperty] == null)
+            if (psObject.RemotingRunspaceId != Guid.Empty)
             {
-                psObject.Properties.Add(new PSNoteProperty(RemotingConstants.RunspaceIdNoteProperty, session.InstanceId));
+                psObject.RemotingRunspaceId = session.InstanceId;
             }
-
-            if (psObject.Properties[RemotingConstants.ShowComputerNameNoteProperty] == null)
+            if (!psObject.RemotingShowComputerName)
             {
-                psObject.Properties.Add(new PSNoteProperty(RemotingConstants.ShowComputerNameNoteProperty, true));
+                psObject.RemotingShowComputerName = true;
             }
 
             WriteObject(psObject);

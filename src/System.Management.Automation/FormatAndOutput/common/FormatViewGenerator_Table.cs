@@ -86,10 +86,10 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             Diagnostics.Assert(so != null, "so cannot be null");
 
             // make sure computername property exists.
-            Diagnostics.Assert(so.Properties[RemotingConstants.ComputerNameNoteProperty] != null,
+            Diagnostics.Assert(so.RemotingComputerName != null,
                 "PrepareForRemoteObjects cannot be called when the object does not contain ComputerName property.");
 
-            if ((dataBaseInfo != null) && (dataBaseInfo.view != null) && (dataBaseInfo.view.mainControl != null))
+            if (dataBaseInfo?.view?.mainControl != null)
             {
                 // dont change the original format definition in the database..just make a copy and work
                 // with the copy

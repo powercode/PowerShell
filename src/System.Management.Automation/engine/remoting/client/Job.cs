@@ -3045,24 +3045,13 @@ namespace System.Management.Automation
                     // want to trust, we simply replace them with the server's
                     // identity we know of
 
-                    if (dataObject.Properties[RemotingConstants.ComputerNameNoteProperty] != null)
-                    {
-                        dataObject.Properties.Remove(RemotingConstants.ComputerNameNoteProperty);
-                    }
-
-                    if (dataObject.Properties[RemotingConstants.RunspaceIdNoteProperty] != null)
-                    {
-                        dataObject.Properties.Remove(RemotingConstants.RunspaceIdNoteProperty);
-                    }
-
-                    dataObject.Properties.Add(new PSNoteProperty(RemotingConstants.ComputerNameNoteProperty, reader.ComputerName));
-                    dataObject.Properties.Add(new PSNoteProperty(RemotingConstants.RunspaceIdNoteProperty, reader.RunspaceId));
+                    dataObject.RemotingComputerName = reader.ComputerName;
+                    dataObject.RemotingRunspaceId = reader.RunspaceId;
                     // PSShowComputerName is present for all the objects (from remoting)..this is to allow PSComputerName to be selected.
                     // Ex: Invoke-Command localhost,blah { gps } | select PSComputerName should work.
-                    if (dataObject.Properties[RemotingConstants.ShowComputerNameNoteProperty] == null)
+                    if (!dataObject.RemotingShowComputerName)
                     {
-                        PSNoteProperty showComputerNameNP = new PSNoteProperty(RemotingConstants.ShowComputerNameNoteProperty, !_hideComputerName);
-                        dataObject.Properties.Add(showComputerNameNP);
+                        dataObject.RemotingShowComputerName = !_hideComputerName;
                     }
                 }
 

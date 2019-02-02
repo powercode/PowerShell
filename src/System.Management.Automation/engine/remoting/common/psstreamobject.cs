@@ -477,12 +477,6 @@ namespace System.Management.Automation.Remoting.Internal
         internal static void AddSourceJobNoteProperty(PSObject psObj, Guid instanceId)
         {
             Dbg.Assert(psObj != null, "psObj is null trying to add a note property.");
-            if (psObj.Properties[RemotingConstants.SourceJobInstanceId] != null)
-            {
-                psObj.Properties.Remove(RemotingConstants.SourceJobInstanceId);
-            }
-
-            psObj.Properties.Add(new PSNoteProperty(RemotingConstants.SourceJobInstanceId, instanceId));
         }
 
         internal static string CreateInformationalMessage(Guid instanceId, string message)

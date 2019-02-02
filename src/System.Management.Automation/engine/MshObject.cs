@@ -601,6 +601,7 @@ namespace System.Management.Automation
 
         private PSObjectFlags _flags;
         private WriteStreamType _writeStream;
+        private RemotingProperties _remotingPropertiesSet;
 
         #endregion instance fields
 
@@ -2269,6 +2270,118 @@ namespace System.Management.Automation
 
         #endregion
 
+        #region Remoting
+        internal RemotingProperties RemotingProperties => _remotingPropertiesSet;
+
+        internal string RemotingComputerName
+        {
+            get => _remotingPropertiesSet.HasFlag(RemotingProperties.ComputerName)
+                     ? (string) Properties[RemotingConstants.ComputerNameNoteProperty]?.Value
+                     : null;
+            set
+            {
+                if (_remotingPropertiesSet.HasFlag(RemotingProperties.ComputerName))
+                {
+                    var psPropertyInfo = Properties[RemotingConstants.ComputerNameNoteProperty];
+                    if (psPropertyInfo != null)
+                    {
+                        psPropertyInfo.Value = value;
+                        return;
+                    }
+                }
+
+                Properties.Add(new PSNoteProperty(RemotingConstants.ComputerNameNoteProperty, value));
+                _remotingPropertiesSet |= RemotingProperties.ComputerName;
+            }
+
+        }
+
+        internal bool RemotingShowComputerName
+        {
+            get
+            {
+                if (_remotingPropertiesSet.HasFlag(RemotingProperties.ShowComputerName))
+                {
+                    var value = Properties[RemotingConstants.ShowComputerNameNoteProperty]?.Value;
+                    return (bool?)value ?? false;
+                }
+
+                return false;
+            }
+            set
+            {
+                Properties.Add(new PSNoteProperty(RemotingConstants.ComputerNameNoteProperty, value));
+                _remotingPropertiesSet |= RemotingProperties.ShowComputerName;
+            }
+        }
+
+        internal Guid RemotingRunspaceId
+        {
+            get
+            {
+                if (_remotingPropertiesSet.HasFlag(RemotingProperties.RunspaceId))
+                {
+                    var id= Properties[RemotingConstants.RunspaceIdNoteProperty]?.Value;
+                    return (Guid?) id ?? Guid.Empty;
+                }
+
+                return Guid.Empty;
+            }
+            set
+            {
+                if (_remotingPropertiesSet.HasFlag(RemotingProperties.RunspaceId))
+                {
+                    var psPropertyInfo = Properties[RemotingConstants.RunspaceIdNoteProperty];
+                    if (psPropertyInfo != null)
+                    {
+                        psPropertyInfo.Value = value;
+                        return;
+                    }
+                }
+                Properties.Add(new PSNoteProperty(RemotingConstants.RunspaceIdNoteProperty, value));
+                _remotingPropertiesSet |= RemotingProperties.RunspaceId;
+            }
+        }
+
+        internal Guid RemotingSourceJobInstanceId
+        {
+            get
+            {
+                if (_remotingPropertiesSet.HasFlag(RemotingProperties.SourceJobInstanceId))
+                {
+                    var id = Properties[RemotingConstants.SourceJobInstanceId]?.Value;
+                    return (Guid?)id ?? Guid.Empty;
+                }
+
+                return Guid.Empty;
+            }
+            set
+            {
+                Properties.Add(new PSNoteProperty(RemotingConstants.SourceJobInstanceId, value));
+                _remotingPropertiesSet |= RemotingProperties.SourceJobInstanceId;
+            }
+        }
+
+        internal int RemotingSourceLength
+        {
+            get
+            {
+                if (_remotingPropertiesSet.HasFlag(RemotingProperties.SourceLength))
+                {
+                    var id = Properties[RemotingConstants.SourceLength]?.Value;
+                    return (int?)id ?? 0;
+                }
+
+                return 0;
+            }
+            set
+            {
+                Properties.Add(new PSNoteProperty(RemotingConstants.SourceLength, value));
+                _remotingPropertiesSet |= RemotingProperties.SourceLength;
+            }
+        }
+        #endregion
+
         internal bool IsDeserialized
         {
             get => _flags.HasFlag(PSObjectFlags.IsDeserialized);
@@ -2396,6 +2509,7 @@ namespace System.Management.Automation
         [Flags]
         enum PSObjectFlags : byte
         {
+            None = 0,
             /// <summary>
             /// This flag is set in deserialized shellobject.
             /// </summary>
@@ -2428,6 +2542,16 @@ namespace System.Management.Automation
         Verbose,
         Debug,
         Information
+    }
+
+    [Flags]
+    internal enum RemotingProperties : byte {
+        None =0,
+        ComputerName = 0b00000001,
+        ShowComputerName = 0b00000010,
+        RunspaceId = 0b00000100,
+        SourceJobInstanceId = 0b00001000,
+        SourceLength = 0b00010000,
     }
 
     /// <summary>

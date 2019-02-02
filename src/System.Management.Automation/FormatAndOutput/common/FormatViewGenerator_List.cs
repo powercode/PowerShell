@@ -26,7 +26,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
                                     PSObject so, TypeInfoDataBase db, FormattingCommandLineParameters parameters)
         {
             base.Initialize(errorContext, expressionFactory, so, db, parameters);
-            if ((this.dataBaseInfo != null) && (this.dataBaseInfo.view != null))
+            if (dataBaseInfo?.view != null)
             {
                 _listBody = (ListControlBody)this.dataBaseInfo.view.mainControl;
             }
@@ -45,18 +45,24 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             Diagnostics.Assert(so != null, "so cannot be null");
 
             // make sure computername property exists.
-            Diagnostics.Assert(so.Properties[RemotingConstants.ComputerNameNoteProperty] != null,
+            Diagnostics.Assert(so.RemotingComputerName != null,
                 "PrepareForRemoteObjects cannot be called when the object does not contain ComputerName property.");
 
-            if ((dataBaseInfo != null) && (dataBaseInfo.view != null) && (dataBaseInfo.view.mainControl != null))
+            if (dataBaseInfo?.view?.mainControl != null)
             {
                 _listBody = (ListControlBody)this.dataBaseInfo.view.mainControl.Copy();
                 // build up the definition for computer name.
-                ListControlItemDefinition cnListItemDefinition = new ListControlItemDefinition();
-                cnListItemDefinition.label = new TextToken();
-                cnListItemDefinition.label.text = RemotingConstants.ComputerNameNoteProperty;
-                FieldPropertyToken fpt = new FieldPropertyToken();
-                fpt.expression = new ExpressionToken(RemotingConstants.ComputerNameNoteProperty, false);
+                ListControlItemDefinition cnListItemDefinition = new ListControlItemDefinition
+                {
+                    label = new TextToken
+                    {
+                        text = RemotingConstants.ComputerNameNoteProperty
+                    }
+                };
+                FieldPropertyToken fpt = new FieldPropertyToken
+                {
+                    expression = new ExpressionToken(RemotingConstants.ComputerNameNoteProperty, false)
+                };
                 cnListItemDefinition.formatTokenList.Add(fpt);
 
                 _listBody.defaultEntryDefinition.itemDefinitionList.Add(cnListItemDefinition);

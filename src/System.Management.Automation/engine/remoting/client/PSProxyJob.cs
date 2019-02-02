@@ -2095,10 +2095,9 @@ namespace System.Management.Automation
 
             if (newObject.Properties[RemotingConstants.EventObject] != null)
             {
-                PSPropertyInfo guidProperty = newObject.Properties[RemotingConstants.SourceJobInstanceId];
-                Guid sourceJobId = guidProperty != null ? (Guid)guidProperty.Value : Guid.Empty;
+                Guid sourceJobId = newObject.RemotingSourceJobInstanceId;
 
-                if (guidProperty == null || sourceJobId == Guid.Empty)
+                if (sourceJobId == Guid.Empty)
                 {
                     Diagnostics.Assert(false, "We should not get guidProperty as null or an empty source job id in non interop scenarios");
                     return;
@@ -2141,9 +2140,8 @@ namespace System.Management.Automation
 
         private void SortOutputObject(PSObject newObject)
         {
-            PSPropertyInfo guidProperty = newObject.Properties[RemotingConstants.SourceJobInstanceId];
-            Guid sourceJobId = guidProperty != null ? (Guid)guidProperty.Value : Guid.Empty;
-            if (guidProperty == null || sourceJobId == Guid.Empty || !_childJobsMapping.ContainsKey(sourceJobId))
+            Guid sourceJobId = newObject.RemotingSourceJobInstanceId;
+            if (sourceJobId == Guid.Empty || !_childJobsMapping.ContainsKey(sourceJobId))
             {
                 // If there is no child job matching the source, add it to the parent's collection so that it is not lost.
                 Output.Add(newObject);
@@ -2151,9 +2149,7 @@ namespace System.Management.Automation
             }
 
             // make sure the tag reflects client side job.
-            newObject.Properties.Remove(RemotingConstants.SourceJobInstanceId);
-            newObject.Properties.Add(new PSNoteProperty(RemotingConstants.SourceJobInstanceId,
-                                                        ((PSChildJobProxy)_childJobsMapping[sourceJobId]).InstanceId));
+            newObject.RemotingSourceJobInstanceId = ((PSChildJobProxy)_childJobsMapping[sourceJobId]).InstanceId;
             ((PSChildJobProxy)_childJobsMapping[sourceJobId]).Output.Add(newObject);
         }
 

@@ -1001,27 +1001,12 @@ namespace Microsoft.PowerShell.Cmdletization.Cim
         internal static bool IsShowComputerNameMarkerPresent(CimInstance cimInstance)
         {
             PSObject pso = PSObject.AsPSObject(cimInstance);
-            PSPropertyInfo psShowComputerNameProperty = pso.InstanceMembers[RemotingConstants.ShowComputerNameNoteProperty] as PSPropertyInfo;
-            if (psShowComputerNameProperty == null)
-            {
-                return false;
-            }
-
-            return true.Equals(psShowComputerNameProperty.Value);
+            return pso.RemotingShowComputerName;
         }
 
         internal static void AddShowComputerNameMarker(PSObject pso)
         {
-            PSPropertyInfo psShowComputerNameProperty = pso.InstanceMembers[RemotingConstants.ShowComputerNameNoteProperty] as PSPropertyInfo;
-            if (psShowComputerNameProperty != null)
-            {
-                psShowComputerNameProperty.Value = true;
-            }
-            else
-            {
-                psShowComputerNameProperty = new PSNoteProperty(RemotingConstants.ShowComputerNameNoteProperty, true);
-                pso.InstanceMembers.Add(psShowComputerNameProperty);
-            }
+            pso.RemotingShowComputerName = true;
         }
 
         internal override void WriteObject(object outputObject)
@@ -1054,7 +1039,7 @@ namespace Microsoft.PowerShell.Cmdletization.Cim
                 AddShowComputerNameMarker(pso);
                 if (cimInstance == null)
                 {
-                    pso.Properties.Add(new PSNoteProperty(RemotingConstants.ComputerNameNoteProperty, this.JobContext.Session.ComputerName));
+                    pso.RemotingComputerName = this.JobContext.Session.ComputerName;
                 }
             }
 

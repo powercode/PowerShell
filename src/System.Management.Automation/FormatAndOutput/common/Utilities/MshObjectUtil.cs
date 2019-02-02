@@ -503,15 +503,9 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             {
                 try
                 {
-                    PSPropertyInfo computerNameProperty = so.Properties[RemotingConstants.ComputerNameNoteProperty];
-                    PSPropertyInfo showComputerNameProperty = so.Properties[RemotingConstants.ShowComputerNameNoteProperty];
-
-                    // if computer name property exists then this must be a remote object. see
-                    // if it can be displayed.
-                    if ((computerNameProperty != null) && (showComputerNameProperty != null))
-                    {
-                        LanguagePrimitives.TryConvertTo<bool>(showComputerNameProperty.Value, out result);
-                    }
+                    var computerName = so.RemotingComputerName;
+                    var showComputerName = so.RemotingShowComputerName;
+                    result = showComputerName && computerName != null;
                 }
                 catch (ArgumentException)
                 {
