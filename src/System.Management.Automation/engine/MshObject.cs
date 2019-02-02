@@ -2362,24 +2362,6 @@ namespace System.Management.Automation
             }
         }
 
-        internal int RemotingSourceLength
-        {
-            get
-            {
-                if (_remotingPropertiesSet.HasFlag(RemotingProperties.SourceLength))
-                {
-                    var id = Properties[RemotingConstants.SourceLength]?.Value;
-                    return (int?)id ?? 0;
-                }
-
-                return 0;
-            }
-            set
-            {
-                Properties.Add(new PSNoteProperty(RemotingConstants.SourceLength, value));
-                _remotingPropertiesSet |= RemotingProperties.SourceLength;
-            }
-        }
         #endregion
 
         internal bool IsDeserialized
@@ -2551,7 +2533,6 @@ namespace System.Management.Automation
         ShowComputerName = 0b00000010,
         RunspaceId = 0b00000100,
         SourceJobInstanceId = 0b00001000,
-        SourceLength = 0b00010000,
     }
 
     /// <summary>
