@@ -194,10 +194,6 @@ namespace System.Management.Automation
             return null;
         }
 
-        private static readonly Collection<CollectionEntry<PSMemberInfo>> s_memberCollection = GetMemberCollection(PSMemberViewTypes.All);
-        private static readonly Collection<CollectionEntry<PSMethodInfo>> s_methodCollection = GetMethodCollection();
-        private static readonly Collection<CollectionEntry<PSPropertyInfo>> s_propertyCollection = GetPropertyCollection(PSMemberViewTypes.All);
-
         /// <summary>
         /// A collection of delegates to get Extended/Adapted/Dotnet members based on the
         /// <paramref name="viewType"/>
@@ -373,26 +369,6 @@ namespace System.Management.Automation
             var context = LocalPipeline.GetExecutionContextFromTLS();
             _typeTable = context?.TypeTableWeakReference;
         }
-
-        internal static readonly DotNetAdapter dotNetInstanceAdapter = new DotNetAdapter();
-        private static readonly DotNetAdapter s_baseAdapterForAdaptedObjects = new BaseDotNetAdapterForAdaptedObjects();
-        internal static readonly DotNetAdapter dotNetStaticAdapter = new DotNetAdapter(true);
-
-        private static readonly AdapterSet s_dotNetInstanceAdapterSet = new AdapterSet(dotNetInstanceAdapter, null);
-        private static readonly AdapterSet s_mshMemberSetAdapter = new AdapterSet(new PSMemberSetAdapter(), null);
-        private static readonly AdapterSet s_mshObjectAdapter = new AdapterSet(new PSObjectAdapter(), null);
-        private static readonly PSObject.AdapterSet s_cimInstanceAdapter =
-            new PSObject.AdapterSet(new ThirdPartyAdapter(typeof(Microsoft.Management.Infrastructure.CimInstance),
-                                                          new Microsoft.PowerShell.Cim.CimInstanceAdapter()),
-                                    PSObject.dotNetInstanceAdapter);
-#if !UNIX
-        private static readonly AdapterSet s_managementObjectAdapter = new AdapterSet(new ManagementObjectAdapter(), dotNetInstanceAdapter);
-        private static readonly AdapterSet s_managementClassAdapter = new AdapterSet(new ManagementClassApdapter(), dotNetInstanceAdapter);
-        private static readonly AdapterSet s_directoryEntryAdapter = new AdapterSet(new DirectoryEntryAdapter(), dotNetInstanceAdapter);
-#endif
-        private static readonly AdapterSet s_dataRowViewAdapter = new AdapterSet(new DataRowViewAdapter(), s_baseAdapterForAdaptedObjects);
-        private static readonly AdapterSet s_dataRowAdapter = new AdapterSet(new DataRowAdapter(), s_baseAdapterForAdaptedObjects);
-        private static readonly AdapterSet s_xmlNodeAdapter = new AdapterSet(new XmlNodeAdapter(), s_baseAdapterForAdaptedObjects);
 
         #region Adapter Mappings
 
@@ -583,12 +559,12 @@ namespace System.Management.Automation
         #region fields
 
         #region instance fields
-        private readonly object _lockObject = new Object();
 
-        /// <summary>
-        /// If this is non-null return this string as the ToString() for this wrapped object.
-        /// </summary>
-        internal string TokenText;
+        private readonly object _lockObject = new Object();
+        // This is toString value set on deserialization
+        private string _toStringFromDeserialization = null;
+
+        private ConsolidatedString _typeNames;
 
         /// <summary>
         /// This is the main field in the class representing
@@ -597,6 +573,106 @@ namespace System.Management.Automation
         private object _immediateBaseObject;
 
         private WeakReference<TypeTable> _typeTable;
+        private AdapterSet _adapterSet;
+        private PSMemberInfoInternalCollection<PSMemberInfo> _instanceMembers;
+        private PSMemberInfoIntegratingCollection<PSMemberInfo> _members;
+        private PSMemberInfoIntegratingCollection<PSPropertyInfo> _properties;
+        private PSMemberInfoIntegratingCollection<PSMethodInfo> _methods;
+
+
+
+        /// <summary>
+        /// If this is non-null return this string as the ToString() for this wrapped object.
+        /// </summary>
+        internal string TokenText;
+
+        /// <summary>
+        /// Members from the adapter of the object before it was serialized
+        /// Null for live objects but not null for deserialized objects.
+        /// </summary>
+        internal PSMemberInfoInternalCollection<PSPropertyInfo> adaptedMembers;
+
+        /// <summary>
+        /// Members from the adapter of the object before it was serialized
+        /// Null for live objects but not null for deserialized objects.
+        /// </summary>
+        internal PSMemberInfoInternalCollection<PSPropertyInfo> clrMembers;
+
+        /// <summary>
+        /// Indicate whether we store the instance members and type names locally
+        /// for this PSObject instance.
+        /// </summary>
+        private bool _storeTypeNameAndInstanceMembersLocally;
+
+        /// <summary>
+        /// This flag is set to true in deserialized shellobject.
+        /// </summary>
+        internal bool isDeserialized;
+        internal bool preserveToString;
+        internal bool preserveToStringSet;
+        private bool _isHelpObject;
+        /// <summary>
+        /// Set to true when the BaseObject is PSCustomObject.
+        /// </summary>
+        internal bool immediateBaseObjectIsEmpty;
+
+        #endregion instance fields
+
+        internal static PSTraceSource memberResolution = PSTraceSource.GetTracer("MemberResolution", "Traces the resolution from member name to the member. A member can be a property, method, etc.", false);
+
+        private static readonly ConditionalWeakTable<object, ConsolidatedString> s_typeNamesResurrectionTable = new ConditionalWeakTable<object, ConsolidatedString>();
+
+        private static readonly Collection<CollectionEntry<PSMemberInfo>> s_memberCollection = GetMemberCollection(PSMemberViewTypes.All);
+        private static readonly Collection<CollectionEntry<PSMethodInfo>> s_methodCollection = GetMethodCollection();
+        private static readonly Collection<CollectionEntry<PSPropertyInfo>> s_propertyCollection = GetPropertyCollection(PSMemberViewTypes.All);
+
+        internal static readonly DotNetAdapter dotNetInstanceAdapter = new DotNetAdapter();
+        private static readonly DotNetAdapter s_baseAdapterForAdaptedObjects = new BaseDotNetAdapterForAdaptedObjects();
+        internal static readonly DotNetAdapter dotNetStaticAdapter = new DotNetAdapter(true);
+
+        private static readonly AdapterSet s_dotNetInstanceAdapterSet = new AdapterSet(dotNetInstanceAdapter, null);
+        private static readonly AdapterSet s_mshMemberSetAdapter = new AdapterSet(new PSMemberSetAdapter(), null);
+        private static readonly AdapterSet s_mshObjectAdapter = new AdapterSet(new PSObjectAdapter(), null);
+        private static readonly PSObject.AdapterSet s_cimInstanceAdapter =
+            new PSObject.AdapterSet(new ThirdPartyAdapter(typeof(Microsoft.Management.Infrastructure.CimInstance),
+                                                          new Microsoft.PowerShell.Cim.CimInstanceAdapter()),
+                                    PSObject.dotNetInstanceAdapter);
+#if !UNIX
+        private static readonly AdapterSet s_managementObjectAdapter = new AdapterSet(new ManagementObjectAdapter(), dotNetInstanceAdapter);
+        private static readonly AdapterSet s_managementClassAdapter = new AdapterSet(new ManagementClassApdapter(), dotNetInstanceAdapter);
+        private static readonly AdapterSet s_directoryEntryAdapter = new AdapterSet(new DirectoryEntryAdapter(), dotNetInstanceAdapter);
+#endif
+        private static readonly AdapterSet s_dataRowViewAdapter = new AdapterSet(new DataRowViewAdapter(), s_baseAdapterForAdaptedObjects);
+        private static readonly AdapterSet s_dataRowAdapter = new AdapterSet(new DataRowAdapter(), s_baseAdapterForAdaptedObjects);
+        private static readonly AdapterSet s_xmlNodeAdapter = new AdapterSet(new XmlNodeAdapter(), s_baseAdapterForAdaptedObjects);
+
+        #endregion fields
+
+        #region properties
+
+        internal PSMemberInfoInternalCollection<PSMemberInfo> InstanceMembers
+        {
+            get
+            {
+                if (_instanceMembers == null)
+                {
+                    lock (_lockObject)
+                    {
+                        if (_instanceMembers == null)
+                        {
+                            _instanceMembers =
+                                s_instanceMembersResurrectionTable.GetValue(
+                                    GetKeyForResurrectionTables(this),
+                                    _ => new PSMemberInfoInternalCollection<PSMemberInfo>());
+                        }
+                    }
+                }
+
+                return _instanceMembers;
+            }
+
+            set => _instanceMembers = value;
+        }
 
         /// <summary>
         /// This is the adapter that will depend on the type of baseObject.
@@ -644,97 +720,6 @@ namespace System.Management.Automation
             }
         }
 
-        private AdapterSet _adapterSet;
-
-        internal bool hasGeneratedReservedMembers;
-
-        internal PSMemberInfoInternalCollection<PSMemberInfo> InstanceMembers
-        {
-            get
-            {
-                if (_instanceMembers == null)
-                {
-                    lock (_lockObject)
-                    {
-                        if (_instanceMembers == null)
-                        {
-                            _instanceMembers =
-                                s_instanceMembersResurrectionTable.GetValue(
-                                    GetKeyForResurrectionTables(this),
-                                    _ => new PSMemberInfoInternalCollection<PSMemberInfo>());
-                        }
-                    }
-                }
-
-                return _instanceMembers;
-            }
-
-            set => _instanceMembers = value;
-        }
-
-        private PSMemberInfoInternalCollection<PSMemberInfo> _instanceMembers;
-
-        internal static bool HasInstanceMembers(object obj, out PSMemberInfoInternalCollection<PSMemberInfo> instanceMembers)
-        {
-            if (obj is PSObject psobj)
-            {
-                lock (psobj)
-                {
-                    if (psobj._instanceMembers == null)
-                    {
-                        s_instanceMembersResurrectionTable.TryGetValue(GetKeyForResurrectionTables(psobj),
-                                                                        out psobj._instanceMembers);
-                    }
-                }
-
-                instanceMembers = psobj._instanceMembers;
-            }
-            else if (obj != null)
-            {
-                s_instanceMembersResurrectionTable.TryGetValue(GetKeyForResurrectionTables(obj), out instanceMembers);
-            }
-            else
-            {
-                instanceMembers = null;
-            }
-
-            return instanceMembers != null && instanceMembers.Count > 0;
-        }
-
-        private static readonly ConditionalWeakTable<object, PSMemberInfoInternalCollection<PSMemberInfo>> s_instanceMembersResurrectionTable =
-            new ConditionalWeakTable<object, PSMemberInfoInternalCollection<PSMemberInfo>>();
-
-        /// <summary>
-        /// Indicate whether we store the instance members and type names locally
-        /// for this PSObject instance.
-        /// </summary>
-        private bool _storeTypeNameAndInstanceMembersLocally;
-
-        /// <summary>
-        /// Members from the adapter of the object before it was serialized
-        /// Null for live objects but not null for deserialized objects.
-        /// </summary>
-        internal PSMemberInfoInternalCollection<PSPropertyInfo> adaptedMembers;
-
-        /// <summary>
-        /// Members from the adapter of the object before it was serialized
-        /// Null for live objects but not null for deserialized objects.
-        /// </summary>
-        internal PSMemberInfoInternalCollection<PSPropertyInfo> clrMembers;
-
-        /// <summary>
-        /// Set to true when the BaseObject is PSCustomObject.
-        /// </summary>
-        internal bool immediateBaseObjectIsEmpty;
-
-        internal static PSTraceSource memberResolution = PSTraceSource.GetTracer("MemberResolution", "Traces the resolution from member name to the member. A member can be a property, method, etc.", false);
-
-        #endregion instance fields
-
-        #endregion fields
-
-        #region properties
-
         /// <summary>
         /// Gets the member collection.
         /// </summary>
@@ -756,8 +741,6 @@ namespace System.Management.Automation
                 return _members;
             }
         }
-
-        private PSMemberInfoIntegratingCollection<PSMemberInfo> _members;
 
         /// <summary>
         /// Gets the Property collection, or the members that are actually properties.
@@ -781,7 +764,6 @@ namespace System.Management.Automation
             }
         }
 
-        private PSMemberInfoIntegratingCollection<PSPropertyInfo> _properties;
 
         /// <summary>
         /// Gets the Method collection, or the members that are actually methods.
@@ -804,8 +786,6 @@ namespace System.Management.Automation
                 return _methods;
             }
         }
-
-        private PSMemberInfoIntegratingCollection<PSMethodInfo> _methods;
 
         /// <summary>
         /// Gets the object we are directly wrapping.
@@ -917,12 +897,39 @@ namespace System.Management.Automation
             return s_typeNamesResurrectionTable.TryGetValue(GetKeyForResurrectionTables(obj), out result);
         }
 
-        private ConsolidatedString _typeNames;
-        private static readonly ConditionalWeakTable<object, ConsolidatedString> s_typeNamesResurrectionTable = new ConditionalWeakTable<object, ConsolidatedString>();
-
         #endregion properties
 
         #region static methods
+        internal static bool HasInstanceMembers(object obj, out PSMemberInfoInternalCollection<PSMemberInfo> instanceMembers)
+        {
+            if (obj is PSObject psobj)
+            {
+                lock (psobj)
+                {
+                    if (psobj._instanceMembers == null)
+                    {
+                        s_instanceMembersResurrectionTable.TryGetValue(GetKeyForResurrectionTables(psobj),
+                            out psobj._instanceMembers);
+                    }
+                }
+
+                instanceMembers = psobj._instanceMembers;
+            }
+            else if (obj != null)
+            {
+                s_instanceMembersResurrectionTable.TryGetValue(GetKeyForResurrectionTables(obj), out instanceMembers);
+            }
+            else
+            {
+                instanceMembers = null;
+            }
+
+            return instanceMembers != null && instanceMembers.Count > 0;
+        }
+
+        private static readonly ConditionalWeakTable<object, PSMemberInfoInternalCollection<PSMemberInfo>> s_instanceMembersResurrectionTable =
+            new ConditionalWeakTable<object, PSMemberInfoInternalCollection<PSMemberInfo>>();
+
 
         /// <summary>
         /// </summary>
@@ -2004,11 +2011,6 @@ namespace System.Management.Automation
             return returnValue;
         }
 
-        /// <summary>
-        /// This flag is set to true in deserialized shellobject.
-        /// </summary>
-        internal bool isDeserialized;
-
         internal static void CopyDeserializerFields(PSObject source, PSObject target)
         {
             if (!target.isDeserialized)
@@ -2044,11 +2046,6 @@ namespace System.Management.Automation
             }
         }
 
-        // This is toString value set on deserialization
-        private string _toStringFromDeserialization = null;
-
-        internal bool preserveToString = false;
-        internal bool preserveToStringSet = false;
 
         internal bool PreserveToString
         {
@@ -2310,8 +2307,6 @@ namespace System.Management.Automation
             set => _isHelpObject = value;
         }
 
-        private bool _isHelpObject = false;
-
         #endregion
     }
 
@@ -2347,7 +2342,7 @@ namespace System.Management.Automation
         AllPublicProperties = 0,
         String = 1,
         SpecificProperties = 2
-    };
+    }
 }
 
 #pragma warning restore 56500
