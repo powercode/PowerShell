@@ -22,6 +22,7 @@ using System.Management.Automation.Runspaces;
 using System.Runtime.Serialization;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
+using System.Net;
 using Microsoft.Management.Infrastructure;
 #if !UNIX
 using System.DirectoryServices;
@@ -599,6 +600,7 @@ namespace System.Management.Automation
         internal bool immediateBaseObjectIsEmpty;
 
         private PSObjectFlags _flags;
+        private WriteStreamType _writeStream;
 
         #endregion instance fields
 
@@ -1602,6 +1604,7 @@ namespace System.Management.Automation
                 }
             }
 
+            returnValue._writeStream = _writeStream;
             returnValue.HasGeneratedReservedMembers = false;
 
             return returnValue;
@@ -2384,6 +2387,11 @@ namespace System.Management.Automation
             }
         }
 
+        internal WriteStreamType WriteStream
+        {
+            get => _writeStream;
+            set => _writeStream = value;
+        }
 
         [Flags]
         enum PSObjectFlags : byte
@@ -2408,6 +2416,19 @@ namespace System.Management.Automation
         }
 
 }
+
+    /// <summary>
+    /// Specifies special stream write processing.
+    /// </summary>
+    internal enum WriteStreamType : byte
+    {
+        None,
+        Error,
+        Warning,
+        Verbose,
+        Debug,
+        Information
+    }
 
     /// <summary>
     /// Serves as a placeholder BaseObject when PSObject's
