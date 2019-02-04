@@ -605,8 +605,6 @@ namespace System.Management.Automation
 
         #endregion instance fields
 
-
-
         internal static PSTraceSource memberResolution = PSTraceSource.GetTracer("MemberResolution", "Traces the resolution from member name to the member. A member can be a property, method, etc.", false);
 
         private static readonly ConditionalWeakTable<object, ConsolidatedString> s_typeNamesResurrectionTable = new ConditionalWeakTable<object, ConsolidatedString>();
@@ -1042,7 +1040,6 @@ namespace System.Management.Automation
 
             return new PSObject(obj) { StoreTypeNameAndInstanceMembersLocally = storeTypeNameAndInstanceMembersLocally };
         }
-
 
 
         /// <summary>
@@ -2280,85 +2277,76 @@ namespace System.Management.Automation
                      : null;
             set
             {
-                if (_remotingPropertiesSet.HasFlag(RemotingProperties.ComputerName))
+                var psPropertyInfo = Properties[RemotingConstants.ComputerNameNoteProperty];
+                if (psPropertyInfo == null)
                 {
-                    var psPropertyInfo = Properties[RemotingConstants.ComputerNameNoteProperty];
-                    if (psPropertyInfo != null)
-                    {
-                        psPropertyInfo.Value = value;
-                        return;
-                    }
+                    Properties.Add(new PSNoteProperty(RemotingConstants.ComputerNameNoteProperty, value));
+                    _remotingPropertiesSet |= RemotingProperties.ComputerName;
                 }
-
-                Properties.Add(new PSNoteProperty(RemotingConstants.ComputerNameNoteProperty, value));
-                _remotingPropertiesSet |= RemotingProperties.ComputerName;
+                else
+                {
+                    psPropertyInfo.Value = value;
+                }
             }
 
         }
 
         internal bool RemotingShowComputerName
         {
-            get
-            {
-                if (_remotingPropertiesSet.HasFlag(RemotingProperties.ShowComputerName))
-                {
-                    var value = Properties[RemotingConstants.ShowComputerNameNoteProperty]?.Value;
-                    return (bool?)value ?? false;
-                }
-
-                return false;
-            }
+            get =>_remotingPropertiesSet.HasFlag(RemotingProperties.ShowComputerName) &&
+                ((bool?)Properties[RemotingConstants.ShowComputerNameNoteProperty]?.Value ?? false);
             set
             {
-                Properties.Add(new PSNoteProperty(RemotingConstants.ComputerNameNoteProperty, value));
-                _remotingPropertiesSet |= RemotingProperties.ShowComputerName;
+                var psPropertyInfo = Properties[RemotingConstants.ShowComputerNameNoteProperty];
+                if (psPropertyInfo == null)
+                {
+                    Properties.Add(new PSNoteProperty(RemotingConstants.ShowComputerNameNoteProperty, value));
+                    _remotingPropertiesSet |= RemotingProperties.ShowComputerName;
+                }
+                else
+                {
+                    psPropertyInfo.Value = value;
+                }
             }
         }
 
         internal Guid RemotingRunspaceId
         {
-            get
-            {
-                if (_remotingPropertiesSet.HasFlag(RemotingProperties.RunspaceId))
-                {
-                    var id= Properties[RemotingConstants.RunspaceIdNoteProperty]?.Value;
-                    return (Guid?) id ?? Guid.Empty;
-                }
-
-                return Guid.Empty;
-            }
+            get => _remotingPropertiesSet.HasFlag(RemotingProperties.RunspaceId)
+                    ? (Guid?)Properties[RemotingConstants.RunspaceIdNoteProperty]?.Value ?? Guid.Empty
+                    : Guid.Empty;
             set
             {
-                if (_remotingPropertiesSet.HasFlag(RemotingProperties.RunspaceId))
+                var psPropertyInfo = Properties[RemotingConstants.RunspaceIdNoteProperty];
+                if (psPropertyInfo == null)
                 {
-                    var psPropertyInfo = Properties[RemotingConstants.RunspaceIdNoteProperty];
-                    if (psPropertyInfo != null)
-                    {
-                        psPropertyInfo.Value = value;
-                        return;
-                    }
+                    Properties.Add(new PSNoteProperty(RemotingConstants.RunspaceIdNoteProperty, value));
+                    _remotingPropertiesSet |= RemotingProperties.RunspaceId;
                 }
-                Properties.Add(new PSNoteProperty(RemotingConstants.RunspaceIdNoteProperty, value));
-                _remotingPropertiesSet |= RemotingProperties.RunspaceId;
+                else
+                {
+                    psPropertyInfo.Value = value;
+                }
             }
         }
 
         internal Guid RemotingSourceJobInstanceId
         {
-            get
-            {
-                if (_remotingPropertiesSet.HasFlag(RemotingProperties.SourceJobInstanceId))
-                {
-                    var id = Properties[RemotingConstants.SourceJobInstanceId]?.Value;
-                    return (Guid?)id ?? Guid.Empty;
-                }
-
-                return Guid.Empty;
-            }
+            get => _remotingPropertiesSet.HasFlag(RemotingProperties.SourceJobInstanceId)
+                    ? (Guid?)Properties[RemotingConstants.SourceJobInstanceId]?.Value ?? Guid.Empty
+                    : Guid.Empty;
             set
             {
-                Properties.Add(new PSNoteProperty(RemotingConstants.SourceJobInstanceId, value));
-                _remotingPropertiesSet |= RemotingProperties.SourceJobInstanceId;
+                var psPropertyInfo = Properties[RemotingConstants.SourceJobInstanceId];
+                if (psPropertyInfo == null)
+                {
+                    Properties.Add(new PSNoteProperty(RemotingConstants.SourceJobInstanceId, value));
+                    _remotingPropertiesSet |= RemotingProperties.SourceJobInstanceId;
+                }
+                else
+                {
+                    psPropertyInfo.Value = value;
+                }
             }
         }
 
