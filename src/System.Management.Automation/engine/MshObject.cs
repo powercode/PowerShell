@@ -2444,43 +2444,6 @@ namespace System.Management.Automation
             }
         }
 
-        private bool PreserveToString
-        {
-            get
-            {
-                //get => _flags.HasFlag(PSObjectFlags.PreserveToString);
-                if (PreserveToStringSet)
-                {
-                    return _flags.HasFlag(PSObjectFlags.PreserveToString);
-                }
-
-                PreserveToStringSet = true;
-                if (InternalTypeNames.Count == 0)
-                {
-                    return false;
-                }
-
-                _flags &= ~PSObjectFlags.PreserveToString;
-
-                return _flags.HasFlag(PSObjectFlags.PreserveToString);
-            }
-        }
-
-        private bool PreserveToStringSet
-        {
-            get => _flags.HasFlag(PSObjectFlags.PreserveToStringSet);
-            set
-            {
-                if (value)
-                {
-                    _flags |= PSObjectFlags.PreserveToStringSet;
-                }
-                else
-                {
-                    _flags &= ~PSObjectFlags.PreserveToStringSet;
-                }
-            }
-        }
 
         internal WriteStreamType WriteStream
         {
@@ -2496,19 +2459,17 @@ namespace System.Management.Automation
             /// This flag is set in deserialized shellobject.
             /// </summary>
             IsDeserialized = 0b00000001,
-            PreserveToString = 0b00000010,
-            PreserveToStringSet = 0b00000100,
             /// <summary>
             /// Set to true when the BaseObject is PSCustomObject.
             /// </summary>
-            HasGeneratedReservedMembers = 0b00001000,
-            ImmediateBaseObjectIsEmpty = 0b00010000,
-            IsHelpObject = 0b00100000,
+            HasGeneratedReservedMembers = 0b00000010,
+            ImmediateBaseObjectIsEmpty = 0b00000100,
+            IsHelpObject = 0b00001000,
             /// <summary>
             /// Indicate whether we store the instance members and type names locally
             /// for this PSObject instance.
             /// </summary>
-            StoreTypeNameAndInstanceMembersLocally = 0b01000000,
+            StoreTypeNameAndInstanceMembersLocally = 0b00010000,
         }
 
 }
