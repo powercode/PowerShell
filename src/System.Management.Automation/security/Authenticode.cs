@@ -183,14 +183,12 @@ namespace System.Management.Automation
                 //
                 // The GetLastWin32Error of this is checked, but PreSharp doesn't seem to be
                 // able to see that.
-#pragma warning disable 56523
                 result = NativeMethods.CryptUIWizDigitalSign(
                     (DWORD)NativeMethods.CryptUIFlags.CRYPTUI_WIZ_NO_UI,
                     IntPtr.Zero,
                     IntPtr.Zero,
                     pSignInfo,
                     IntPtr.Zero);
-#pragma warning enable 56523
 
                 if (si.pSignExtInfo != null)
                 {
@@ -507,14 +505,10 @@ namespace System.Management.Automation
                 Marshal.StructureToPtr(wtd, wtdBuffer, false);
 
                 // The result is returned to the caller, and handled generically.
-                // Disable the PreFast check for Win32 error codes, as we don't care.
-#pragma warning disable 56523
                 dwResult = NativeMethods.WinVerifyTrust(
                     IntPtr.Zero,
                     WINTRUST_ACTION_GENERIC_VERIFY_V2,
                     wtdBuffer);
-#pragma warning enable 56523
-
                 wtData = Marshal.PtrToStructure<NativeMethods.WINTRUST_DATA>(wtdBuffer);
             }
             finally
@@ -533,12 +527,8 @@ namespace System.Management.Automation
         {
             X509Certificate2 signerCert = null;
 
-            // We don't care about the Win32 error code here, so disable
-            // the PreFast complaint that we're not retrieving it.
-#pragma warning disable 56523
             IntPtr pCert =
                 NativeMethods.WTHelperGetProvCertFromChain(pSigner, 0);
-#pragma warning enable 56523
 
             if (pCert != IntPtr.Zero)
             {
@@ -603,12 +593,8 @@ namespace System.Management.Automation
             pProvSigner = IntPtr.Zero;
             timestamperCert = null;
 
-            // The GetLastWin32Error of this is checked, but PreSharp doesn't seem to be
-            // able to see that.
-#pragma warning disable 56523
             IntPtr pProvData =
                 NativeMethods.WTHelperProvDataFromStateData(wvtStateData);
-#pragma warning enable 56523
 
             if (pProvData != IntPtr.Zero)
             {

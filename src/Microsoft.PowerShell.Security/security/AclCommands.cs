@@ -184,11 +184,8 @@ namespace Microsoft.PowerShell.Commands
             {
                 // These are guaranteed to not be null, but even checking
                 // them for null causes a presharp warning
-#pragma warning disable 56506
-
                 // Get path
                 return instance.Properties["PSPath"].Value.ToString();
-#pragma warning enable 56506
             }
         }
 

@@ -1060,14 +1060,10 @@ namespace System.Management.Automation.Security
                 wtdBuffer = Marshal.AllocCoTaskMem(Marshal.SizeOf(wtd));
                 Marshal.StructureToPtr(wtd, wtdBuffer, false);
 
-                // The GetLastWin32Error of this is checked, but PreSharp doesn't seem to be
-                // able to see that.
-#pragma warning disable 56523
                 dwResult = WinVerifyTrust(
                     IntPtr.Zero,
                     WINTRUST_ACTION_GENERIC_VERIFY_V2,
                     wtdBuffer);
-#pragma warning enable 56523
 
                 wtd = Marshal.PtrToStructure<WINTRUST_DATA>(wtdBuffer);
             }
@@ -1197,12 +1193,10 @@ namespace System.Management.Automation.Security
 
                 // The GetLastWin32Error of this is checked, but PreSharp doesn't seem to be
                 // able to see that.
-#pragma warning disable 56523
                 dwResult = WinVerifyTrust(
                     IntPtr.Zero,
                     WINTRUST_ACTION_GENERIC_VERIFY_V2,
                     wtdBuffer);
-#pragma warning enable 56523
             }
             finally
             {
