@@ -112,7 +112,7 @@ namespace Microsoft.PowerShell.Commands
         private static PSObject PopulateFromJDictionary(JObject entries, DuplicateMemberTracker memberTracker, out ErrorRecord error)
         {
             error = null;
-            var result = new PSObject();
+            var result = new PSObject(entries.Count);
             foreach (var entry in entries)
             {
                 if (string.IsNullOrEmpty(entry.Key))
