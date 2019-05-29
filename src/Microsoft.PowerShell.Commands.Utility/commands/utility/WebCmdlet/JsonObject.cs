@@ -10,7 +10,6 @@ using System.Management.Automation;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using System.Linq;
 
 namespace Microsoft.PowerShell.Commands
 {
@@ -196,10 +195,11 @@ namespace Microsoft.PowerShell.Commands
         private static ICollection<object> PopulateFromJArray(JArray list, out ErrorRecord error)
         {
             error = null;
-            List<object> result = new List<object>();
+            var result = new object[list.Count];
 
-            foreach (var element in list)
+            for (var index = 0; index < list.Count; index++)
             {
+                var element = list[index];
                 switch(element)
                 {
                     case JArray subList:
@@ -211,7 +211,7 @@ namespace Microsoft.PowerShell.Commands
                             return null;
                         }
 
-                        result.Add(listResult);
+                        result[index] = listResult;
                         break;
                     }
                     case JObject dic:
@@ -223,18 +223,18 @@ namespace Microsoft.PowerShell.Commands
                             return null;
                         }
 
-                        result.Add(dicResult);
+                        result[index] = dicResult;
                         break;
                     }
                     case JValue value:
                     {
-                        result.Add(value.Value);
+                        result[index] = value.Value;
                         break;
                     }
                 }
             }
 
-            return result.ToArray();
+            return result;
         }
 
         // This function is a clone of PopulateFromDictionary using JObject as an input.
