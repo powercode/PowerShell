@@ -20,6 +20,12 @@ namespace Microsoft.PowerShell.Commands
     [SuppressMessage("Microsoft.Naming", "CA1704:IdentifiersShouldBeSpelledCorrectly")]
     public static class JsonObject
     {
+        private class DuplicateMemberTracker : HashSet<string>
+        {
+            public DuplicateMemberTracker(int capacity) : base(capacity, StringComparer.OrdinalIgnoreCase)
+            {
+            }
+        }
 
         /// <summary>
         /// Convert a Json string back to an object of type PSObject.
@@ -85,7 +91,7 @@ namespace Microsoft.PowerShell.Commands
                         // JObject is a IDictionary
                         return returnHashtable
                                    ? PopulateHashTableFromJDictionary(dictionary, out error)
-                                   : PopulateFromJDictionary(dictionary, out error);
+                                   : PopulateFromJDictionary(dictionary, new DuplicateMemberTracker(dictionary.Count),  out error);
                     case JArray list:
                         return returnHashtable
                                    ? PopulateHashTableFromJArray(list, out error)
@@ -103,7 +109,7 @@ namespace Microsoft.PowerShell.Commands
         }
 
         // This function is a clone of PopulateFromDictionary using JObject as an input.
-        private static PSObject PopulateFromJDictionary(JObject entries, out ErrorRecord error)
+        private static PSObject PopulateFromJDictionary(JObject entries, DuplicateMemberTracker memberTracker, out ErrorRecord error)
         {
             error = null;
             var result = new PSObject();
@@ -122,7 +128,8 @@ namespace Microsoft.PowerShell.Commands
 
                 // Case sensitive duplicates should normally not occur since JsonConvert.DeserializeObject
                 // does not throw when encountering duplicates and just uses the last entry.
-                if (result.Properties.Any(psPropertyInfo => psPropertyInfo.Name.Equals(entry.Key, StringComparison.InvariantCulture)))
+                if (memberTracker.TryGetValue(entry.Key, out var propertyName)
+                    && propertyName.Equals(entry.Key, StringComparison.CurrentCulture))
                 {
                     var errorMsg = string.Format(CultureInfo.CurrentCulture, WebCmdletStrings.DuplicateKeysInJsonString, entry.Key);
                     error = new ErrorRecord(
@@ -135,10 +142,9 @@ namespace Microsoft.PowerShell.Commands
 
                 // Compare case insensitive to tell the user to use the -AsHashTable option instead.
                 // This is because PSObject cannot have keys with different casing.
-                PSPropertyInfo property = result.Properties[entry.Key];
-                if (property != null)
+                if (propertyName != null)
                 {
-                    var errorMsg = string.Format(CultureInfo.CurrentCulture, WebCmdletStrings.KeysWithDifferentCasingInJsonString, property.Name, entry.Key);
+                    var errorMsg = string.Format(CultureInfo.CurrentCulture, WebCmdletStrings.KeysWithDifferentCasingInJsonString, propertyName, entry.Key);
                     error = new ErrorRecord(
                         new InvalidOperationException(errorMsg),
                         "KeysWithDifferentCasingInJsonString",
@@ -164,7 +170,7 @@ namespace Microsoft.PowerShell.Commands
                     case JObject dic:
                     {
                         // Dictionary
-                        var dicResult = PopulateFromJDictionary(dic, out error);
+                        var dicResult = PopulateFromJDictionary(dic, new DuplicateMemberTracker(dic.Count), out error);
                         if (error != null)
                         {
                             return null;
@@ -180,6 +186,7 @@ namespace Microsoft.PowerShell.Commands
                     }
                 }
 
+                memberTracker.Add(entry.Key);
             }
 
             return result;
@@ -210,7 +217,7 @@ namespace Microsoft.PowerShell.Commands
                     case JObject dic:
                     {
                         // Dictionary
-                        var dicResult = PopulateFromJDictionary(dic, out error);
+                        var dicResult = PopulateFromJDictionary(dic, new DuplicateMemberTracker(dic.Count), out error);
                         if (error != null)
                         {
                             return null;
