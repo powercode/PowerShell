@@ -197,6 +197,23 @@ namespace Microsoft.PowerShell.Commands
             error = null;
             var result = new object[list.Count];
 
+            DuplicateMemberTracker memberTracker = null;
+
+            DuplicateMemberTracker GetTracker(int capacity)
+            {
+                if (memberTracker == null)
+                {
+                    memberTracker = new DuplicateMemberTracker(capacity);
+                }
+                else
+                {
+                    memberTracker.Clear();
+                    memberTracker.EnsureCapacity(capacity);
+                }
+
+                return memberTracker;
+            }
+
             for (var index = 0; index < list.Count; index++)
             {
                 var element = list[index];
@@ -217,7 +234,7 @@ namespace Microsoft.PowerShell.Commands
                     case JObject dic:
                     {
                         // Dictionary
-                        var dicResult = PopulateFromJDictionary(dic, new DuplicateMemberTracker(dic.Count), out error);
+                        var dicResult = PopulateFromJDictionary(dic, GetTracker(dic.Count), out error);
                         if (error != null)
                         {
                             return null;
