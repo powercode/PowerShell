@@ -280,9 +280,11 @@ namespace Microsoft.PowerShell.Commands
             var currentObjectOrderValues = currentObjectEntry.orderValues;
             if (currentObjectOrderValues != null && currentObjectOrderValues.Count > 0)
             {
-                object currentTupleObject = PSTuple.ArrayToTuple(currentObjectOrderValues);
+                object currentCompareObject = currentObjectOrderValues.Count == 1
+                    ? currentObjectOrderValues[0]
+                    : PSTuple.ArrayToTuple(currentObjectOrderValues);
 
-                if (groupInfoDictionary.TryGetValue(currentTupleObject, out var currentGroupInfo))
+                if (groupInfoDictionary.TryGetValue(currentCompareObject, out var currentGroupInfo))
                 {
                     // add this inputObject to an existing group
                     currentGroupInfo.Add(currentObjectEntry.inputObject);
@@ -310,7 +312,7 @@ namespace Microsoft.PowerShell.Commands
                         GroupInfo newObjGrp = noElement ? new GroupInfoNoElement(currentObjectEntry) : new GroupInfo(currentObjectEntry);
                         groups.Add(newObjGrp);
 
-                        groupInfoDictionary.Add(currentTupleObject, newObjGrp);
+                        groupInfoDictionary.Add(currentCompareObject, newObjGrp);
                     }
                 }
             }
@@ -334,9 +336,11 @@ namespace Microsoft.PowerShell.Commands
             var currentObjectOrderValues = currentObjectEntry.orderValues;
             if (currentObjectOrderValues != null && currentObjectOrderValues.Count > 0)
             {
-                object currentTupleObject = PSTuple.ArrayToTuple(currentObjectOrderValues);
+                object currentCompareObject = currentObjectOrderValues.Count == 1
+                    ? currentObjectOrderValues[0]
+                    : PSTuple.ArrayToTuple(currentObjectOrderValues);
 
-                if (groupInfoDictionary.TryGetValue(currentTupleObject, out var currentGroupInfo))
+                if (groupInfoDictionary.TryGetValue(currentCompareObject, out var currentGroupInfo))
                 {
                     // add this inputObject to an existing group
                     currentGroupInfo.Add(currentObjectEntry.inputObject);
@@ -368,7 +372,7 @@ namespace Microsoft.PowerShell.Commands
 
                         groups.Add(newObjGrp);
 
-                        groupInfoDictionary.Add(currentTupleObject, newObjGrp);
+                        groupInfoDictionary.Add(currentCompareObject, newObjGrp);
                     }
                 }
             }
