@@ -319,6 +319,7 @@ namespace Microsoft.PowerShell.Commands
 
         // Expand a list of (possibly wildcarded) expressions into resolved expressions that
         // match property names on the incoming objects.
+        // match property names on the incoming objects.
         private static void ExpandExpressions(PSObject inputObject, List<MshParameter> UnexpandedParametersWithWildCardPattern, List<MshParameter> expandedParameterList)
         {
             if (UnexpandedParametersWithWildCardPattern != null)
@@ -384,19 +385,28 @@ namespace Microsoft.PowerShell.Commands
                 PSObject so = inputObjects[index];
                 if (so == null || so == AutomationNull.Value)
                     continue;
-                List<ErrorRecord> evaluationErrors = new List<ErrorRecord>();
-                List<string> propertyNotFoundMsgs = new List<string>();
+
                 OrderByPropertyEntry result =
-                    OrderByPropertyEntryEvaluationHelper.ProcessObject(so, mshParameterList, evaluationErrors, propertyNotFoundMsgs, originalIndex: index);
-                foreach (ErrorRecord err in evaluationErrors)
+                    OrderByPropertyEntryEvaluationHelper.ProcessObject(so, mshParameterList, out var evaluationErrors, out var propertyNotFoundMsgs, originalIndex: index);
+
+                if (evaluationErrors != null)
                 {
-                    cmdlet.WriteError(err);
+                    foreach (ErrorRecord err in evaluationErrors)
+                    {
+                        cmdlet.WriteError(err);
+                    }
                 }
 
-                foreach (string debugMsg in propertyNotFoundMsgs)
+                if (propertyNotFoundMsgs != null)
                 {
-                    cmdlet.WriteDebug(debugMsg);
+                    foreach (string debugMsg in propertyNotFoundMsgs)
+                    {
+                        cmdlet.WriteDebug(debugMsg);
+                    }
                 }
+
+                evaluationErrors.Clear();
+                propertyNotFoundMsgs.Clear();
 
                 orderMatrixToCreate.Add(result);
             }
@@ -509,18 +519,22 @@ namespace Microsoft.PowerShell.Commands
                 ExpandExpressions(inputObject, _unExpandedParametersWithWildCardPattern, _mshParameterList);
             }
 
-            List<ErrorRecord> evaluationErrors = new List<ErrorRecord>();
-            List<string> propertyNotFoundMsgs = new List<string>();
             OrderByPropertyEntry result =
-                OrderByPropertyEntryEvaluationHelper.ProcessObject(inputObject, _mshParameterList, evaluationErrors, propertyNotFoundMsgs, isCaseSensitive, cultureInfo);
-            foreach (ErrorRecord err in evaluationErrors)
+                OrderByPropertyEntryEvaluationHelper.ProcessObject(inputObject, _mshParameterList, out List<ErrorRecord> evaluationErrors, out List<string> propertyNotFoundMsgs, isCaseSensitive, cultureInfo);
+            if(evaluationErrors != null)
             {
-                cmdlet.WriteError(err);
+                foreach (ErrorRecord err in evaluationErrors)
+                {
+                    cmdlet.WriteError(err);
+                }
             }
 
-            foreach (string debugMsg in propertyNotFoundMsgs)
+            if(propertyNotFoundMsgs != null)
             {
-                cmdlet.WriteDebug(debugMsg);
+                foreach (string debugMsg in propertyNotFoundMsgs)
+                {
+                    cmdlet.WriteDebug(debugMsg);
+                }
             }
 
             return result;
@@ -541,11 +555,11 @@ namespace Microsoft.PowerShell.Commands
     internal static class OrderByPropertyEntryEvaluationHelper
     {
         internal static OrderByPropertyEntry ProcessObject(PSObject inputObject, List<MshParameter> mshParameterList,
-            List<ErrorRecord> errors, List<string> propertyNotFoundMsgs, bool isCaseSensitive = false, CultureInfo cultureInfo = null, int originalIndex = -1)
+            out List<ErrorRecord> errors, out List<string> propertyNotFoundMsgs, bool isCaseSensitive = false, CultureInfo cultureInfo = null, int originalIndex = -1)
         {
-            Diagnostics.Assert(errors != null, "errors cannot be null!");
-            Diagnostics.Assert(propertyNotFoundMsgs != null, "propertyNotFoundMsgs cannot be null!");
-            OrderByPropertyEntry entry = new OrderByPropertyEntry();
+            errors = null;
+            propertyNotFoundMsgs = null;
+            OrderByPropertyEntry entry = new OrderByPropertyEntry(mshParameterList.Count);
             entry.inputObject = inputObject;
             entry.originalIndex = originalIndex;
 
@@ -561,9 +575,13 @@ namespace Microsoft.PowerShell.Commands
             foreach (MshParameter p in mshParameterList)
             {
                 string propertyNotFoundMsg = null;
-                EvaluateSortingExpression(p, inputObject, entry.orderValues, errors, out propertyNotFoundMsg, ref entry.comparable);
+                EvaluateSortingExpression(p, inputObject, entry.orderValues, out errors, out propertyNotFoundMsg, ref entry.comparable);
                 if (!string.IsNullOrEmpty(propertyNotFoundMsg))
                 {
+                    if (propertyNotFoundMsgs != null)
+                    {
+                        propertyNotFoundMsgs = new List<string>(mshParameterList.Count);
+                    }
                     propertyNotFoundMsgs.Add(propertyNotFoundMsg);
                 }
             }
@@ -575,10 +593,11 @@ namespace Microsoft.PowerShell.Commands
             MshParameter p,
             PSObject inputObject,
             List<ObjectCommandPropertyValue> orderValues,
-            List<ErrorRecord> errors,
+            out List<ErrorRecord> errors,
             out string propertyNotFoundMsg,
             ref bool comparable)
         {
+            errors = null;
             // NOTE: we assume globbing was not allowed in input
             PSPropertyExpression ex = p.GetEntry(FormatParameterDefinitionKeys.ExpressionEntryKey) as PSPropertyExpression;
 
@@ -609,6 +628,10 @@ namespace Microsoft.PowerShell.Commands
                         "ExpressionEvaluation",
                         ErrorCategory.InvalidResult,
                         inputObject);
+                    if (errors == null)
+                    {
+                        errors = new List<ErrorRecord>(expressionResults.Count);
+                    }
                     errors.Add(errorRecord);
                     orderValues.Add(ObjectCommandPropertyValue.ExistingNullProperty);
                 }
@@ -624,12 +647,18 @@ namespace Microsoft.PowerShell.Commands
     internal sealed class OrderByPropertyEntry
     {
         internal PSObject inputObject = null;
-        internal List<ObjectCommandPropertyValue> orderValues = new List<ObjectCommandPropertyValue>();
+
+        internal List<ObjectCommandPropertyValue> orderValues;
         // The originalIndex field was added to enable stable heap-sorts (Top N/Bottom N)
         internal int originalIndex = -1;
 
         // The comparable field enables faster identification of uncomparable data
         internal bool comparable = false;
+
+        public OrderByPropertyEntry(int count)
+        {
+            orderValues = new List<ObjectCommandPropertyValue>(count);
+        }
     }
 
     internal class OrderByPropertyComparer : IComparer<OrderByPropertyEntry>
