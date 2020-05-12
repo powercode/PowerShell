@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#nullable enable
+
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -40,19 +42,19 @@ namespace System.Management.Automation
                 throw PSTraceSource.NewArgumentNullException(nameof(runtimeDefinedParameter));
             }
 
-            this.Name = runtimeDefinedParameter.Name;
-            this.Type = runtimeDefinedParameter.ParameterType;
-            this.IsDynamic = processingDynamicParameters;
+            Name = runtimeDefinedParameter.Name;
+            Type = runtimeDefinedParameter.ParameterType;
+            IsDynamic = processingDynamicParameters;
 
-            this.CollectionTypeInformation = new ParameterCollectionTypeInformation(runtimeDefinedParameter.ParameterType);
+            CollectionTypeInformation = new ParameterCollectionTypeInformation(runtimeDefinedParameter.ParameterType);
 
-            this.CompiledAttributes = new Collection<Attribute>();
+            CompiledAttributes = new Collection<Attribute>();
 
-            this.ParameterSetData = new Dictionary<string, ParameterSetSpecificMetadata>(StringComparer.OrdinalIgnoreCase);
+            ParameterSetData = new Dictionary<string, ParameterSetSpecificMetadata>(StringComparer.OrdinalIgnoreCase);
 
-            Collection<ValidateArgumentsAttribute> validationAttributes = null;
-            Collection<ArgumentTransformationAttribute> argTransformationAttributes = null;
-            string[] aliases = null;
+            Collection<ValidateArgumentsAttribute>? validationAttributes = null;
+            Collection<ArgumentTransformationAttribute>? argTransformationAttributes = null;
+            string[]? aliases = null;
 
             // First, process attributes that aren't type conversions
             foreach (Attribute attribute in runtimeDefinedParameter.Attributes)
@@ -77,7 +79,7 @@ namespace System.Management.Automation
 
             // If this is a PSCredential type and they haven't added any argument transformation attributes,
             // add one for credential transformation
-            if ((this.Type == typeof(PSCredential)) && argTransformationAttributes == null)
+            if ((Type == typeof(PSCredential)) && argTransformationAttributes == null)
             {
                 ProcessAttribute(runtimeDefinedParameter.Name, new CredentialAttribute(), ref validationAttributes, ref argTransformationAttributes, ref aliases);
             }
@@ -88,13 +90,13 @@ namespace System.Management.Automation
                 ProcessAttribute(runtimeDefinedParameter.Name, attribute, ref validationAttributes, ref argTransformationAttributes, ref aliases);
             }
 
-            this.ValidationAttributes = validationAttributes == null
+            ValidationAttributes = validationAttributes == null
                 ? Array.Empty<ValidateArgumentsAttribute>()
                 : validationAttributes.ToArray();
-            this.ArgumentTransformationAttributes = argTransformationAttributes == null
+            ArgumentTransformationAttributes = argTransformationAttributes == null
                 ? Array.Empty<ArgumentTransformationAttribute>()
                 : argTransformationAttributes.ToArray();
-            this.Aliases = aliases == null
+            Aliases = aliases == null
                 ? Array.Empty<string>()
                 : aliases.ToArray();
         }
@@ -126,21 +128,21 @@ namespace System.Management.Automation
                 throw PSTraceSource.NewArgumentNullException(nameof(member));
             }
 
-            this.Name = member.Name;
-            this.DeclaringType = member.DeclaringType;
-            this.IsDynamic = processingDynamicParameters;
+            Name = member.Name;
+            DeclaringType = member.DeclaringType;
+            IsDynamic = processingDynamicParameters;
 
             var propertyInfo = member as PropertyInfo;
             if (propertyInfo != null)
             {
-                this.Type = propertyInfo.PropertyType;
+                Type = propertyInfo.PropertyType;
             }
             else
             {
                 var fieldInfo = member as FieldInfo;
                 if (fieldInfo != null)
                 {
-                    this.Type = fieldInfo.FieldType;
+                    Type = fieldInfo.FieldType;
                 }
                 else
                 {
@@ -153,18 +155,18 @@ namespace System.Management.Automation
                 }
             }
 
-            this.CollectionTypeInformation = new ParameterCollectionTypeInformation(this.Type);
-            this.CompiledAttributes = new Collection<Attribute>();
-            this.ParameterSetData = new Dictionary<string, ParameterSetSpecificMetadata>(StringComparer.OrdinalIgnoreCase);
+            CollectionTypeInformation = new ParameterCollectionTypeInformation(Type);
+            CompiledAttributes = new Collection<Attribute>();
+            ParameterSetData = new Dictionary<string, ParameterSetSpecificMetadata>(StringComparer.OrdinalIgnoreCase);
 
             // We do not want to get the inherited custom attributes, only the attributes exposed
             // directly on the member
 
             var memberAttributes = member.GetCustomAttributes(false);
 
-            Collection<ValidateArgumentsAttribute> validationAttributes = null;
-            Collection<ArgumentTransformationAttribute> argTransformationAttributes = null;
-            string[] aliases = null;
+            Collection<ValidateArgumentsAttribute>? validationAttributes = null;
+            Collection<ArgumentTransformationAttribute>? argTransformationAttributes = null;
+            string[]? aliases = null;
 
             foreach (Attribute attr in memberAttributes)
             {
@@ -179,13 +181,13 @@ namespace System.Management.Automation
                 }
             }
 
-            this.ValidationAttributes = validationAttributes == null
+            ValidationAttributes = validationAttributes == null
                 ? Array.Empty<ValidateArgumentsAttribute>()
                 : validationAttributes.ToArray();
-            this.ArgumentTransformationAttributes = argTransformationAttributes == null
+            ArgumentTransformationAttributes = argTransformationAttributes == null
                 ? Array.Empty<ArgumentTransformationAttribute>()
                 : argTransformationAttributes.ToArray();
-            this.Aliases = aliases ?? Array.Empty<string>();
+            Aliases = aliases ?? Array.Empty<string>();
         }
 
         #endregion ctor
@@ -193,53 +195,53 @@ namespace System.Management.Automation
         /// <summary>
         /// Gets the name of the parameter.
         /// </summary>
-        internal string Name { get; private set; }
+        internal string Name { get; }
 
         /// <summary>
         /// The PSTypeName from a PSTypeNameAttribute.
         /// </summary>
-        internal string PSTypeName { get; private set; }
+        internal string? PSTypeName { get; private set; }
 
         /// <summary>
         /// Gets the Type information of the attribute.
         /// </summary>
-        internal Type Type { get; private set; }
+        internal Type Type { get; }
 
         /// <summary>
         /// Gets the Type information of the attribute.
         /// </summary>
-        internal Type DeclaringType { get; private set; }
+        internal Type? DeclaringType { get; }
 
         /// <summary>
         /// Gets whether the parameter is a dynamic parameter or not.
         /// </summary>
-        internal bool IsDynamic { get; private set; }
+        internal bool IsDynamic { get; }
 
         /// <summary>
         /// Gets the parameter collection type information.
         /// </summary>
-        internal ParameterCollectionTypeInformation CollectionTypeInformation { get; private set; }
+        internal ParameterCollectionTypeInformation CollectionTypeInformation { get; }
 
         /// <summary>
         /// A collection of the attributes found on the member. The attributes have been compiled into
         /// a format that easier to digest by the metadata processor.
         /// </summary>
-        internal Collection<Attribute> CompiledAttributes { get; private set; }
+        internal Collection<Attribute> CompiledAttributes { get; }
 
         /// <summary>
         /// Gets the collection of data generation attributes on this parameter.
         /// </summary>
-        internal ArgumentTransformationAttribute[] ArgumentTransformationAttributes { get; private set; }
+        internal ArgumentTransformationAttribute[] ArgumentTransformationAttributes { get; }
 
         /// <summary>
         /// Gets the collection of data validation attributes on this parameter.
         /// </summary>
-        internal ValidateArgumentsAttribute[] ValidationAttributes { get; private set; }
+        internal ValidateArgumentsAttribute[] ValidationAttributes { get; }
 
         /// <summary>
         /// Get and private set the obsolete attribute on this parameter.
         /// </summary>
-        internal ObsoleteAttribute ObsoleteAttribute { get; private set; }
+        internal ObsoleteAttribute? ObsoleteAttribute { get; private set; }
 
         /// <summary>
         /// If true, null can be bound to the parameter even if the parameter is mandatory.
@@ -294,17 +296,17 @@ namespace System.Management.Automation
         /// <summary>
         /// A delegate that can set the property.
         /// </summary>
-        internal Action<object, object> Setter { get; set; }
+        internal Action<object, object?>? Setter { get; set; }
 
         /// <summary>
         /// A dictionary of the parameter sets and the parameter set specific data for this parameter.
         /// </summary>
-        internal Dictionary<string, ParameterSetSpecificMetadata> ParameterSetData { get; private set; }
+        internal Dictionary<string, ParameterSetSpecificMetadata> ParameterSetData { get; }
 
         /// <summary>
         /// The alias names for this parameter.
         /// </summary>
-        internal string[] Aliases { get; private set; }
+        internal string[] Aliases { get; }
 
         /// <summary>
         /// Determines if this parameter takes pipeline input for any of the specified
@@ -352,9 +354,9 @@ namespace System.Management.Automation
         /// <returns>
         /// The parameter set specified data for the specified parameter set.
         /// </returns>
-        internal ParameterSetSpecificMetadata GetParameterSetData(uint parameterSetFlag)
+        internal ParameterSetSpecificMetadata? GetParameterSetData(uint parameterSetFlag)
         {
-            ParameterSetSpecificMetadata result = null;
+            ParameterSetSpecificMetadata? result = null;
 
             foreach (ParameterSetSpecificMetadata setData in ParameterSetData.Values)
             {
@@ -421,9 +423,9 @@ namespace System.Management.Automation
         private void ProcessAttribute(
             string memberName,
             Attribute attribute,
-            ref Collection<ValidateArgumentsAttribute> validationAttributes,
-            ref Collection<ArgumentTransformationAttribute> argTransformationAttributes,
-            ref string[] aliases)
+            ref Collection<ValidateArgumentsAttribute>? validationAttributes,
+            ref Collection<ArgumentTransformationAttribute>? argTransformationAttributes,
+            ref string[]? aliases)
         {
             if (attribute == null)
                 return;
@@ -437,22 +439,19 @@ namespace System.Management.Automation
                 return;
             }
 
-            ValidateArgumentsAttribute validateAttr = attribute as ValidateArgumentsAttribute;
-            if (validateAttr != null)
+            if (attribute is ValidateArgumentsAttribute validateAttr)
             {
-                if (validationAttributes == null)
-                    validationAttributes = new Collection<ValidateArgumentsAttribute>();
+                validationAttributes ??= new Collection<ValidateArgumentsAttribute>();
                 validationAttributes.Add(validateAttr);
                 if ((attribute is ValidateNotNullAttribute) || (attribute is ValidateNotNullOrEmptyAttribute))
                 {
-                    this.CannotBeNull = true;
+                    CannotBeNull = true;
                 }
 
                 return;
             }
 
-            AliasAttribute aliasAttr = attribute as AliasAttribute;
-            if (aliasAttr != null)
+            if (attribute is AliasAttribute aliasAttr)
             {
                 if (aliases == null)
                 {
@@ -470,47 +469,40 @@ namespace System.Management.Automation
                 return;
             }
 
-            ArgumentTransformationAttribute argumentAttr = attribute as ArgumentTransformationAttribute;
-            if (argumentAttr != null)
+            if (attribute is ArgumentTransformationAttribute argumentAttr)
             {
-                if (argTransformationAttributes == null)
-                    argTransformationAttributes = new Collection<ArgumentTransformationAttribute>();
+                argTransformationAttributes ??= new Collection<ArgumentTransformationAttribute>();
                 argTransformationAttributes.Add(argumentAttr);
                 return;
             }
 
-            AllowNullAttribute allowNullAttribute = attribute as AllowNullAttribute;
-            if (allowNullAttribute != null)
+            if (attribute is AllowNullAttribute)
             {
-                this.AllowsNullArgument = true;
+                AllowsNullArgument = true;
                 return;
             }
 
-            AllowEmptyStringAttribute allowEmptyStringAttribute = attribute as AllowEmptyStringAttribute;
-            if (allowEmptyStringAttribute != null)
+            if (attribute is AllowEmptyStringAttribute)
             {
-                this.AllowsEmptyStringArgument = true;
+                AllowsEmptyStringArgument = true;
                 return;
             }
 
-            AllowEmptyCollectionAttribute allowEmptyCollectionAttribute = attribute as AllowEmptyCollectionAttribute;
-            if (allowEmptyCollectionAttribute != null)
+            if (attribute is AllowEmptyCollectionAttribute)
             {
-                this.AllowsEmptyCollectionArgument = true;
+                AllowsEmptyCollectionArgument = true;
                 return;
             }
 
-            ObsoleteAttribute obsoleteAttr = attribute as ObsoleteAttribute;
-            if (obsoleteAttr != null)
+            if (attribute is ObsoleteAttribute obsoleteAttr)
             {
                 ObsoleteAttribute = obsoleteAttr;
                 return;
             }
 
-            PSTypeNameAttribute psTypeNameAttribute = attribute as PSTypeNameAttribute;
-            if (psTypeNameAttribute != null)
+            if (attribute is PSTypeNameAttribute psTypeNameAttribute)
             {
-                this.PSTypeName = psTypeNameAttribute.PSTypeName;
+                PSTypeName = psTypeNameAttribute.PSTypeName;
             }
         }
 
@@ -625,7 +617,7 @@ namespace System.Management.Automation
                 return;
             }
 
-            bool implementsIList = (type.GetInterface(typeof(IList).Name) != null);
+            bool implementsIList = (type.GetInterface(nameof(IList)) != null);
 
             // Look for class Collection<T>.  Collection<T> implements IList, and also IList
             // is more efficient to bind than ICollection<T>.  This optimization
@@ -648,7 +640,7 @@ namespace System.Management.Automation
             // does not derive from IList.  The only way to add elements
             // to an ICollection<T> is via reflected calls to Add(T),
             // but the advantage over plain IList is that we can typecast the elements.
-            Type interfaceICollection =
+            Type? interfaceICollection =
                 interfaces.FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICollection<>));
             if (interfaceICollection != null)
             {
@@ -668,18 +660,17 @@ namespace System.Management.Automation
             {
                 ParameterCollectionType = ParameterCollectionType.IList;
                 // elementType remains null
-                return;
             }
         }
 
         /// <summary>
         /// The collection type of the parameter.
         /// </summary>
-        internal ParameterCollectionType ParameterCollectionType { get; private set; }
+        internal ParameterCollectionType ParameterCollectionType { get; }
 
         /// <summary>
         /// The type of the elements in the collection.
         /// </summary>
-        internal Type ElementType { get; private set; }
+        internal Type? ElementType { get; }
     }
 }

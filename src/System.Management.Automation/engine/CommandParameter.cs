@@ -1,7 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#nullable enable
+
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Management.Automation.Language;
 
 namespace System.Management.Automation
@@ -9,25 +12,46 @@ namespace System.Management.Automation
     /// <summary>
     /// Represents a parameter to the Command.
     /// </summary>
-    [DebuggerDisplay("{ParameterName}")]
+    [DebuggerDisplay("{DebuggerDisplay}")]
     internal sealed class CommandParameterInternal
     {
         private class Parameter
         {
-            internal Ast ast;
-            internal string parameterName;
-            internal string parameterText;
+            internal Ast? Ast { get;  }
+            internal string? Name { get; set; }
+            internal string Text { get; }
+
+            public Parameter(Ast? ast, string? name, string text)
+            {
+                Ast = ast;
+                Name = name;
+                Text = text;
+            }
+
+            public override string ToString()
+            {
+                return Name ?? Text;
+            }
         }
 
         private class Argument
         {
-            internal Ast ast;
-            internal object value;
-            internal bool splatted;
+            internal Ast? Ast { get; }
+            internal object? Value { get; }
+            internal bool Splatted { get; }
+
+            public Argument(Ast? ast, object? value, bool splatted = false)
+            {
+                Ast = ast;
+                Value = value;
+                Splatted = splatted;
+            }
+
+            public override string ToString() => $"{Value}";
         }
 
-        private Parameter _parameter;
-        private Argument _argument;
+        private Parameter? _parameter;
+        private Argument? _argument;
         private bool _spaceAfterParameter;
 
         internal bool SpaceAfterParameter { get { return _spaceAfterParameter; } }
@@ -38,21 +62,35 @@ namespace System.Management.Automation
 
         internal bool ParameterAndArgumentSpecified { get { return ParameterNameSpecified && ArgumentSpecified; } }
 
+        string DebuggerDisplay
+        {
+            get
+            {
+                return _parameter != null && _argument != null
+                    ? $"{_parameter}: {_argument}"
+                    : _parameter != null
+                        ? $"{_parameter}"
+                        : $"{_argument}";
+            }
+        }
+
         /// <summary>
         /// Gets and sets the string that represents parameter name, which does not include the '-' (dash).
         /// </summary>
+        [DisallowNull]
         internal string ParameterName
         {
             get
             {
                 Diagnostics.Assert(ParameterNameSpecified, "Caller must verify parameter name was specified");
-                return _parameter.parameterName;
+                return _parameter?.Name ?? throw new InvalidOperationException("ParameterName must be specified");
             }
 
             set
             {
                 Diagnostics.Assert(ParameterNameSpecified, "Caller must verify parameter name was specified");
-                _parameter.parameterName = value;
+                if (_parameter == null) throw new InvalidOperationException("Parameter must be specified");
+                _parameter.Name = value;
             }
         }
 
@@ -64,16 +102,16 @@ namespace System.Management.Automation
             get
             {
                 Diagnostics.Assert(ParameterNameSpecified, "Caller must verify parameter name was specified");
-                return _parameter.parameterText;
+                return _parameter?.Text ?? throw new InvalidOperationException("ParameterName must be specified");
             }
         }
 
         /// <summary>
         /// The ast of the parameter, if one was specified.
         /// </summary>
-        internal Ast ParameterAst
+        internal Ast? ParameterAst
         {
-            get => _parameter?.ast;
+            get => _parameter?.Ast;
         }
 
         /// <summary>
@@ -87,9 +125,9 @@ namespace System.Management.Automation
         /// <summary>
         /// The ast of the optional argument, if one was specified.
         /// </summary>
-        internal Ast ArgumentAst
+        internal Ast? ArgumentAst
         {
-            get => _argument?.ast;
+            get => _argument?.Ast;
         }
 
         /// <summary>
@@ -103,9 +141,9 @@ namespace System.Management.Automation
         /// <summary>
         /// The value of the optional argument, if one was specified, otherwise UnboundParameter.Value.
         /// </summary>
-        internal object ArgumentValue
+        internal object? ArgumentValue
         {
-            get { return _argument != null ? _argument.value : UnboundParameter.Value; }
+            get { return _argument != null ? _argument.Value : UnboundParameter.Value; }
         }
 
         /// <summary>
@@ -113,21 +151,15 @@ namespace System.Management.Automation
         /// </summary>
         internal bool ArgumentSplatted
         {
-            get { return _argument != null ? _argument.splatted : false; }
+            get { return _argument?.Splatted ?? false; }
         }
 
         /// <summary>
         /// Set the argument value and ast.
         /// </summary>
-        internal void SetArgumentValue(Ast ast, object value)
+        internal void SetArgumentValue(Ast? ast, object? value)
         {
-            if (_argument == null)
-            {
-                _argument = new Argument();
-            }
-
-            _argument.value = value;
-            _argument.ast = ast;
+            _argument ??= new Argument(ast, value, false);
         }
 
         /// <summary>
@@ -154,12 +186,11 @@ namespace System.Management.Automation
         internal static CommandParameterInternal CreateParameter(
             string parameterName,
             string parameterText,
-            Ast ast = null)
+            Ast? ast = null)
         {
             return new CommandParameterInternal
             {
-                _parameter =
-                           new Parameter { ast = ast, parameterName = parameterName, parameterText = parameterText }
+                _parameter = new Parameter(ast, parameterName, parameterText)
             };
         }
 
@@ -170,18 +201,13 @@ namespace System.Management.Automation
         /// <param name="ast">The ast of the argument value in the script.</param>
         /// <param name="splatted">True if the argument value is to be splatted, false otherwise.</param>
         internal static CommandParameterInternal CreateArgument(
-            object value,
-            Ast ast = null,
+            object? value,
+            Ast? ast = null,
             bool splatted = false)
         {
             return new CommandParameterInternal
             {
-                _argument = new Argument
-                {
-                    value = value,
-                    ast = ast,
-                    splatted = splatted,
-                }
+                _argument = new Argument(ast, value, splatted)
             };
         }
 
@@ -202,17 +228,17 @@ namespace System.Management.Automation
         /// <param name="value">The argument value.</param>
         /// <param name="spaceAfterParameter">Used in native commands to correctly handle -foo:bar vs. -foo: bar.</param>
         internal static CommandParameterInternal CreateParameterWithArgument(
-            Ast parameterAst,
+            Ast? parameterAst,
             string parameterName,
             string parameterText,
-            Ast argumentAst,
-            object value,
+            Ast? argumentAst,
+            object? value,
             bool spaceAfterParameter)
         {
             return new CommandParameterInternal
             {
-                _parameter = new Parameter { ast = parameterAst, parameterName = parameterName, parameterText = parameterText },
-                _argument = new Argument { ast = argumentAst, value = value },
+                _parameter = new Parameter(parameterAst, parameterName, parameterText),
+                _argument = new Argument(argumentAst, value),
                 _spaceAfterParameter = spaceAfterParameter
             };
         }
@@ -221,7 +247,7 @@ namespace System.Management.Automation
 
         internal bool IsDashQuestion()
         {
-            return ParameterNameSpecified && (ParameterName.Equals("?", StringComparison.OrdinalIgnoreCase));
+            return ParameterNameSpecified && (ParameterName!.Equals("?", StringComparison.OrdinalIgnoreCase));
         }
     }
 }

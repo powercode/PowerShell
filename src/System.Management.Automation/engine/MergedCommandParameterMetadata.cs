@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#nullable enable
+
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
@@ -196,7 +198,7 @@ namespace System.Management.Automation
         /// <summary>
         /// The name of the default parameter set.
         /// </summary>
-        private string _defaultParameterSetName;
+        private string? _defaultParameterSetName;
 
         /// <summary>
         /// Adds the parameter set name to the parameter set map and returns the
@@ -344,7 +346,7 @@ namespace System.Management.Automation
         /// </returns>
         internal string GetParameterSetName(uint parameterSet)
         {
-            string result = _defaultParameterSetName;
+            string? result = _defaultParameterSetName;
 
             if (string.IsNullOrEmpty(result))
             {
@@ -368,14 +370,7 @@ namespace System.Management.Automation
                 if (((parameterSet >> (index + 1)) & 0x1) == 0)
                 {
                     // Ensure that the bit found was within the map, if not return an empty string
-                    if (index < _parameterSetMap.Count)
-                    {
-                        result = _parameterSetMap[index];
-                    }
-                    else
-                    {
-                        result = string.Empty;
-                    }
+                    result = index < _parameterSetMap.Count ? _parameterSetMap[index] : string.Empty;
                 }
                 else
                 {
@@ -398,14 +393,11 @@ namespace System.Management.Automation
             IDictionary<string, MergedCompiledCommandParameter> dict)
         {
             MergedCompiledCommandParameter mergedParam = dict[key];
-            if (mergedParam != null)
+            CompiledCommandParameter? compiledParam = mergedParam?.Parameter;
+            if (compiledParam != null)
             {
-                CompiledCommandParameter compiledParam = mergedParam.Parameter;
-                if (compiledParam != null)
-                {
-                    if (!string.IsNullOrEmpty(compiledParam.Name))
-                        return compiledParam.Name;
-                }
+                if (!string.IsNullOrEmpty(compiledParam.Name))
+                    return compiledParam.Name;
             }
 
             return string.Empty;
@@ -435,11 +427,11 @@ namespace System.Management.Automation
         /// <exception cref="ArgumentException">
         /// If <paramref name="name"/> is null or empty.
         /// </exception>
-        internal MergedCompiledCommandParameter GetMatchingParameter(
+        internal MergedCompiledCommandParameter? GetMatchingParameter(
             string name,
             bool throwOnParameterNotFound,
             bool tryExactMatching,
-            InvocationInfo invocationInfo)
+            InvocationInfo? invocationInfo)
         {
             if (string.IsNullOrEmpty(name))
             {
@@ -561,7 +553,7 @@ namespace System.Management.Automation
                 }
             }
 
-            MergedCompiledCommandParameter result = null;
+            MergedCompiledCommandParameter? result = null;
             if (matchingParameters.Count > 0)
             {
                 result = matchingParameters[0];
@@ -657,12 +649,12 @@ namespace System.Management.Automation
         /// <summary>
         /// Gets the compiled command parameter for the association.
         /// </summary>
-        internal CompiledCommandParameter Parameter { get; private set; }
+        internal CompiledCommandParameter Parameter { get; }
 
         /// <summary>
         /// Gets the type of binder that the compiled command parameter should be bound with.
         /// </summary>
-        internal ParameterBinderAssociation BinderAssociation { get; private set; }
+        internal ParameterBinderAssociation BinderAssociation { get; }
 
         public override string ToString()
         {

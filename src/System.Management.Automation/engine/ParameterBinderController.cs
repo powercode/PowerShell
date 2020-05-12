@@ -4,6 +4,7 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Management.Automation.Language;
 using System.Text;
@@ -868,6 +869,7 @@ namespace System.Management.Automation
         /// Generate elaborated binding exception so that the user will know the default binding might cause the failure.
         /// </summary>
         /// <param name="pbex"></param>
+        [DoesNotReturn]
         protected void ThrowElaboratedBindingException(ParameterBindingException pbex)
         {
             if (pbex == null)
