@@ -2,12 +2,14 @@
 // Licensed under the MIT License.
 
 using System;
-using System.Collections;
+using System.Collections.Generic;
 using System.Management.Automation;
 using System.Management.Automation.Host;
 using System.Management.Automation.Internal;
 
 using Dbg = System.Management.Automation.Diagnostics;
+
+#nullable enable
 
 namespace Microsoft.PowerShell
 {
@@ -24,8 +26,7 @@ namespace Microsoft.PowerShell
     /// This class uses lots of nearly identical helper functions to recursively traverse the tree. If I weren't so pressed
     /// for time, I would see if generic methods could be used to collapse the number of traversers.
     /// </summary>
-    internal
-    class PendingProgress
+    internal class PendingProgress
     {
         #region Updating Code
 
@@ -41,9 +42,7 @@ namespace Microsoft.PowerShell
         /// The ProgressRecord received that will either update the status of an activity which we are already tracking, or
         /// represent a new activity that we need to track.
         /// </param>
-        internal
-        void
-        Update(Int64 sourceId, ProgressRecord record)
+        internal void Update(Int64 sourceId, ProgressRecord record)
         {
             Dbg.Assert(record != null, "record should not be null");
 
@@ -55,10 +54,8 @@ namespace Microsoft.PowerShell
                     break;
                 }
 
-                ArrayList listWhereFound = null;
-                int indexWhereFound = -1;
-                ProgressNode foundNode =
-                    FindNodeById(sourceId, record.ActivityId, out listWhereFound, out indexWhereFound);
+                ProgressNode? foundNode =
+                    FindNodeById(sourceId, record.ActivityId, out List<ProgressNode>? listWhereFound, out int indexWhereFound);
 
                 if (foundNode != null)
                 {
@@ -116,13 +113,10 @@ namespace Microsoft.PowerShell
 
                 if (newNode.ParentActivityId >= 0)
                 {
-                    ProgressNode parentNode = FindNodeById(newNode.SourceId, newNode.ParentActivityId);
+                    ProgressNode? parentNode = FindNodeById(newNode.SourceId, newNode.ParentActivityId);
                     if (parentNode != null)
                     {
-                        if (parentNode.Children == null)
-                        {
-                            parentNode.Children = new ArrayList();
-                        }
+                        parentNode.Children ??= new List<ProgressNode>();
 
                         AddNode(parentNode.Children, newNode);
                         break;
@@ -144,14 +138,9 @@ namespace Microsoft.PowerShell
             AgeNodesAndResetStyle();
         }
 
-        private
-        void
-        EvictNode()
+        private void EvictNode()
         {
-            ArrayList listWhereFound = null;
-            int indexWhereFound = -1;
-
-            ProgressNode oldestNode = FindOldestLeafmostNode(out listWhereFound, out indexWhereFound);
+            ProgressNode? oldestNode = FindOldestLeafmostNode(out List<ProgressNode>? listWhereFound, out int indexWhereFound);
             if (oldestNode == null)
             {
                 // Well that's a surprise.  There's got to be at least one node there that's older than 0.
@@ -164,7 +153,7 @@ namespace Microsoft.PowerShell
             }
             else
             {
-                RemoveNode(listWhereFound, indexWhereFound);
+                RemoveNode(listWhereFound!, indexWhereFound);
             }
         }
 
@@ -177,9 +166,7 @@ namespace Microsoft.PowerShell
         /// <param name="indexToRemove">
         /// Index into the list of the node to be removed.
         /// </param>
-        private
-        void
-        RemoveNode(ArrayList nodes, int indexToRemove)
+        private void RemoveNode(List<ProgressNode> nodes, int indexToRemove)
         {
 #if DEBUG || ASSERTIONS_TRACE
             ProgressNode nodeToRemove = (ProgressNode)nodes[indexToRemove];
@@ -198,11 +185,9 @@ namespace Microsoft.PowerShell
 #endif
         }
 
-        private
-        void
-        RemoveNodeAndPromoteChildren(ArrayList nodes, int indexToRemove)
+        private void RemoveNodeAndPromoteChildren(List<ProgressNode> nodes, int indexToRemove)
         {
-            ProgressNode nodeToRemove = (ProgressNode)nodes[indexToRemove];
+            ProgressNode nodeToRemove = nodes[indexToRemove];
 
             Dbg.Assert(nodes != null, "can't remove nodes from a null list");
             Dbg.Assert(indexToRemove < nodes.Count, "index is not in list");
@@ -221,7 +206,7 @@ namespace Microsoft.PowerShell
                 {
                     // unparent the children. If the children are ever updated again, they will be reparented.
 
-                    ((ProgressNode)nodeToRemove.Children[i]).ParentActivityId = -1;
+                    nodeToRemove.Children[i].ParentActivityId = -1;
                 }
 
                 // add the children as siblings
@@ -252,9 +237,7 @@ namespace Microsoft.PowerShell
         /// <param name="nodeToAdd">
         /// Node to be added.
         /// </param>
-        private
-        void
-        AddNode(ArrayList nodes, ProgressNode nodeToAdd)
+        private void AddNode(List<ProgressNode> nodes, ProgressNode nodeToAdd)
         {
             nodes.Add(nodeToAdd);
             ++_nodeCount;
@@ -265,12 +248,9 @@ namespace Microsoft.PowerShell
 #endif
         }
 
-        private
-        class FindOldestNodeVisitor : NodeVisitor
+        private class FindOldestNodeVisitor : NodeVisitor
         {
-            internal override
-            bool
-            Visit(ProgressNode node, ArrayList listWhereFound, int indexWhereFound)
+            internal override bool Visit(ProgressNode node, List<ProgressNode> listWhereFound, int indexWhereFound)
             {
                 if (node.Age >= _oldestSoFar)
                 {
@@ -283,17 +263,11 @@ namespace Microsoft.PowerShell
                 return true;
             }
 
-            internal
-            ProgressNode
-            FoundNode;
+            internal ProgressNode? FoundNode;
 
-            internal
-            ArrayList
-            ListWhereFound;
+            internal List<ProgressNode>? ListWhereFound;
 
-            internal
-            int
-            IndexWhereFound = -1;
+            internal int IndexWhereFound = -1;
 
             private int _oldestSoFar;
         }
@@ -302,14 +276,12 @@ namespace Microsoft.PowerShell
             "Performance",
             "CA1822:Mark members as static",
             Justification = "Accesses instance members in preprocessor branch.")]
-        private
-        ProgressNode
-        FindOldestLeafmostNodeHelper(ArrayList treeToSearch, out ArrayList listWhereFound, out int indexWhereFound)
+        private ProgressNode? FindOldestLeafmostNodeHelper(List<ProgressNode> treeToSearch, out List<ProgressNode>? listWhereFound, out int indexWhereFound)
         {
             listWhereFound = null;
             indexWhereFound = -1;
 
-            FindOldestNodeVisitor v = new FindOldestNodeVisitor();
+            FindOldestNodeVisitor v = new();
             NodeVisitor.VisitNodes(treeToSearch, v);
 
             listWhereFound = v.ListWhereFound;
@@ -327,20 +299,15 @@ namespace Microsoft.PowerShell
             return v.FoundNode;
         }
 
-        private
-        ProgressNode
-        FindOldestLeafmostNode(out ArrayList listWhereFound, out int indexWhereFound)
+        private ProgressNode? FindOldestLeafmostNode(out List<ProgressNode>? listWhereFound, out int indexWhereFound)
         {
-            listWhereFound = null;
-            indexWhereFound = -1;
-
-            ProgressNode result = null;
-            ArrayList treeToSearch = _topLevelNodes;
+            ProgressNode? result;
+            List<ProgressNode> treeToSearch = _topLevelNodes;
 
             while (true)
             {
                 result = FindOldestLeafmostNodeHelper(treeToSearch, out listWhereFound, out indexWhereFound);
-                if (result == null || result.Children == null || result.Children.Count == 0)
+                if (result?.Children == null || result.Children.Count == 0)
                 {
                     break;
                 }
@@ -356,18 +323,10 @@ namespace Microsoft.PowerShell
         /// <summary>
         /// Convenience overload.
         /// </summary>
-        private
-        ProgressNode
-        FindNodeById(Int64 sourceId, int activityId)
-        {
-            ArrayList listWhereFound = null;
-            int indexWhereFound = -1;
-            return
-                FindNodeById(sourceId, activityId, out listWhereFound, out indexWhereFound);
-        }
+        private ProgressNode? FindNodeById(Int64 sourceId, int activityId)
+            => FindNodeById(sourceId, activityId, out List<ProgressNode>? _, out int _);
 
-        private
-        class FindByIdNodeVisitor : NodeVisitor
+        private class FindByIdNodeVisitor : NodeVisitor
         {
             internal
             FindByIdNodeVisitor(Int64 sourceIdToFind, int activityIdToFind)
@@ -376,9 +335,7 @@ namespace Microsoft.PowerShell
                 _idToFind = activityIdToFind;
             }
 
-            internal override
-            bool
-            Visit(ProgressNode node, ArrayList listWhereFound, int indexWhereFound)
+            internal override bool Visit(ProgressNode node, List<ProgressNode> listWhereFound, int indexWhereFound)
             {
                 if (node.ActivityId == _idToFind && node.SourceId == _sourceIdToFind)
                 {
@@ -391,19 +348,13 @@ namespace Microsoft.PowerShell
                 return true;
             }
 
-            internal
-            ProgressNode
-            FoundNode;
+            internal ProgressNode? FoundNode;
 
-            internal
-            ArrayList
-            ListWhereFound;
+            internal List<ProgressNode>? ListWhereFound;
 
-            internal
-            int
-            IndexWhereFound = -1;
+            internal int IndexWhereFound = -1;
 
-            private readonly int _idToFind = -1;
+            private readonly int _idToFind;
             private readonly Int64 _sourceIdToFind;
         }
 
@@ -426,14 +377,12 @@ namespace Microsoft.PowerShell
         /// <returns>
         /// The found node, or null if no suitable node was located.
         /// </returns>
-        private
-        ProgressNode
-        FindNodeById(Int64 sourceId, int activityId, out ArrayList listWhereFound, out int indexWhereFound)
+        private ProgressNode? FindNodeById(Int64 sourceId, int activityId, out List<ProgressNode>? listWhereFound, out int indexWhereFound)
         {
             listWhereFound = null;
             indexWhereFound = -1;
 
-            FindByIdNodeVisitor v = new FindByIdNodeVisitor(sourceId, activityId);
+            FindByIdNodeVisitor v = new(sourceId, activityId);
             NodeVisitor.VisitNodes(_topLevelNodes, v);
 
             listWhereFound = v.ListWhereFound;
@@ -463,19 +412,17 @@ namespace Microsoft.PowerShell
         /// <returns>
         /// The found node, or null if no suitable node was located.
         /// </returns>
-        private
-        ProgressNode
-        FindOldestNodeOfGivenStyle(ArrayList nodes, int oldestSoFar, ProgressNode.RenderStyle style)
+        private ProgressNode? FindOldestNodeOfGivenStyle(List<ProgressNode>? nodes, int oldestSoFar, ProgressNode.RenderStyle style)
         {
             if (nodes == null)
             {
                 return null;
             }
 
-            ProgressNode found = null;
+            ProgressNode? found = null;
             for (int i = 0; i < nodes.Count; ++i)
             {
-                ProgressNode node = (ProgressNode)nodes[i];
+                ProgressNode node = nodes[i];
                 Dbg.Assert(node != null, "nodes should not contain null elements");
 
                 if (node.Age >= oldestSoFar && node.Style == style)
@@ -486,7 +433,7 @@ namespace Microsoft.PowerShell
 
                 if (node.Children != null)
                 {
-                    ProgressNode child = FindOldestNodeOfGivenStyle(node.Children, oldestSoFar, style);
+                    ProgressNode? child = FindOldestNodeOfGivenStyle(node.Children, oldestSoFar, style);
 
                     if (child != null)
                     {
@@ -508,12 +455,9 @@ namespace Microsoft.PowerShell
             return found;
         }
 
-        private
-        class AgeAndResetStyleVisitor : NodeVisitor
+        private class AgeAndResetStyleVisitor : NodeVisitor
         {
-            internal override
-            bool
-            Visit(ProgressNode node, ArrayList unused, int unusedToo)
+            internal override bool Visit(ProgressNode node, List<ProgressNode> unused, int unusedToo)
             {
                 node.Age = Math.Min(node.Age + 1, Int32.MaxValue - 1);
                 node.Style = ProgressNode.RenderStyle.FullPlus;
@@ -527,11 +471,9 @@ namespace Microsoft.PowerShell
         ///
         /// All nodes are aged every time a new ProgressRecord is received.
         /// </summary>
-        private
-        void
-        AgeNodesAndResetStyle()
+        private void AgeNodesAndResetStyle()
         {
-            AgeAndResetStyleVisitor arsv = new AgeAndResetStyleVisitor();
+            AgeAndResetStyleVisitor arsv = new();
             NodeVisitor.VisitNodes(_topLevelNodes, arsv);
         }
 
@@ -557,9 +499,7 @@ namespace Microsoft.PowerShell
         /// <returns>
         /// An array of strings containing the textual representation of the outstanding progress activities.
         /// </returns>
-        internal
-        string[]
-        Render(int maxWidth, int maxHeight, PSHostRawUserInterface rawUI)
+        internal string[]? Render(int maxWidth, int maxHeight, PSHostRawUserInterface rawUI)
         {
             Dbg.Assert(_topLevelNodes != null, "Shouldn't need to render progress if no data exists");
             Dbg.Assert(maxWidth > 0, "maxWidth is too small");
@@ -581,7 +521,7 @@ namespace Microsoft.PowerShell
                 invisible = CompressToFit(rawUI, maxHeight, maxWidth);
             }
 
-            ArrayList result = new ArrayList();
+            List<string> result = new ();
             string border = StringUtil.Padding(maxWidth);
 
             result.Add(border);
@@ -605,7 +545,7 @@ namespace Microsoft.PowerShell
 
             result.Add(border);
 
-            return (string[])result.ToArray(typeof(string));
+            return result.ToArray();
         }
 
         /// <summary>
@@ -626,9 +566,7 @@ namespace Microsoft.PowerShell
         /// <param name="rawUI">
         /// The PSHostRawUserInterface used to gauge string widths in the rendering.
         /// </param>
-        private
-        void
-        RenderHelper(ArrayList strings, ArrayList nodes, int indentation, int maxWidth, PSHostRawUserInterface rawUI)
+        private void RenderHelper(List<string> strings, IList<ProgressNode> nodes, int indentation, int maxWidth, PSHostRawUserInterface rawUI)
         {
             Dbg.Assert(strings != null, "strings should not be null");
             Dbg.Assert(nodes != null, "nodes should not be null");
@@ -655,8 +593,7 @@ namespace Microsoft.PowerShell
             }
         }
 
-        private
-        class HeightTallyer : NodeVisitor
+        private class HeightTallyer : NodeVisitor
         {
             internal HeightTallyer(PSHostRawUserInterface rawUi, int maxHeight, int maxWidth)
             {
@@ -665,9 +602,7 @@ namespace Microsoft.PowerShell
                 _maxWidth = maxWidth;
             }
 
-            internal override
-            bool
-            Visit(ProgressNode node, ArrayList unused, int unusedToo)
+            internal override bool Visit(ProgressNode node, List<ProgressNode> unused, int unusedToo)
             {
                 Tally += node.LinesRequiredMethod(_rawUi, _maxWidth);
 
@@ -704,7 +639,7 @@ namespace Microsoft.PowerShell
         /// </param>
         private int TallyHeight(PSHostRawUserInterface rawUi, int maxHeight, int maxWidth)
         {
-            HeightTallyer ht = new HeightTallyer(rawUi, maxHeight, maxWidth);
+            HeightTallyer ht = new(rawUi, maxHeight, maxWidth);
             NodeVisitor.VisitNodes(_topLevelNodes, ht);
             return ht.Tally;
         }
@@ -717,9 +652,7 @@ namespace Microsoft.PowerShell
         /// <param name="nodes"></param>
         /// <param name="style"></param>
         /// <returns></returns>
-        private
-        bool
-        AllNodesHaveGivenStyle(ArrayList nodes, ProgressNode.RenderStyle style)
+        private bool AllNodesHaveGivenStyle(List<ProgressNode>? nodes, ProgressNode.RenderStyle style)
         {
             if (nodes == null)
             {
@@ -728,7 +661,7 @@ namespace Microsoft.PowerShell
 
             for (int i = 0; i < nodes.Count; ++i)
             {
-                ProgressNode node = (ProgressNode)nodes[i];
+                ProgressNode node = nodes[i];
                 Dbg.Assert(node != null, "nodes should not contain null elements");
 
                 if (node.Style != style)
@@ -751,21 +684,15 @@ namespace Microsoft.PowerShell
         /// <summary>
         /// Debugging code. NodeVisitor that counts up the number of nodes in the tree.
         /// </summary>
-        private
-        class
-        CountingNodeVisitor : NodeVisitor
+        private class CountingNodeVisitor : NodeVisitor
         {
-            internal override
-            bool
-            Visit(ProgressNode unused, ArrayList unusedToo, int unusedThree)
+            internal override bool Visit(ProgressNode unused, List<ProgressNode> unusedToo, int unusedThree)
             {
                 ++Count;
                 return true;
             }
 
-            internal
-            int
-            Count;
+            internal int Count;
         }
 
         /// <summary>
@@ -774,11 +701,9 @@ namespace Microsoft.PowerShell
         /// <returns>
         /// The number of nodes in the tree.
         /// </returns>
-        private
-        int
-        CountNodes()
+        private int CountNodes()
         {
-            CountingNodeVisitor cnv = new CountingNodeVisitor();
+            CountingNodeVisitor cnv = new();
             NodeVisitor.VisitNodes(_topLevelNodes, cnv);
             return cnv.Count;
         }
@@ -813,9 +738,7 @@ namespace Microsoft.PowerShell
         /// false to indicate that all of the nodes are compressed to a given level, but that the rendering still can't fit
         /// within the constraint.
         /// </returns>
-        private
-        bool
-        CompressToFitHelper(
+        private bool CompressToFitHelper(
             PSHostRawUserInterface rawUi,
             int maxHeight,
             int maxWidth,
@@ -827,7 +750,7 @@ namespace Microsoft.PowerShell
 
             while (true)
             {
-                ProgressNode node = FindOldestNodeOfGivenStyle(_topLevelNodes, oldestSoFar: 0, priorStyle);
+                ProgressNode? node = FindOldestNodeOfGivenStyle(_topLevelNodes, oldestSoFar: 0, priorStyle);
                 if (node == null)
                 {
                     // We've compressed every node of the prior style already.
@@ -881,9 +804,7 @@ namespace Microsoft.PowerShell
         /// The number of nodes that were made invisible during the compression.
         ///
         ///</returns>
-        private
-        int
-        CompressToFit(PSHostRawUserInterface rawUi, int maxHeight, int maxWidth)
+        private int CompressToFit(PSHostRawUserInterface rawUi, int maxHeight, int maxWidth)
         {
             Dbg.Assert(_topLevelNodes != null, "Shouldn't need to compress if no data exists");
 
@@ -951,8 +872,7 @@ namespace Microsoft.PowerShell
 
         #region Utility Code
 
-        private abstract
-        class NodeVisitor
+        private abstract class NodeVisitor
         {
             /// <summary>
             /// Called for each node in the tree.
@@ -969,13 +889,9 @@ namespace Microsoft.PowerShell
             /// <returns>
             /// true to continue visiting nodes, false if not.
             /// </returns>
-            internal abstract
-            bool
-            Visit(ProgressNode node, ArrayList listWhereFound, int indexWhereFound);
+            internal abstract bool Visit(ProgressNode node, List<ProgressNode> listWhereFound, int indexWhereFound);
 
-            internal static
-            void
-            VisitNodes(ArrayList nodes, NodeVisitor v)
+            internal static void VisitNodes(List<ProgressNode>? nodes, NodeVisitor v)
             {
                 if (nodes == null)
                 {
@@ -1002,7 +918,7 @@ namespace Microsoft.PowerShell
 
         #endregion
 
-        private readonly ArrayList _topLevelNodes = new ArrayList();
+        private readonly List<ProgressNode> _topLevelNodes = new ();
         private int _nodeCount;
 
         private const int maxNodeCount = 128;

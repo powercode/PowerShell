@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Management.Automation;
 using System.Management.Automation.Host;
 using System.Management.Automation.Internal;
@@ -79,7 +80,7 @@ namespace Microsoft.PowerShell
         /// </param>
         internal
         void
-        Render(ArrayList strCollection, int indentation, int maxWidth, PSHostRawUserInterface rawUI)
+        Render(List<string> strCollection, int indentation, int maxWidth, PSHostRawUserInterface rawUI)
         {
             Dbg.Assert(strCollection != null, "strCollection should not be null");
             Dbg.Assert(indentation >= 0, "indentation is negative");
@@ -128,7 +129,7 @@ namespace Microsoft.PowerShell
         /// </param>
         private
         void
-        RenderFull(ArrayList strCollection, int indentation, int maxWidth, PSHostRawUserInterface rawUI, bool isFullPlus)
+        RenderFull(List<string> strCollection, int indentation, int maxWidth, PSHostRawUserInterface rawUI, bool isFullPlus)
         {
             string indent = StringUtil.Padding(indentation);
 
@@ -199,7 +200,7 @@ namespace Microsoft.PowerShell
             }
         }
 
-        private static void RenderFullDescription(string description, string indent, int maxWidth, PSHostRawUserInterface rawUi, ArrayList strCollection, bool isFullPlus)
+        private static void RenderFullDescription(string description, string indent, int maxWidth, PSHostRawUserInterface rawUi, List<string> strCollection, bool isFullPlus)
         {
             string oldDescription = StringUtil.Format(" {0}{1} ", indent, description);
             string newDescription;
@@ -237,7 +238,7 @@ namespace Microsoft.PowerShell
         /// </param>
         private
         void
-        RenderCompact(ArrayList strCollection, int indentation, int maxWidth, PSHostRawUserInterface rawUI)
+        RenderCompact(List<string> strCollection, int indentation, int maxWidth, PSHostRawUserInterface rawUI)
         {
             string indent = StringUtil.Padding(indentation);
 
@@ -305,7 +306,7 @@ namespace Microsoft.PowerShell
         /// </param>
         private
         void
-        RenderMinimal(ArrayList strCollection, int indentation, int maxWidth, PSHostRawUserInterface rawUI)
+        RenderMinimal(List<string> strCollection, int indentation, int maxWidth, PSHostRawUserInterface rawUI)
         {
             string indent = StringUtil.Padding(indentation);
 
@@ -320,7 +321,7 @@ namespace Microsoft.PowerShell
             string secRemain = string.Empty;
             if (SecondsRemaining >= 0)
             {
-                TimeSpan span = new TimeSpan(0, 0, SecondsRemaining);
+                TimeSpan span = new(hours: 0, 0, SecondsRemaining);
                 secRemain = span.ToString() + " ";
             }
 
@@ -341,7 +342,7 @@ namespace Microsoft.PowerShell
         /// The nodes that have this node as their parent.
         /// </summary>
         internal
-        ArrayList
+        List<ProgressNode>
         Children;
 
         /// <summary>
@@ -420,7 +421,7 @@ namespace Microsoft.PowerShell
             int lines = 1;
             // Use 5 spaces as the heuristic indent. 5 spaces stand for the indent for the CurrentOperation of the first-level child node
             var indent = StringUtil.Padding(5);
-            var temp = new ArrayList();
+            List<string> temp = new();
 
             if (isFullPlus)
             {
