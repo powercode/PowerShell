@@ -189,15 +189,15 @@ namespace Microsoft.PowerShell.Commands
         /// </remarks>
         /// <param name="directory">The directory base the truncation on.</param>
         /// <returns>The relative path that was produced.</returns>
-        public string RelativePath(string directory)
+        private ReadOnlySpan<char> RelativePath(ReadOnlySpan<char> directory)
         {
             if (!_pathSet)
             {
                 return this.Path;
             }
 
-            string relPath = _path;
-            if (!string.IsNullOrEmpty(directory))
+            ReadOnlySpan<char> relPath = _path;
+            if (!directory.IsEmpty)
             {
                 if (relPath.StartsWith(directory, StringComparison.OrdinalIgnoreCase))
                 {
@@ -206,11 +206,11 @@ namespace Microsoft.PowerShell.Commands
                     {
                         if (directory[offset - 1] == '\\' || directory[offset - 1] == '/')
                         {
-                            relPath = relPath.Substring(offset);
+                            relPath = relPath[offset..];
                         }
                         else if (relPath[offset] == '\\' || relPath[offset] == '/')
                         {
-                            relPath = relPath.Substring(offset + 1);
+                            relPath = relPath[(offset + 1)..];
                         }
                     }
                 }
@@ -218,10 +218,7 @@ namespace Microsoft.PowerShell.Commands
 
             return relPath;
         }
-
-        private const string MatchFormat = "{0}{1}:{2}:{3}";
-        private const string SimpleFormat = "{0}{1}";
-
+        
         // Prefixes used by formatting: Match and Context prefixes
         // are used when context-tracking is enabled, otherwise
         // the empty prefix is used.
@@ -265,7 +262,7 @@ namespace Microsoft.PowerShell.Commands
         /// <returns>The string representation of the match object.</returns>
         private string ToString(string directory, string line)
         {
-            string displayPath = (directory != null) ? RelativePath(directory) : _path;
+            ReadOnlySpan<char> displayPath = (directory != null) ? RelativePath(directory) : _path;
 
             // Just return a single line if the user didn't
             // enable context-tracking.
@@ -356,11 +353,11 @@ namespace Microsoft.PowerShell.Commands
         /// <param name="displayPath">The file path, formatted for display.</param>
         /// <param name="prefix">The match prefix.</param>
         /// <returns>The formatted line as a string.</returns>
-        private string FormatLine(string lineStr, ulong displayLineNumber, string displayPath, string prefix)
+        private string FormatLine(string lineStr, ulong displayLineNumber, ReadOnlySpan<char> displayPath, string prefix)
         {
             return _pathSet
-                       ? StringUtil.Format(MatchFormat, prefix, displayPath, displayLineNumber, lineStr)
-                       : StringUtil.Format(SimpleFormat, prefix, lineStr);
+                       ? $"{prefix}{displayPath}:{displayLineNumber}:{lineStr}"
+                       : $"{prefix}:{lineStr}";
         }
 
         /// <summary>
