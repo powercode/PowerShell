@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Management.Automation.Host;
 using System.Text;
@@ -14,16 +15,19 @@ namespace System.Management.Automation.Internal
 {
     internal static class StringUtil
     {
-        internal static string Format(string format, object arg0)
+        internal static string Format([StringSyntax(StringSyntaxAttribute.CompositeFormat)] string format, params ReadOnlySpan<object> args)
+            => string.Format(CultureInfo.CurrentCulture, format, args);
+     
+        internal static string Format([StringSyntax(StringSyntaxAttribute.CompositeFormat)] string format, object arg0)
             => string.Format(CultureInfo.CurrentCulture, format, arg0);
 
-        internal static string Format(string format, object arg0, object arg1)
+        internal static string Format([StringSyntax(StringSyntaxAttribute.CompositeFormat)] string format, object arg0, object arg1)
             => string.Format(CultureInfo.CurrentCulture, format, arg0, arg1);
 
-        internal static string Format(string format, object arg0, object arg1, object arg2)
+        internal static string Format([StringSyntax(StringSyntaxAttribute.CompositeFormat)] string format, object arg0, object arg1, object arg2)
             => string.Format(CultureInfo.CurrentCulture, format, arg0, arg1, arg2);
 
-        internal static string Format(string format, params object[] args)
+        internal static string Format([StringSyntax(StringSyntaxAttribute.CompositeFormat)] string format, object[] args)
             => string.Format(CultureInfo.CurrentCulture, format, args);
 
         internal static string TruncateToBufferCellWidth(PSHostRawUserInterface rawUI, string toTruncate, int maxWidthInBufferCells)
