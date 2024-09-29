@@ -2,12 +2,14 @@
 // Licensed under the MIT License.
 
 using System;
+using System.Buffers;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics.Eventing.Reader;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Management.Automation;
 using System.Management.Automation.Internal;
 using System.Text;
@@ -63,6 +65,14 @@ namespace Microsoft.PowerShell.Commands
             };
         }
     }
+
+    [Flags]
+    internal enum MatchInfoFlags
+    {
+        None,
+        Emphasize = 1,
+        Simple = 2,
+    }
     
     /// <summary>
     /// The object returned by select-string representing the result of a match.
@@ -93,44 +103,23 @@ namespace Microsoft.PowerShell.Commands
         /// Gets or sets a value indicating whether the matched portion of the string is highlighted.
         /// </summary>
         /// <value>Whether the matched portion of the string is highlighted with the negative VT sequence.</value>
-        private readonly bool _emphasize;
+        private readonly MatchInfoFlags _flags;
 
         /// <summary>
-        /// Stores the matchIndex if there are only a single match
+        /// 
         /// </summary>
-        private readonly Range _matchingRange;
-        
-        /// <summary>
-        /// Stores a tuple of the starting index and length of each match within the line.
-        /// </summary>
-        private readonly IReadOnlyList<Range> _matchingRanges;
-        
-        /// <summary>
-        /// Initializes a new instance of the <see cref="MatchInfo"/> class with emphasis disabled.
-        /// </summary>
-        public MatchInfo()
-        {
-            this._emphasize = false;
-        }
+        private readonly Range? _simpleMatchRange;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="MatchInfo"/> class with emphasized matched text.
+        /// Initializes a new instance of the <see cref="MatchInfo"/> class
         /// Used when virtual terminal sequences are supported.
         /// </summary>
-        /// <param name="matchRanges">Sets the matchIndexes.</param>
-        internal MatchInfo(IReadOnlyList<Range> matchRanges)
+        /// <param name="flags">flags that determine how the matchInfo should be rendered.</param>
+        /// <param name="simpleMatchRange">Optional range for SimpleMatch</param>
+        internal MatchInfo(MatchInfoFlags flags = MatchInfoFlags.None, Range? simpleMatchRange = null)
         {
-            this._emphasize = true;
-            if (matchRanges.Count == 1)
-            {
-                _matchingRange  = matchRanges[0];
-                this._matchingRanges = null;
-            }
-            else
-            {
-                this._matchingRanges = matchRanges;    
-            }
-            
+            this._flags = flags;
+            _simpleMatchRange = simpleMatchRange;
         }
 
         /// <summary>
@@ -307,33 +296,50 @@ namespace Microsoft.PowerShell.Commands
         /// <returns>The string representation of the match object with matched text inverted.</returns>
         public string ToEmphasizedString(string directory)
         {
-            if (!_emphasize)
+            if (!_flags.HasFlag(MatchInfoFlags.Emphasize))
             {
                 return ToString(directory);
             }
 
-            return ToString(directory, EmphasizeLine());
+            return ToString(directory, EmphasizeLine(_flags.HasFlag(MatchInfoFlags.Simple)));
         }
 
         /// <summary>
         /// Surrounds the matched text with virtual terminal sequences to invert it's color. Used in ToEmphasizedString.
         /// </summary>
         /// <returns>The matched line with matched text inverted.</returns>
-        private string EmphasizeLine()
+        private string EmphasizeLine(bool simple)
         {
             var psStyle = PSStyle.Instance;
-            int emphasizedLineLength = ((_matchingRanges ?.Count ?? 1) * (psStyle.Reverse.Length + psStyle.Reset.Length)) + Line.Length;
-            IReadOnlyList<Range> matchRanges = _matchingRanges ?? [_matchingRange];
-            var result = string.Create(emphasizedLineLength, (Line, matchIndexes: matchRanges, psStyle.Reverse, psStyle.Reset), static (chars, state) =>
+            var rangesCount = simple ? 1 : Matches.Length;
+            
+            Span<Range> matchingRanges = rangesCount < 64 ?  stackalloc Range[rangesCount] : new Range[rangesCount].AsSpan();
+            if (simple && _simpleMatchRange != null)
             {
-                (string sourceLine, IReadOnlyList<Range> matchRanges, string invertColorsVT100, string resetVT100) = state;
-                ReadOnlySpan<char> sourceSpan = sourceLine.AsSpan();
+                matchingRanges[0] = _simpleMatchRange.Value;
+            }
+            for (int i = 0; i < Matches.Length; i++)
+            {
+                Match match = Matches[i];
+                matchingRanges[i] = new Range(match.Index, match.Length);
+                if (simple)
+                {
+                    break;
+                }
+            }
+            int emphasizedLineLength = (matchingRanges.Length * (psStyle.Reverse.Length + psStyle.Reset.Length)) + Line.Length;
+            
+            var result = string.Create(emphasizedLineLength, matchingRanges,  (chars, state) =>
+            {
+                var matchRanges = state;
+                ReadOnlySpan<char> sourceSpan = Line.AsSpan();
                 var dest = chars;
                 int lineIndex = 0;
+                var invertColorsVT100 = psStyle.Reverse;
+                var resetVT100 = psStyle.Reset;
                 
-                for (int i = 0; i < matchRanges.Count; i++)
+                foreach (var matchRange in matchRanges)
                 {
-                    Range matchRange = matchRanges[i];
                     var line = sourceSpan[lineIndex..matchRange.Start];
                     // Adds characters before match
                     line.CopyTo(dest);
@@ -354,11 +360,10 @@ namespace Microsoft.PowerShell.Commands
                     // Adds closing vt sequence
                     resetVT100.CopyTo(dest);
                     dest = dest[resetVT100.Length..];
-                    
                 }
 
                 Range lastMatch = matchRanges[^1];
-                var charsIndex = matchRanges.Count == 0 ? 0 : lastMatch.Start.Value + lastMatch.End.Value;
+                var charsIndex = matchRanges.Length == 0 ? 0 : lastMatch.Start.Value + lastMatch.End.Value;
                 // Adds remaining characters in line
                 sourceSpan[charsIndex..].CopyTo(dest);
             });
@@ -1686,7 +1691,7 @@ namespace Microsoft.PowerShell.Commands
         /// Emit any objects which have been queued up, and clear the queue.
         /// </summary>
         /// <param name="contextTracker">The context tracker to operate on.</param>
-        /// <returns>Whether or not any objects were emitted.</returns>
+        /// <returns>Whether any objects were emitted.</returns>
         private bool FlushTrackerQueue(IContextTracker contextTracker)
         {
             // Do we even have any matches to emit?
@@ -1785,9 +1790,14 @@ namespace Microsoft.PowerShell.Commands
             Match[] matches = null;
             int patternIndex = 0;
             matchResult = null;
-
-            List<Range> indexes = null;
-
+            Range? simpleMatchRange = null;
+            var flags = (!NoEmphasis, SimpleMatch.IsPresent) switch
+            {
+                (true, true) => MatchInfoFlags.Emphasize | MatchInfoFlags.Simple,
+                (false, true) => MatchInfoFlags.Simple,
+                (true, false) => MatchInfoFlags.Emphasize,
+                _ => MatchInfoFlags.None,
+            };
             bool shouldEmphasize = !NoEmphasis; // && Host.UI.SupportsVirtualTerminal;
 
             // If Emphasize is set and VT is supported,
@@ -1795,7 +1805,7 @@ namespace Microsoft.PowerShell.Commands
             // need to be passed in to the matchInfo object.
             if (shouldEmphasize)
             {
-                indexes = new List<Range>();
+                //matchRanges = new List<Range>();
             }
 
             if (!SimpleMatch)
@@ -1814,15 +1824,6 @@ namespace Microsoft.PowerShell.Commands
                         {
                             matches = new Match[mc.Count];
                             ((ICollection)mc).CopyTo(matches, 0);
-
-                            if (shouldEmphasize)
-                            {
-                                foreach (Match match in matches)
-                                {
-                                    indexes.Add(new(match.Index, match.Length));
-                                }
-                            }
-
                             gotMatch = true;
                         }
                     }
@@ -1833,12 +1834,7 @@ namespace Microsoft.PowerShell.Commands
 
                         if (match.Success)
                         {
-                            if (shouldEmphasize)
-                            {
-                                indexes.Add(new(match.Index, match.Length));
-                            }
-
-                            matches = new Match[] { match };
+                            matches = [match];
                         }
                     }
 
@@ -1859,11 +1855,7 @@ namespace Microsoft.PowerShell.Commands
                     int index = _cultureInfoIndexOf(operandString, pat, 0, operandString.Length, _compareOptions);
                     if (index >= 0)
                     {
-                        if (shouldEmphasize)
-                        {
-                            indexes.Add(new(index, pat.Length));
-                        }
-
+                        simpleMatchRange = new Range(index, pat.Length);
                         gotMatch = true;
                         break;
                     }
@@ -1899,8 +1891,8 @@ namespace Microsoft.PowerShell.Commands
                     if (matchInfo.Context != null)
                     {
                         matchResult = matchInfo.Clone();
-                        matchResult.Context.DisplayPreContext = Array.Empty<string>();
-                        matchResult.Context.DisplayPostContext = Array.Empty<string>();
+                        matchResult.Context.DisplayPreContext = [];
+                        matchResult.Context.DisplayPostContext = [];
                     }
                     else
                     {
@@ -1912,22 +1904,20 @@ namespace Microsoft.PowerShell.Commands
                 }
 
                 // otherwise construct and populate a new MatchInfo object
-                matchResult = shouldEmphasize
-                    ? new MatchInfo(indexes)
-                    : new MatchInfo();
-                matchResult.IgnoreCase = !CaseSensitive;
-                matchResult.Line = operandString;
-                matchResult.Pattern = Pattern[patternIndex];
+                matchResult = new MatchInfo(flags, simpleMatchRange)
+                {
+                    IgnoreCase = !CaseSensitive, 
+                    Line = operandString, 
+                    Pattern = Pattern[patternIndex],
+                    // Matches should be an empty list, rather than null,
+                    // in the cases of notMatch and simpleMatch.
+                    Matches = matches ?? [],
+                };
 
                 if (_preContext > 0 || _postContext > 0)
                 {
                     matchResult.Context = new MatchInfoContext();
                 }
-
-                // Matches should be an empty list, rather than null,
-                // in the cases of notMatch and simpleMatch.
-                matchResult.Matches = matches ?? Array.Empty<Match>();
-
                 return true;
             }
 
