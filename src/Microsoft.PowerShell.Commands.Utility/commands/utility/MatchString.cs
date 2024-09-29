@@ -68,7 +68,9 @@ namespace Microsoft.PowerShell.Commands
     {
         None,
         Emphasize = 1,
-        Simple = 2,
+        SimpleMatch = 2,
+        PathSet = 4,
+        IgnoreCase = 8,
     }
     
     /// <summary>
@@ -82,7 +84,20 @@ namespace Microsoft.PowerShell.Commands
         /// Gets or sets a value indicating whether the match was done ignoring case.
         /// </summary>
         /// <value>True if case was ignored.</value>
-        public bool IgnoreCase { get; set; }
+        public bool IgnoreCase 
+        {
+            get => _flags.HasFlag(MatchInfoFlags.IgnoreCase); 
+            set => _flags = value ? _flags | MatchInfoFlags.IgnoreCase : _flags & ~MatchInfoFlags.IgnoreCase; 
+        }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the match has a path set.
+        /// </summary>
+        private bool IsPathSet
+        {
+            get => _flags.HasFlag(MatchInfoFlags.PathSet);
+            set => _flags = value ? _flags | MatchInfoFlags.PathSet : _flags & ~MatchInfoFlags.PathSet;
+        }
 
         /// <summary>
         /// Gets or sets the number of the matching line.
@@ -100,10 +115,10 @@ namespace Microsoft.PowerShell.Commands
         /// Gets or sets a value indicating whether the matched portion of the string is highlighted.
         /// </summary>
         /// <value>Whether the matched portion of the string is highlighted with the negative VT sequence.</value>
-        private readonly MatchInfoFlags _flags;
+        private MatchInfoFlags _flags;
 
         /// <summary>
-        /// 
+        /// Keeps track of the range of a first simple match.
         /// </summary>
         private readonly Range? _simpleMatchRange;
 
@@ -131,7 +146,7 @@ namespace Microsoft.PowerShell.Commands
         {
             get
             {
-                if (!_pathSet)
+                if (!IsPathSet)
                 {
                     return s_inputStream;
                 }
@@ -151,17 +166,15 @@ namespace Microsoft.PowerShell.Commands
         /// <value>The path name.</value>
         public string Path
         {
-            get => _pathSet ? _path : s_inputStream;
+            get => IsPathSet ? _path : s_inputStream;
             set
             {
                 _path = value;
-                _pathSet = true;
+                IsPathSet = true;
             }
         }
 
         private string _path = s_inputStream;
-
-        private bool _pathSet;
 
         /// <summary>
         /// Gets or sets the pattern that was used in the match.
@@ -298,7 +311,7 @@ namespace Microsoft.PowerShell.Commands
                 return ToString(directory);
             }
 
-            return ToString(directory, EmphasizeLine(_flags.HasFlag(MatchInfoFlags.Simple)));
+            return ToString(directory, EmphasizeLine(_flags.HasFlag(MatchInfoFlags.SimpleMatch)));
         }
 
         /// <summary>
@@ -1790,8 +1803,8 @@ namespace Microsoft.PowerShell.Commands
             Range? simpleMatchRange = null;
             var flags = (!NoEmphasis, SimpleMatch.IsPresent) switch
             {
-                (true, true) => MatchInfoFlags.Emphasize | MatchInfoFlags.Simple,
-                (false, true) => MatchInfoFlags.Simple,
+                (true, true) => MatchInfoFlags.Emphasize | MatchInfoFlags.SimpleMatch,
+                (false, true) => MatchInfoFlags.SimpleMatch,
                 (true, false) => MatchInfoFlags.Emphasize,
                 _ => MatchInfoFlags.None,
             };
