@@ -21,7 +21,7 @@ namespace System.Management.Automation.Internal
         {
             get
             {
-                _plaintextcontent ??= ValueStringDecorated.AnsiRegex.Replace(_text, string.Empty);
+                _plaintextcontent ??= ValueStringDecorated.AnsiRegex().Replace(_text, string.Empty);
 
                 return _plaintextcontent;
             }
@@ -79,7 +79,7 @@ namespace System.Management.Automation.Internal
         }
     }
 
-    internal struct ValueStringDecorated
+    internal partial struct ValueStringDecorated
     {
         internal const char ESC = '\x1b';
         private readonly bool _isDecorated;
@@ -91,7 +91,7 @@ namespace System.Management.Automation.Internal
         {
             get
             {
-                _plaintextcontent ??= AnsiRegex.Replace(_text, string.Empty);
+                _plaintextcontent ??= AnsiRegex().Replace(_text, string.Empty);
 
                 return _plaintextcontent;
             }
@@ -107,7 +107,8 @@ namespace System.Management.Automation.Internal
         private const string HyperlinkRegex = @"(\x1b\]8;;.*?\x1b\\)";
 
         // replace regex with .NET 6 API once available
-        internal static readonly Regex AnsiRegex = new Regex($"{GraphicsRegex}|{CsiRegex}|{HyperlinkRegex}", RegexOptions.Compiled);
+        [GeneratedRegex($"{GraphicsRegex}|{CsiRegex}|{HyperlinkRegex}")]
+        internal static partial Regex AnsiRegex();
 
         /// <summary>
         /// Get the ranges of all escape sequences in the text.
@@ -123,7 +124,7 @@ namespace System.Management.Automation.Internal
                 if (_isDecorated && _vtRanges is null)
                 {
                     _vtRanges = new Dictionary<int, int>();
-                    foreach (Match match in AnsiRegex.Matches(_text))
+                    foreach (Match match in AnsiRegex().Matches(_text))
                     {
                         _vtRanges.Add(match.Index, match.Length);
                     }
