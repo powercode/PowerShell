@@ -72,7 +72,7 @@ namespace Microsoft.PowerShell.Commands
         PathSet = 4,
         IgnoreCase = 8,
     }
-    
+
     /// <summary>
     /// The object returned by select-string representing the result of a match.
     /// </summary>
@@ -84,10 +84,10 @@ namespace Microsoft.PowerShell.Commands
         /// Gets or sets a value indicating whether the match was done ignoring case.
         /// </summary>
         /// <value>True if case was ignored.</value>
-        public bool IgnoreCase 
+        public bool IgnoreCase
         {
-            get => _flags.HasFlag(MatchInfoFlags.IgnoreCase); 
-            set => _flags = value ? _flags | MatchInfoFlags.IgnoreCase : _flags & ~MatchInfoFlags.IgnoreCase; 
+            get => _flags.HasFlag(MatchInfoFlags.IgnoreCase);
+            set => _flags = value ? _flags | MatchInfoFlags.IgnoreCase : _flags & ~MatchInfoFlags.IgnoreCase;
         }
 
         /// <summary>
@@ -226,7 +226,7 @@ namespace Microsoft.PowerShell.Commands
 
             return relPath;
         }
-        
+
         // Prefixes used by formatting: Match and Context prefixes
         // are used when context-tracking is enabled, otherwise
         // the empty prefix is used.
@@ -322,12 +322,13 @@ namespace Microsoft.PowerShell.Commands
         {
             var psStyle = PSStyle.Instance;
             var rangesCount = simple ? 1 : Matches.Length;
-            
-            Span<Range> matchingRanges = rangesCount < 64 ?  stackalloc Range[rangesCount] : new Range[rangesCount].AsSpan();
+
+            Span<Range> matchingRanges = rangesCount < 64 ? stackalloc Range[rangesCount] : new Range[rangesCount].AsSpan();
             if (simple && _simpleMatchRange != null)
             {
                 matchingRanges[0] = _simpleMatchRange.Value;
             }
+
             for (int i = 0; i < Matches.Length; i++)
             {
                 Match match = Matches[i];
@@ -337,9 +338,11 @@ namespace Microsoft.PowerShell.Commands
                     break;
                 }
             }
+
             int emphasizedLineLength = (matchingRanges.Length * (psStyle.Reverse.Length + psStyle.Reset.Length)) + Line.Length;
             
             var result = string.Create(emphasizedLineLength, matchingRanges,  (chars, state) =>
+
             {
                 var matchRanges = state;
                 ReadOnlySpan<char> sourceSpan = Line.AsSpan();
@@ -347,7 +350,7 @@ namespace Microsoft.PowerShell.Commands
                 int lineIndex = 0;
                 var invertColorsVT100 = psStyle.Reverse;
                 var resetVT100 = psStyle.Reset;
-                
+
                 foreach (var matchRange in matchRanges)
                 {
                     var line = sourceSpan[lineIndex..matchRange.Start];
@@ -356,7 +359,7 @@ namespace Microsoft.PowerShell.Commands
                     dest = dest[line.Length..];
                     lineIndex = matchRange.Start.Value;
                     line = sourceSpan[lineIndex..];
-                    
+
                     // Adds opening vt sequence
                     invertColorsVT100.CopyTo(dest);
                     dest = dest[invertColorsVT100.Length..];
@@ -391,8 +394,8 @@ namespace Microsoft.PowerShell.Commands
         private string FormatLine(string lineStr, ulong displayLineNumber, ReadOnlySpan<char> displayPath, string prefix)
         {
             return IsPathSet
-                       ? $"{prefix}{displayPath}:{displayLineNumber}:{lineStr}"
-                       : $"{prefix}{lineStr}";
+                ? $"{prefix}{displayPath}:{displayLineNumber}:{lineStr}"
+                : $"{prefix}{lineStr}";
         }
 
         /// <summary>
