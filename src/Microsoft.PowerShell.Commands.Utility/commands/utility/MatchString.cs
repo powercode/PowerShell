@@ -197,23 +197,24 @@ namespace Microsoft.PowerShell.Commands
             }
 
             ReadOnlySpan<char> relPath = _path;
-            if (!directory.IsEmpty)
+            if (directory.IsEmpty || !relPath.StartsWith(directory, StringComparison.OrdinalIgnoreCase))
             {
-                if (relPath.StartsWith(directory, StringComparison.OrdinalIgnoreCase))
-                {
-                    int offset = directory.Length;
-                    if (offset < relPath.Length)
-                    {
-                        if (directory[offset - 1] == '\\' || directory[offset - 1] == '/')
-                        {
-                            relPath = relPath[offset..];
-                        }
-                        else if (relPath[offset] == '\\' || relPath[offset] == '/')
-                        {
-                            relPath = relPath[(offset + 1)..];
-                        }
-                    }
-                }
+                return relPath;
+            }
+            
+            int offset = directory.Length;
+            if (offset >= relPath.Length)
+            {
+                return relPath;
+            }
+
+            if (directory.EndsWith(['\\', '/']))
+            {
+                relPath = relPath[offset..];
+            }
+            else if (relPath[offset] == '\\' || relPath[offset] == '/')
+            {
+                relPath = relPath[(offset + 1)..];
             }
 
             return relPath;
@@ -312,37 +313,43 @@ namespace Microsoft.PowerShell.Commands
         /// <returns>The matched line with matched text inverted.</returns>
         private string EmphasizeLine()
         {
-            string invertColorsVT100 = PSStyle.Instance.Reverse;
-            string resetVT100 = PSStyle.Instance.Reset;
-
-            char[] chars = new char[(_matchIndexes.Count * (invertColorsVT100.Length + resetVT100.Length)) + Line.Length];
-            int lineIndex = 0;
-            int charsIndex = 0;
-            for (int i = 0; i < _matchIndexes.Count; i++)
+            var psStyle = PSStyle.Instance;
+            int emphasizedLineLength = _matchIndexes.Count * (psStyle.Reverse.Length + psStyle.Reset.Length) + Line.Length;
+            var result = string.Create(emphasizedLineLength, (Line, _matchIndexes, _matchLengths, psStyle.Reverse, psStyle.Reset), static (chars, state) =>
             {
-                // Adds characters before match
-                Line.CopyTo(lineIndex, chars, charsIndex, _matchIndexes[i] - lineIndex);
-                charsIndex += _matchIndexes[i] - lineIndex;
-                lineIndex = _matchIndexes[i];
+                (string sourceLine, IReadOnlyList<int> matchIndexes, IReadOnlyList<int> matchLengths, string invertColorsVT100, string resetVT100) = state;
+                ReadOnlySpan<char> sourceSpan = sourceLine.AsSpan();
+                var dest = chars;
+                int lineIndex = 0;
+                for (int i = 0; i < matchIndexes.Count; i++)
+                {
+                    var line = sourceSpan[lineIndex..matchIndexes[i]];
+                    // Adds characters before match
+                    line.CopyTo(dest);
+                    dest = dest[line.Length..];
+                    lineIndex = matchIndexes[i];
+                    line = sourceSpan[lineIndex..];
+                    
+                    // Adds opening vt sequence
+                    invertColorsVT100.AsSpan().CopyTo(dest);
+                    dest = dest[invertColorsVT100.Length..];
+                    
+                    // Adds characters being emphasized
+                    line = line[..matchLengths[i]];
+                    line.CopyTo(dest);
+                    dest = dest[matchLengths[i]..];
+                    lineIndex += matchLengths[i];
 
-                // Adds opening vt sequence
-                invertColorsVT100.CopyTo(0, chars, charsIndex, invertColorsVT100.Length);
-                charsIndex += invertColorsVT100.Length;
-
-                // Adds characters being emphasized
-                Line.CopyTo(lineIndex, chars, charsIndex, _matchLengths[i]);
-                lineIndex += _matchLengths[i];
-                charsIndex += _matchLengths[i];
-
-                // Adds closing vt sequence
-                resetVT100.CopyTo(0, chars, charsIndex, resetVT100.Length);
-                charsIndex += resetVT100.Length;
-            }
-
-            // Adds remaining characters in line
-            Line.CopyTo(lineIndex, chars, charsIndex, Line.Length - lineIndex);
-
-            return new string(chars);
+                    // Adds closing vt sequence
+                    resetVT100.CopyTo(dest);
+                    dest = dest[resetVT100.Length..];
+                    
+                }
+                var charsIndex = matchIndexes.Count == 0 ? 0 : matchIndexes[^1] + matchLengths[^1];
+                // Adds remaining characters in line
+                sourceSpan[charsIndex..].CopyTo(dest);
+            });
+            return result;
         }
 
         /// <summary>
@@ -1769,7 +1776,7 @@ namespace Microsoft.PowerShell.Commands
             List<int> indexes = null;
             List<int> lengths = null;
 
-            bool shouldEmphasize = !NoEmphasis && Host.UI.SupportsVirtualTerminal;
+            bool shouldEmphasize = !NoEmphasis; // && Host.UI.SupportsVirtualTerminal;
 
             // If Emphasize is set and VT is supported,
             // the lengths and starting indexes of regex matches
