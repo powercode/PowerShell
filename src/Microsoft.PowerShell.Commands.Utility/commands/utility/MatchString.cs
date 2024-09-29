@@ -377,7 +377,7 @@ namespace Microsoft.PowerShell.Commands
         {
             return _pathSet
                        ? $"{prefix}{displayPath}:{displayLineNumber}:{lineStr}"
-                       : $"{prefix}:{lineStr}";
+                       : $"{prefix}{lineStr}";
         }
 
         /// <summary>
