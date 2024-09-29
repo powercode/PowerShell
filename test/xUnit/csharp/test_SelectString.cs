@@ -7,10 +7,12 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Linq;
+using System.Management.Automation;
 using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using Microsoft.PowerShell.Commands;
 using Xunit;
 
 namespace PSTests.Parallel;
@@ -157,5 +159,72 @@ public class SelectStringTests
         Range[] expectedRanges = [new Range(0, 44), new Range(46, 50), new Range(52, 121), new Range(123, 195), new Range(197, 267)];
         
         Assert.Equal(expectedRanges, actualRanges);
+    }
+
+    [Fact]
+    public void RunSelectStringOnWarAndPeace()
+    {
+        using var ps = PowerShell.Create();
+        ps.AddScript("$PSStyle.OutputRendering = 'Ansi'");
+        ps.AddStatement();
+        ps.Commands.AddCommand("Select-String")
+            .AddParameter(nameof(SelectStringCommand.LiteralPath), _filePath)
+            .AddParameter(nameof(SelectStringCommand.Pattern), @"\b(Gutenberg|the)\b")
+            .AddParameter(nameof(SelectStringCommand.AllMatches));
+        ps.Commands.AddCommand("Out-String");
+        var res = ps.Invoke<string>();
+        var errors = ps.Streams.Error.ReadAll();
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void ShouldOnlyReturnTheCaseSensitiveMatch()
+    {
+        using var ps = PowerShell.Create();
+        ps.AddScript("$PSStyle.OutputRendering = 'Ansi'");
+        ps.AddStatement();
+        ps.Commands.AddCommand("Select-String")
+            .AddParameter(nameof(SelectStringCommand.CaseSensitive))
+            .AddParameter(nameof(SelectStringCommand.Pattern), @"hello");
+        string[] input = ["hello", "Hello"];
+        var res = ps.Invoke<MatchInfo>(input);
+        var match = Assert.Single(res);
+        Assert.Equal("hello", match.ToString());
+    }
+
+    [Fact]
+    public void AllMatch()
+    {
+        
+        using var ps = PowerShell.Create();
+        ps.AddScript("$PSStyle.OutputRendering = 'Ansi'");
+        ps.AddStatement();
+        ps.Commands.AddCommand("Select-String")
+            .AddParameter(nameof(SelectStringCommand.AllMatches))
+            .AddParameter(nameof(SelectStringCommand.Pattern), @"l");
+        ps.Commands.AddCommand("Out-String");
+        string[] input = ["hello", "Hello", "goodbye"];
+        var res = ps.Invoke<string>(input).First();
+        var nl = Environment.NewLine;
+        string expected = $"{nl}he\e[7ml\e[0m\e[7ml\e[0mo{nl}He\e[7ml\e[0m\e[7ml\e[0mo{nl}{nl}";
+        Assert.Equal(expected, res);
+    }
+    
+    [Fact]
+    public void SimpleMatch()
+    {
+        
+        using var ps = PowerShell.Create();
+        ps.AddScript("$PSStyle.OutputRendering = 'Ansi'");
+        ps.AddStatement();
+        ps.Commands.AddCommand("Select-String")
+            .AddParameter(nameof(SelectStringCommand.SimpleMatch))
+            .AddParameter(nameof(SelectStringCommand.Pattern), @"l");
+        ps.Commands.AddCommand("Out-String");
+        string[] input = ["hello", "Hello", "goodbye"];
+        var res = ps.Invoke<string>(input).First();
+        var nl = Environment.NewLine;
+        string expected = $"{nl}he\e[7ml\e[0mlo{nl}He\e[7ml\e[0mlo{nl}{nl}";
+        Assert.Equal(expected, res);
     }
 }
