@@ -64,7 +64,7 @@ namespace Microsoft.PowerShell.Commands
     }
 
     [Flags]
-    internal enum MatchInfoFlags
+    internal enum MatchInfoFlags : byte
     {
         None,
         Emphasize = 1,
@@ -78,7 +78,7 @@ namespace Microsoft.PowerShell.Commands
     /// </summary>
     public class MatchInfo
     {
-        private static readonly string s_inputStream = "InputStream";
+        private const string InputStream = "InputStream";
 
         /// <summary>
         /// Gets or sets a value indicating whether the match was done ignoring case.
@@ -148,7 +148,7 @@ namespace Microsoft.PowerShell.Commands
             {
                 if (!IsPathSet)
                 {
-                    return s_inputStream;
+                    return InputStream;
                 }
 
                 return _filename ??= System.IO.Path.GetFileName(_path);
@@ -166,7 +166,7 @@ namespace Microsoft.PowerShell.Commands
         /// <value>The path name.</value>
         public string Path
         {
-            get => IsPathSet ? _path : s_inputStream;
+            get => IsPathSet ? _path : InputStream;
             set
             {
                 _path = value;
@@ -174,7 +174,7 @@ namespace Microsoft.PowerShell.Commands
             }
         }
 
-        private string _path = s_inputStream;
+        private string _path = InputStream;
 
         /// <summary>
         /// Gets or sets the pattern that was used in the match.
@@ -198,7 +198,7 @@ namespace Microsoft.PowerShell.Commands
         /// <returns>The relative path that was produced.</returns>
         private ReadOnlySpan<char> RelativePath(ReadOnlySpan<char> directory)
         {
-            if (!_pathSet)
+            if (!IsPathSet)
             {
                 return this.Path;
             }
@@ -390,7 +390,7 @@ namespace Microsoft.PowerShell.Commands
         /// <returns>The formatted line as a string.</returns>
         private string FormatLine(string lineStr, ulong displayLineNumber, ReadOnlySpan<char> displayPath, string prefix)
         {
-            return _pathSet
+            return IsPathSet
                        ? $"{prefix}{displayPath}:{displayLineNumber}:{lineStr}"
                        : $"{prefix}{lineStr}";
         }
