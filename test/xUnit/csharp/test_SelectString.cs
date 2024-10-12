@@ -195,7 +195,6 @@ public class SelectStringTests
     [Fact]
     public void AllMatch()
     {
-        
         using var ps = PowerShell.Create();
         ps.AddScript("$PSStyle.OutputRendering = 'Ansi'");
         ps.AddStatement();
@@ -213,7 +212,6 @@ public class SelectStringTests
     [Fact]
     public void SimpleMatch()
     {
-        
         using var ps = PowerShell.Create();
         ps.AddScript("$PSStyle.OutputRendering = 'Ansi'");
         ps.AddStatement();
@@ -226,5 +224,28 @@ public class SelectStringTests
         var nl = Environment.NewLine;
         string expected = $"{nl}he\e[7ml\e[0mlo{nl}He\e[7ml\e[0mlo{nl}{nl}";
         Assert.Equal(expected, res);
+    }
+
+    [Theory]
+    [InlineData("string", "1:This is a text string, and another string")]
+    [InlineData("second", "2:This is the second line")]    
+    [InlineData("matches", "5:No matches")]
+
+    public void MatchesLine(string pattern, string expectedEnd)
+    {
+        var nl = Environment.NewLine;
+        var text = $"This is a text string, and another string{nl}This is the second line{nl}This is the third line{nl}This is the fourth line{nl}No matches";
+        
+        var file = Path.GetTempFileName();
+        File.WriteAllText(file, text);
+        
+        using var ps = PowerShell.Create();
+        ps.Commands.AddCommand("Select-String")
+            .AddParameter(nameof(SelectStringCommand.LiteralPath), file)
+            .AddParameter(nameof(SelectStringCommand.Pattern), pattern);
+        
+        var res = ps.Invoke<MatchInfo>().First();
+        string expected = $"{file}:{expectedEnd}";
+        Assert.Equal(expected, res.ToString());
     }
 }

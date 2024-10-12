@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 #nullable enable
 using System;
+using System.Buffers;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -9,10 +10,14 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
+using System.IO.Pipelines;
 using System.Management.Automation;
 using System.Management.Automation.Internal;
+using System.Management.Automation.Runspaces;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.PowerShell.Commands
@@ -213,7 +218,7 @@ namespace Microsoft.PowerShell.Commands
             {
                 return relPath;
             }
-            
+
             int offset = directory.Length;
             if (offset >= relPath.Length)
             {
@@ -346,9 +351,8 @@ namespace Microsoft.PowerShell.Commands
             }
 
             int emphasizedLineLength = (matchingRanges.Length * (psStyle.Reverse.Length + psStyle.Reset.Length)) + Line.Length;
-            
-            var result = string.Create(emphasizedLineLength, matchingRanges,  (chars, state) =>
 
+            var result = string.Create(emphasizedLineLength, matchingRanges, (chars, state) =>
             {
                 var matchRanges = state;
                 ReadOnlySpan<char> sourceSpan = Line.AsSpan();
@@ -510,6 +514,7 @@ namespace Microsoft.PowerShell.Commands
             }
 
             #region IEnumerable<T> implementation.
+
             public IEnumerator<T> GetEnumerator()
             {
                 for (int i = 0; i < Count; i++)
@@ -523,6 +528,7 @@ namespace Microsoft.PowerShell.Commands
             #endregion
 
             #region ICollection<T> implementation
+
             public int Count { get; private set; }
 
             public bool IsReadOnly => false;
@@ -588,6 +594,7 @@ namespace Microsoft.PowerShell.Commands
             {
                 throw new UnreachableException();
             }
+
             #endregion
 
             /// <summary>
@@ -698,6 +705,7 @@ namespace Microsoft.PowerShell.Commands
             }
 
             #region IContextTracker implementation
+
             public IList<MatchInfo> EmitQueue => _emitQueue;
 
             private readonly List<MatchInfo> _emitQueue;
@@ -765,6 +773,7 @@ namespace Microsoft.PowerShell.Commands
                     UpdateQueue();
                 }
             }
+
             #endregion
 
             /// <summary>
@@ -791,8 +800,8 @@ namespace Microsoft.PowerShell.Commands
             private void Reset()
             {
                 _contextState = (_preContext > 0)
-                               ? ContextState.CollectPre
-                               : ContextState.InitialState;
+                    ? ContextState.CollectPre
+                    : ContextState.InitialState;
                 _collectedPreContext.Clear();
                 _collectedPostContext.Clear();
                 _matchInfo = null;
@@ -870,6 +879,7 @@ namespace Microsoft.PowerShell.Commands
             }
 
             #region IContextTracker implementation
+
             public IList<MatchInfo> EmitQueue => _emitQueue;
 
             private readonly List<MatchInfo> _emitQueue;
@@ -903,6 +913,7 @@ namespace Microsoft.PowerShell.Commands
                 int startIndex = _collectedContext.IsFull ? _preContext + 1 : 0;
                 EmitAllInRange(startIndex, _collectedContext.Count - 1);
             }
+
             #endregion
 
             /// <summary>
@@ -1032,6 +1043,7 @@ namespace Microsoft.PowerShell.Commands
             }
 
             #region IContextTracker implementation
+
             public IList<MatchInfo> EmitQueue { get; }
 
             public void TrackLine(string line)
@@ -1054,6 +1066,7 @@ namespace Microsoft.PowerShell.Commands
                 _logicalTracker.TrackEOF();
                 UpdateQueue();
             }
+
             #endregion
 
             /// <summary>
@@ -1127,14 +1140,15 @@ namespace Microsoft.PowerShell.Commands
         internal const string InvariantCultureName = "Invariant";
         internal const string CurrentCultureName = "Current";
 
+        private static readonly SearchValues<byte> s_newLineSearchValues = SearchValues.Create([(byte)'\r', (byte)'\n']);
+        
         private string _cultureName = CultureInfo.CurrentCulture.Name;
         private StringComparison _stringComparison = StringComparison.CurrentCultureIgnoreCase;
         private CompareOptions _compareOptions = CompareOptions.IgnoreCase;
-
-        private delegate int CultureInfoIndexOf(string source, string value, int startIndex, int count, CompareOptions options);
-
-        private CultureInfoIndexOf _cultureInfoIndexOf = CultureInfo.CurrentCulture.CompareInfo.IndexOf;
-
+        private Decoder _decoder = null!; // initialized in BeginProcessing
+        
+        private  Func<ReadOnlySpan<char>, ReadOnlySpan<char>, CompareOptions, int> _cultureInfoIndexOf = CultureInfo.CurrentCulture.CompareInfo.IndexOf;
+        
         private void InitCulture()
         {
             _stringComparison = default;
@@ -1251,7 +1265,7 @@ namespace Microsoft.PowerShell.Commands
         public SwitchParameter SimpleMatch { get; set; }
 
         /// <summary>
-        /// Gets or sets a value indicating if the search is case-sensitive.If true, then do case-sensitive searches.
+        /// Gets or sets a value indicating if the search is case-sensitive. If true, then do case-sensitive searches.
         /// </summary>
         [Parameter]
         public SwitchParameter CaseSensitive { get; set; }
@@ -1449,7 +1463,8 @@ namespace Microsoft.PowerShell.Commands
         protected override void BeginProcessing()
         {
             _globalContextTracker = GetContextTracker();
-            
+            _decoder = Encoding.GetDecoder();
+
             if (this.MyInvocation.BoundParameters.ContainsKey(nameof(Culture)) && !this.MyInvocation.BoundParameters.ContainsKey(nameof(SimpleMatch)))
             {
                 InvalidOperationException exception = new(MatchStringStrings.CannotSpecifyCultureWithoutSimpleMatch);
@@ -1554,7 +1569,7 @@ namespace Microsoft.PowerShell.Commands
                 MatchInfo? matchInfo = null;
                 if (_inputObject.BaseObject is string line)
                 {
-                    matched = DoMatch(line, out result);
+                    matched = DoMatch(line.AsSpan(), out result);
                 }
                 else
                 {
@@ -1592,6 +1607,135 @@ namespace Microsoft.PowerShell.Commands
             }
         }
 
+        private static async Task FillPipeAsync(FileStream fs, PipeWriter writer, CancellationToken cancellationToken)
+        {
+            const int minimumBufferSize = 8192;
+            while (true)
+            {
+                Memory<byte> memory = writer.GetMemory(minimumBufferSize);
+                int bytesRead = await fs.ReadAsync(memory, cancellationToken);
+                if (bytesRead == 0)
+                {
+                    break;
+                }
+                writer.Advance(bytesRead);
+                FlushResult result = await writer.FlushAsync(cancellationToken);
+                if (result.IsCompleted || result.IsCompleted)
+                {
+                    break;
+                }
+            }
+            await writer.CompleteAsync();
+        }
+        
+        private static void ReadPipe(PipeReader reader, SearchValues<byte> searchValues, Action<ReadOnlySpan<byte>, ulong> action, CancellationToken cancellationToken)
+        {
+            var pool = ArrayPool<byte>.Shared;
+            ulong lineNumber = 0;
+            while (true)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                ReadResult result;
+                while (!reader.TryRead(out result))
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                    Thread.Yield();
+                }
+                
+                ReadOnlySequence<byte> bufferSequence = result.Buffer;
+                SequencePosition? newLinePosition;
+
+                if (bufferSequence.IsEmpty)
+                {
+                    return;
+                }
+
+                do
+                {
+                    newLinePosition = GetNewLineSequencePosition(bufferSequence, searchValues);
+                    if (!newLinePosition.HasValue && !result.IsCompleted)
+                    {
+                        break;
+                    }
+                    
+                    lineNumber++;
+                    
+                    var chunk = newLinePosition.HasValue 
+                        ? bufferSequence.Slice(0, newLinePosition.Value) 
+                        : bufferSequence;
+
+                    if (chunk.IsSingleSegment)
+                    {
+                        action(chunk.FirstSpan, lineNumber);    
+                    }
+                    else {
+                        byte[] chunkArray = pool.Rent((int)chunk.Length);
+                        chunk.CopyTo(chunkArray.AsSpan());
+                        try{
+                            action(chunkArray.AsSpan(), lineNumber);
+                        }
+                        finally{
+                            pool.Return(chunkArray);
+                        }
+                    }
+                    if (newLinePosition.HasValue)
+                    {
+                        bufferSequence = bufferSequence.Slice(bufferSequence.GetPosition(1, newLinePosition.Value));
+                        // in case we found \r and the next position in \n, move forward one more step
+                        if (bufferSequence.Length > 0 && bufferSequence.FirstSpan[0] == '\n')
+                        {
+                            bufferSequence = bufferSequence.Slice(bufferSequence.GetPosition(1));
+                        }
+                    }
+                } while (newLinePosition.HasValue);
+
+                reader.AdvanceTo(bufferSequence.Start, bufferSequence.End);
+                if (result.IsCompleted)
+                {
+                    break;
+                }
+            }
+            var task = reader.CompleteAsync();
+            _ = task;
+            return;
+            
+            static SequencePosition? GetNewLineSequencePosition(ReadOnlySequence<byte> buffer, SearchValues<byte> searchValues)
+            {
+                if (buffer.IsSingleSegment)
+                {
+                    long index = buffer.FirstSpan.IndexOfAny(searchValues);
+                    if (index != -1)
+                    {
+                        // roll forward passed search values
+                        return buffer.GetPosition(index);
+                    }
+                }
+                else
+                {
+                    long startIndex = 0;
+                    foreach (var segment in buffer)
+                    {
+                        long index = segment.Span.IndexOfAny(searchValues);
+                        if (index != -1)
+                        {
+                            return buffer.GetPosition(startIndex + index);
+                        }
+
+                        startIndex += segment.Length;
+                    }
+                }
+
+                return null;
+            }
+        }
+
         /// <summary>
         /// Process a file which was either specified on the
         /// command line or passed in as a FileInfo object.
@@ -1600,63 +1744,49 @@ namespace Microsoft.PowerShell.Commands
         /// <returns>True if a match was found; otherwise false.</returns>
         private bool ProcessFile(string filename)
         {
+            CancellationToken cancellationToken = CancellationToken.None;
             var contextTracker = GetContextTracker();
-
+            bool isTracking = contextTracker != _globalContextTracker;
             bool foundMatch = false;
 
             // Read the file one line at a time...
             try
             {
-                // see if the file is one of the include exclude list...
+                // see if the file is in one of the include exclude list...
                 if (!MeetsIncludeExcludeCriteria(filename))
                 {
                     return false;
                 }
 
-                using (FileStream fs = new(filename, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                var fileStreamOptions = new FileStreamOptions()
                 {
-                    using (StreamReader sr = new(fs, Encoding))
+                    Access = FileAccess.Read,
+                    BufferSize = 8 * 1024,
+                    Mode = FileMode.Open,
+                    Share = FileShare.ReadWrite,
+                    Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+                };
+                using (FileStream fsx = new(filename, fileStreamOptions))
+                {
+                    var pipe = new System.IO.Pipelines.Pipe();
+                    _ = FillPipeAsync(fsx, pipe.Writer, cancellationToken);
+                    ReadPipe(pipe.Reader, s_newLineSearchValues,  ProcessLineBytes, cancellationToken);
+                }
+                
+                void ProcessLineBytes(ReadOnlySpan<byte> line, ulong lineNumber)
+                {
+                    if (DoMatch(line, out MatchInfo? result))
                     {
-                        ulong lineNo = 0;
-
-                        // Read and display lines from the file until the end of
-                        // the file is reached.
-                        while (sr.ReadLine() is { } line)
-                        {
-                            lineNo++;
-
-                            if (DoMatch(line, out MatchInfo? result))
-                            {
-                                result.Path = filename;
-                                result.LineNumber = lineNo;
-                                contextTracker.TrackMatch(result);
-                            }
-                            else
-                            {
-                                contextTracker.TrackLine(line);
-                            }
-
-                            // Flush queue of matches to emit.
-                            if (contextTracker.EmitQueue.Count > 0)
-                            {
-                                foundMatch = true;
-
-                                // If -list or -quiet was specified, we only want to emit the first match
-                                // for each file so record the object to emit and stop processing
-                                // this file. It's done this way so the file is closed before emitting
-                                // the result so the downstream cmdlet can actually manipulate the file
-                                // that was found.
-                                if (Quiet || List)
-                                {
-                                    break;
-                                }
-
-                                FlushTrackerQueue(contextTracker);
-                            }
-                        }
+                        result.Path = filename;
+                        result.LineNumber = lineNumber;
+                        contextTracker.TrackMatch(result);
+                    }
+                    else if (isTracking)
+                    {
+                        TrackContextLine(line, contextTracker, ref foundMatch);    
                     }
                 }
-
+                
                 // Check for any remaining matches. This could be caused
                 // by breaking out of the loop early for quiet or list
                 // mode, or by reaching EOF before we collected all
@@ -1685,6 +1815,42 @@ namespace Microsoft.PowerShell.Commands
             }
 
             return foundMatch;
+        }
+        
+        private void TrackContextLine(ReadOnlySpan<byte> line, IContextTracker contextTracker, ref bool foundMatch)
+        {
+            var strLine = ConvertToString(line);
+            contextTracker.TrackLine(strLine);
+
+            // Flush queue of matches to emit.
+            if (contextTracker.EmitQueue.Count > 0)
+            {
+                foundMatch = true;
+
+                // If -list or -quiet was specified, we only want to emit the first match
+                // for each file so record the object to emit and stop processing
+                // this file. It's done this way so the file is closed before emitting
+                // the result so the downstream cmdlet can actually manipulate the file
+                // that was found.
+                if (Quiet || List)
+                {
+                    return;
+                }
+
+                FlushTrackerQueue(contextTracker);
+            }
+        }
+
+        private string ConvertToString(ReadOnlySpan<byte> line)
+        {
+            int maxChars = _encoding.GetMaxCharCount(line.Length);
+            char[] buffer = ArrayPool<char>.Shared.Rent(maxChars);
+            var span = new Span<char>(buffer);
+            var length = _decoder.GetChars(line, span, true);
+            span = span[..length];
+            var result = span.ToString();
+            ArrayPool<char>.Shared.Return(buffer);
+            return result;
         }
 
         /// <summary>
@@ -1741,10 +1907,25 @@ namespace Microsoft.PowerShell.Commands
             }
         }
 
-        private bool DoMatch(string operandString, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult)
+        private bool DoMatch(ReadOnlySpan<byte> operandString, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult)
         {
-            return DoMatchWorker(operandString, null, out matchResult);
+            char[] buffer = null!;
+            try
+            {
+                var maxCharCount = Encoding.GetMaxCharCount(operandString.Length);
+                buffer = ArrayPool<char>.Shared.Rent(maxCharCount);
+                var charSpan = buffer.AsSpan();
+                var length = _decoder.GetChars(operandString, charSpan, true);
+                return DoMatchWorker(charSpan[..length], null, out matchResult);
+            }
+            finally
+            {
+                ArrayPool<char>.Shared.Return(buffer);
+            }
         }
+
+        private bool DoMatch(ReadOnlySpan<char> operandString, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult) 
+            => DoMatchWorker(operandString, null, out matchResult);
 
         private bool DoMatch(object operand,  [NotNullWhen(returnValue: true)] out MatchInfo? matchResult, out string operandString)
         {
@@ -1773,7 +1954,7 @@ namespace Microsoft.PowerShell.Commands
                 operandString = (string)LanguagePrimitives.ConvertTo(operand, typeof(string), CultureInfo.InvariantCulture);
             }
 
-            return DoMatchWorker(operandString, matchInfo, out matchResult);
+            return DoMatchWorker(operandString.AsSpan(), matchInfo, out matchResult);
         }
 
         /// <summary>
@@ -1784,7 +1965,7 @@ namespace Microsoft.PowerShell.Commands
         /// <param name="matchInfo">The input object in filter mode.</param>
         /// <param name="matchResult">The match info object - this will be null if this.quiet is set.</param>
         /// <returns>True if the input object matched.</returns>
-        private bool DoMatchWorker(string operandString, MatchInfo? matchInfo,  [NotNullWhen(returnValue: true)] out MatchInfo? matchResult)
+        private bool DoMatchWorker(ReadOnlySpan<char> operandString, MatchInfo? matchInfo, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult)
         {
             bool gotMatch = false;
             Match[]? matches = null;
@@ -1798,6 +1979,7 @@ namespace Microsoft.PowerShell.Commands
                 (true, false) => MatchInfoFlags.Emphasize,
                 _ => MatchInfoFlags.None,
             };
+            // TODO: remove comment
             bool shouldEmphasize = !NoEmphasis; // && Host.UI.SupportsVirtualTerminal;
 
             // If Emphasize is set and VT is supported,
@@ -1813,13 +1995,24 @@ namespace Microsoft.PowerShell.Commands
                 while (patternIndex < Pattern.Length)
                 {
                     Regex r = _regexPattern![patternIndex];
+                    if (!r.IsMatch(operandString))
+                    {
+                        patternIndex++;
+                        continue;
+                    }
 
+                    if (!r.IsMatch(operandString))
+                    {
+                        patternIndex++;
+                        continue;
+                    }
+                    var line = operandString.ToString();
                     // Only honor allMatches if notMatch is not set,
                     // since it's a fairly expensive operation and
                     // notMatch takes precedent over allMatch.
                     if (AllMatches && !NotMatch)
                     {
-                        MatchCollection mc = r.Matches(operandString);
+                        MatchCollection mc = r.Matches(line);
                         if (mc.Count > 0)
                         {
                             matches = new Match[mc.Count];
@@ -1829,7 +2022,7 @@ namespace Microsoft.PowerShell.Commands
                     }
                     else
                     {
-                        Match match = r.Match(operandString);
+                        Match match = r.Match(line);
                         gotMatch = match.Success;
 
                         if (match.Success)
@@ -1851,8 +2044,7 @@ namespace Microsoft.PowerShell.Commands
                 while (patternIndex < Pattern.Length)
                 {
                     string pat = Pattern[patternIndex];
-
-                    int index = _cultureInfoIndexOf(operandString, pat, 0, operandString.Length, _compareOptions);
+                    int index = _cultureInfoIndexOf.Invoke(operandString, pat.AsSpan(), _compareOptions);
                     if (index >= 0)
                     {
                         simpleMatchRange = new Range(index, pat.Length);
@@ -1898,8 +2090,8 @@ namespace Microsoft.PowerShell.Commands
                 // otherwise construct and populate a new MatchInfo object
                 matchResult = new MatchInfo(flags, simpleMatchRange)
                 {
-                    IgnoreCase = !CaseSensitive, 
-                    Line = operandString, 
+                    IgnoreCase = !CaseSensitive,
+                    Line = operandString.ToString(),
                     Pattern = Pattern[patternIndex],
                     // Matches should be an empty list, rather than null,
                     // in the cases of notMatch and simpleMatch.
@@ -1910,6 +2102,7 @@ namespace Microsoft.PowerShell.Commands
                 {
                     matchResult.Context = new MatchInfoContext();
                 }
+
                 return true;
             }
 
