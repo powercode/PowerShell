@@ -171,8 +171,8 @@ public class SelectStringTests
             .AddParameter(nameof(SelectStringCommand.LiteralPath), _filePath)
             .AddParameter(nameof(SelectStringCommand.Pattern), @"\b(Gutenberg|the)\b")
             .AddParameter(nameof(SelectStringCommand.AllMatches));
-        ps.Commands.AddCommand("Out-String");
-        var res = ps.Invoke<string>();
+        //ps.Commands.AddCommand("Out-String");
+        var res = ps.Invoke<MatchInfo>();
         var errors = ps.Streams.Error.ReadAll();
         Assert.Empty(errors);
     }
@@ -247,5 +247,34 @@ public class SelectStringTests
         var res = ps.Invoke<MatchInfo>().First();
         string expected = $"{file}:{expectedEnd}";
         Assert.Equal(expected, res.ToString());
+    }
+    
+    [Theory]
+    [InlineData("string", "1:This is a text string, and another string")]
+    [InlineData("second", "2:This is the second line")]    
+    [InlineData("matches", "5:No matches")]
+
+    public void MatchesLineRelativePath(string pattern, string expectedEnd)
+    {
+        var nl = Environment.NewLine;
+        var text = $"This is a text string, and another string{nl}This is the second line{nl}This is the third line{nl}This is the fourth line{nl}No matches";
+        
+        var file = Path.GetTempFileName();
+        File.WriteAllText(file, text);
+        var fileName = Path.GetFileName(file); 
+        using var ps = PowerShell.Create();
+        ps.Commands
+            .AddCommand("Push-Location")
+            .AddParameter(nameof(PushLocationCommand.LiteralPath), Path.GetDirectoryName(file))
+            .AddStatement()
+            .AddCommand("Select-String")
+            .AddParameter(nameof(SelectStringCommand.LiteralPath), file)
+            .AddParameter(nameof(SelectStringCommand.Pattern), pattern);
+        
+        var res = ps.Invoke<MatchInfo>();
+        var first = Assert.Single(res);
+        var actual = first.ToString(Path.GetDirectoryName(file));
+        string expected = $"{fileName}:{expectedEnd}";
+        Assert.Equal(expected, actual);
     }
 }

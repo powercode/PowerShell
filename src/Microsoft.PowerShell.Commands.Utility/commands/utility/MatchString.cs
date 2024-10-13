@@ -13,7 +13,8 @@ using System.IO;
 using System.IO.Pipelines;
 using System.Management.Automation;
 using System.Management.Automation.Internal;
-using System.Management.Automation.Runspaces;
+using System.Management.Automation.Interpreter;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -435,6 +436,20 @@ namespace Microsoft.PowerShell.Commands
             return clone;
         }
     }
+    
+    [Flags]
+    internal enum LineMatcherFlags
+    {
+        None = 0,
+        NoEmphasize = 1 << 1,
+        AllMatches = 1 << 2,
+        NotMatch = 1 << 3,
+        IsTracking = 1 << 4,
+        IgnoreCase = 1 << 5,
+        Quiet = 1 << 6,
+        List = 1 << 7,
+        Raw = 1 << 8,
+    }
 
     // ReSharper disable once ClassNeverInstantiated.Global
     /// <summary>
@@ -633,7 +648,7 @@ namespace Microsoft.PowerShell.Commands
         /// <summary>
         /// An interface to a context tracking algorithm.
         /// </summary>
-        private interface IContextTracker
+        internal interface IContextTracker
         {
             /// <summary>
             /// Gets matches with completed context information
@@ -1096,7 +1111,7 @@ namespace Microsoft.PowerShell.Commands
         /// <summary>
         /// ContextTracker that does not work for the case when pre- and post-context is 0.
         /// </summary>
-        private sealed class NoContextTracker : IContextTracker
+        internal sealed class NoContextTracker : IContextTracker
         {
             private readonly IList<MatchInfo> _matches = new List<MatchInfo>(1);
 
@@ -1119,22 +1134,8 @@ namespace Microsoft.PowerShell.Commands
         [Parameter]
         [ValidateSet(typeof(ValidateMatchStringCultureNamesGenerator))]
         [ValidateNotNull]
-        public string Culture
-        {
-            get => _stringComparison switch
-                {
-                    StringComparison.Ordinal or StringComparison.OrdinalIgnoreCase => OrdinalCultureName,
-                    StringComparison.InvariantCulture or StringComparison.InvariantCultureIgnoreCase => InvariantCultureName,
-                    StringComparison.CurrentCulture or StringComparison.CurrentCultureIgnoreCase => CurrentCultureName,
-                    _ => _cultureName
-                };
-
-            set
-            {
-                _cultureName = value;
-                InitCulture();
-            }
-        }
+        // ReSharper disable once PropertyCanBeMadeInitOnly.Global
+        public string Culture { get; set; } = CultureInfo.CurrentCulture.Name;
 
         internal const string OrdinalCultureName = "Ordinal";
         internal const string InvariantCultureName = "Invariant";
@@ -1142,53 +1143,6 @@ namespace Microsoft.PowerShell.Commands
 
         private static readonly SearchValues<byte> s_newLineSearchValues = SearchValues.Create([(byte)'\r', (byte)'\n']);
         
-        private string _cultureName = CultureInfo.CurrentCulture.Name;
-        private StringComparison _stringComparison = StringComparison.CurrentCultureIgnoreCase;
-        private CompareOptions _compareOptions = CompareOptions.IgnoreCase;
-        private Decoder _decoder = null!; // initialized in BeginProcessing
-        
-        private  Func<ReadOnlySpan<char>, ReadOnlySpan<char>, CompareOptions, int> _cultureInfoIndexOf = CultureInfo.CurrentCulture.CompareInfo.IndexOf;
-        
-        private void InitCulture()
-        {
-            _stringComparison = default;
-
-            switch (_cultureName)
-            {
-                case OrdinalCultureName:
-                    {
-                        _stringComparison = CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-                        _compareOptions = CaseSensitive ? CompareOptions.Ordinal : CompareOptions.OrdinalIgnoreCase;
-                        _cultureInfoIndexOf = CultureInfo.InvariantCulture.CompareInfo.IndexOf;
-                        break;
-                    }
-
-                case InvariantCultureName:
-                    {
-                        _stringComparison = CaseSensitive ? StringComparison.InvariantCulture : StringComparison.InvariantCultureIgnoreCase;
-                        _compareOptions = CaseSensitive ? CompareOptions.None : CompareOptions.IgnoreCase;
-                        _cultureInfoIndexOf = CultureInfo.InvariantCulture.CompareInfo.IndexOf;
-                        break;
-                    }
-
-                case CurrentCultureName:
-                    {
-                        _stringComparison = CaseSensitive ? StringComparison.CurrentCulture : StringComparison.CurrentCultureIgnoreCase;
-                        _compareOptions = CaseSensitive ? CompareOptions.None : CompareOptions.IgnoreCase;
-                        _cultureInfoIndexOf = CultureInfo.CurrentCulture.CompareInfo.IndexOf;
-                        break;
-                    }
-
-                default:
-                    {
-                        var cultureInfo = CultureInfo.GetCultureInfo(_cultureName);
-                        _compareOptions = CaseSensitive ? CompareOptions.None : CompareOptions.IgnoreCase;
-                        _cultureInfoIndexOf = cultureInfo.CompareInfo.IndexOf;
-                        break;
-                    }
-            }
-        }
-
         /// <summary>
         /// Gets or sets the current pipeline object.
         /// </summary>
@@ -1212,8 +1166,6 @@ namespace Microsoft.PowerShell.Commands
         /// </summary>
         [Parameter(Mandatory = true, Position = 0)]
         public string[] Pattern { get; set; } = null!;
-
-        private Regex[]? _regexPattern;
 
         // ReSharper disable once MemberCanBePrivate.Global
         /// <summary>
@@ -1433,11 +1385,6 @@ namespace Microsoft.PowerShell.Commands
 
         private int _postContext;
 
-        // When we are in Raw mode or pre- and post-context are zero, use the _noContextTracker, since we will not be needing trackedLines.
-        private IContextTracker GetContextTracker() => (Raw || (_preContext == 0 && _postContext == 0))
-            ? _noContextTracker
-            : new ContextTracker(_preContext, _postContext);
-
         // This context tracker is only used for strings which are piped
         // directly into the cmdlet. File processing doesn't need
         // to track state between calls to ProcessRecord, and so
@@ -1445,7 +1392,10 @@ namespace Microsoft.PowerShell.Commands
         // use a single global tracker for both is that in the case of
         // a mixed list of strings and FileInfo, the context tracker
         // would get reset after each file.
-        private IContextTracker _globalContextTracker = null!;  // set in BeginProcessing
+        // When we are in Raw mode or pre- and post-context are zero, use the _noContextTracker, since we will not be needing trackedLines.
+        private IContextTracker GetContextTracker() => (Raw || (_preContext == 0 && _postContext == 0))
+            ? _noContextTracker
+            : new ContextTracker(_preContext, _postContext);
 
         private readonly IContextTracker _noContextTracker = new NoContextTracker();
 
@@ -1462,44 +1412,43 @@ namespace Microsoft.PowerShell.Commands
         /// </summary>
         protected override void BeginProcessing()
         {
-            _globalContextTracker = GetContextTracker();
-            _decoder = Encoding.GetDecoder();
-
-            if (this.MyInvocation.BoundParameters.ContainsKey(nameof(Culture)) && !this.MyInvocation.BoundParameters.ContainsKey(nameof(SimpleMatch)))
+            if (MyInvocation.BoundParameters.ContainsKey(nameof(Culture)) && !this.MyInvocation.BoundParameters.ContainsKey(nameof(SimpleMatch)))
             {
                 InvalidOperationException exception = new(MatchStringStrings.CannotSpecifyCultureWithoutSimpleMatch);
                 ErrorRecord errorRecord = new(exception, "CannotSpecifyCultureWithoutSimpleMatch", ErrorCategory.InvalidData, null);
                 this.ThrowTerminatingError(errorRecord);
             }
-
-            InitCulture();
-
+            
             string? suppressVt = Environment.GetEnvironmentVariable("__SuppressAnsiEscapeSequences");
             if (!string.IsNullOrEmpty(suppressVt))
             {
                 NoEmphasis = true;
             }
+            
+            var lineMatcherFlags = GetLineMatcherFlags();
 
-            if (!SimpleMatch)
-            {
-                RegexOptions regexOptions = CaseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase;
-                _regexPattern = new Regex[Pattern.Length];
-                for (int i = 0; i < Pattern.Length; i++)
-                {
-                    try
-                    {
-                        _regexPattern[i] = new Regex(Pattern[i], regexOptions);
-                    }
-                    catch (Exception e)
-                    {
-                        this.ThrowTerminatingError(BuildErrorRecord(MatchStringStrings.InvalidRegex, Pattern[i], e.Message, "InvalidRegex", e));
-                        throw;
-                    }
-                }
-            }
+            _lineMatcher = SimpleMatch 
+                ? new SimpleLineMatcher(CommandRuntime, GetContextTracker(), Pattern, lineMatcherFlags,  Encoding, Culture) 
+                : new RegexLineMatcher(CommandRuntime, GetContextTracker(), Pattern, lineMatcherFlags, Encoding);
+        }
+
+        private LineMatcherFlags GetLineMatcherFlags()
+        {
+            bool isTracking = !Raw && _preContext == 0 && _postContext != 0;
+            var flags  = LineMatcherFlags.None;
+            if (isTracking) flags |= LineMatcherFlags.IsTracking;
+            if (NotMatch) flags |= LineMatcherFlags.NotMatch;
+            if (AllMatches) flags |= LineMatcherFlags.AllMatches;
+            if (!CaseSensitive) flags |= LineMatcherFlags.IgnoreCase;
+            if (NoEmphasis) flags |= LineMatcherFlags.NoEmphasize;
+            if (Quiet) flags |= LineMatcherFlags.Quiet;
+            if (List) flags |= LineMatcherFlags.List;
+            if (Raw) flags |= LineMatcherFlags.Raw;
+            return flags;
         }
 
         private readonly List<string> _inputObjectFileList = [string.Empty];
+        private LineMatcher _lineMatcher = null!;
 
         /// <summary>
         /// Process the input.
@@ -1569,13 +1518,13 @@ namespace Microsoft.PowerShell.Commands
                 MatchInfo? matchInfo = null;
                 if (_inputObject.BaseObject is string line)
                 {
-                    matched = DoMatch(line.AsSpan(), out result);
+                    matched = _lineMatcher.DoMatch(line.AsSpan(), out result);
                 }
                 else
                 {
                     matchInfo = _inputObject.BaseObject as MatchInfo;
                     object objectToCheck = matchInfo ?? (object)_inputObject;
-                    matched = DoMatch(objectToCheck, out result, out line);
+                    matched = _lineMatcher.DoMatch(objectToCheck, out result, out line);
                 }
 
                 if (matched && result is not null)
@@ -1587,15 +1536,15 @@ namespace Microsoft.PowerShell.Commands
                     }
 
                     // doMatch will have already set the pattern and line text...
-                    _globalContextTracker.TrackMatch(result);
+                    _lineMatcher.TrackMatch(result);
                 }
                 else
                 {
-                    _globalContextTracker.TrackLine(line);
+                    _lineMatcher.TrackLine(line);
                 }
 
                 // Emit any queued up objects...
-                if (FlushTrackerQueue(_globalContextTracker))
+                if (_lineMatcher.FlushTrackerQueue())
                 {
                     // If we're in quiet mode, go ahead and stop processing
                     // now.
@@ -1745,8 +1694,7 @@ namespace Microsoft.PowerShell.Commands
         private bool ProcessFile(string filename)
         {
             CancellationToken cancellationToken = CancellationToken.None;
-            var contextTracker = GetContextTracker();
-            bool isTracking = contextTracker != _globalContextTracker;
+            
             bool foundMatch = false;
 
             // Read the file one line at a time...
@@ -1757,7 +1705,9 @@ namespace Microsoft.PowerShell.Commands
                 {
                     return false;
                 }
-
+                
+                _lineMatcher.CurrentFileName = filename;
+                
                 var fileStreamOptions = new FileStreamOptions()
                 {
                     Access = FileAccess.Read,
@@ -1770,29 +1720,16 @@ namespace Microsoft.PowerShell.Commands
                 {
                     var pipe = new System.IO.Pipelines.Pipe();
                     _ = FillPipeAsync(fsx, pipe.Writer, cancellationToken);
-                    ReadPipe(pipe.Reader, s_newLineSearchValues,  ProcessLineBytes, cancellationToken);
-                }
-                
-                void ProcessLineBytes(ReadOnlySpan<byte> line, ulong lineNumber)
-                {
-                    if (DoMatch(line, out MatchInfo? result))
-                    {
-                        result.Path = filename;
-                        result.LineNumber = lineNumber;
-                        contextTracker.TrackMatch(result);
-                    }
-                    else if (isTracking)
-                    {
-                        TrackContextLine(line, contextTracker, ref foundMatch);    
-                    }
+                    
+                    ReadPipe(pipe.Reader, s_newLineSearchValues,  _lineMatcher.ProcessLineBytes, cancellationToken);
                 }
                 
                 // Check for any remaining matches. This could be caused
                 // by breaking out of the loop early for quiet or list
                 // mode, or by reaching EOF before we collected all
                 // our post-context.
-                contextTracker.TrackEOF();
-                if (FlushTrackerQueue(contextTracker))
+                _lineMatcher.TrackEOF();
+                if (_lineMatcher.FlushTrackerQueue())
                 {
                     foundMatch = true;
                 }
@@ -1817,82 +1754,6 @@ namespace Microsoft.PowerShell.Commands
             return foundMatch;
         }
         
-        private void TrackContextLine(ReadOnlySpan<byte> line, IContextTracker contextTracker, ref bool foundMatch)
-        {
-            var strLine = ConvertToString(line);
-            contextTracker.TrackLine(strLine);
-
-            // Flush queue of matches to emit.
-            if (contextTracker.EmitQueue.Count > 0)
-            {
-                foundMatch = true;
-
-                // If -list or -quiet was specified, we only want to emit the first match
-                // for each file so record the object to emit and stop processing
-                // this file. It's done this way so the file is closed before emitting
-                // the result so the downstream cmdlet can actually manipulate the file
-                // that was found.
-                if (Quiet || List)
-                {
-                    return;
-                }
-
-                FlushTrackerQueue(contextTracker);
-            }
-        }
-
-        private string ConvertToString(ReadOnlySpan<byte> line)
-        {
-            int maxChars = _encoding.GetMaxCharCount(line.Length);
-            char[] buffer = ArrayPool<char>.Shared.Rent(maxChars);
-            var span = new Span<char>(buffer);
-            var length = _decoder.GetChars(line, span, true);
-            span = span[..length];
-            var result = span.ToString();
-            ArrayPool<char>.Shared.Return(buffer);
-            return result;
-        }
-
-        /// <summary>
-        /// Emit any objects which have been queued up, and clear the queue.
-        /// </summary>
-        /// <param name="contextTracker">The context tracker to operate on.</param>
-        /// <returns>Whether any objects were emitted.</returns>
-        private bool FlushTrackerQueue(IContextTracker contextTracker)
-        {
-            // Do we even have any matches to emit?
-            if (contextTracker.EmitQueue.Count < 1)
-            {
-                return false;
-            }
-
-            if (Raw)
-            {
-                foreach (MatchInfo match in contextTracker.EmitQueue)
-                {
-                    WriteObject(match.Line);
-                }
-            }
-            else if (Quiet && !List)
-            {
-                WriteObject(true);
-            }
-            else if (List)
-            {
-                WriteObject(contextTracker.EmitQueue[0]);
-            }
-            else
-            {
-                foreach (MatchInfo match in contextTracker.EmitQueue)
-                {
-                    WriteObject(match);
-                }
-            }
-
-            contextTracker.EmitQueue.Clear();
-            return true;
-        }
-
         /// <summary>
         /// Complete processing. Emits any objects which have been queued up
         /// due to -context tracking.
@@ -1900,215 +1761,13 @@ namespace Microsoft.PowerShell.Commands
         protected override void EndProcessing()
         {
             // Check for a leftover match that was still tracking context.
-            _globalContextTracker.TrackEOF();
+            _lineMatcher.TrackEOF();
             if (!_doneProcessing)
             {
-                FlushTrackerQueue(_globalContextTracker);
+                _lineMatcher.FlushTrackerQueue();
             }
         }
-
-        private bool DoMatch(ReadOnlySpan<byte> operandString, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult)
-        {
-            char[] buffer = null!;
-            try
-            {
-                var maxCharCount = Encoding.GetMaxCharCount(operandString.Length);
-                buffer = ArrayPool<char>.Shared.Rent(maxCharCount);
-                var charSpan = buffer.AsSpan();
-                var length = _decoder.GetChars(operandString, charSpan, true);
-                return DoMatchWorker(charSpan[..length], null, out matchResult);
-            }
-            finally
-            {
-                ArrayPool<char>.Shared.Return(buffer);
-            }
-        }
-
-        private bool DoMatch(ReadOnlySpan<char> operandString, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult) 
-            => DoMatchWorker(operandString, null, out matchResult);
-
-        private bool DoMatch(object operand,  [NotNullWhen(returnValue: true)] out MatchInfo? matchResult, out string operandString)
-        {
-            MatchInfo? matchInfo = operand as MatchInfo;
-            if (matchInfo != null)
-            {
-                // We're operating in filter mode. Match
-                // against the provided MatchInfo's line.
-                // If the user has specified context tracking,
-                // inform them that it is not allowed in filter
-                // mode and disable it. Also, reset the global
-                // context tracker used for processing pipeline
-                // objects to use the new settings.
-                operandString = matchInfo.Line;
-
-                if (_preContext > 0 || _postContext > 0)
-                {
-                    _preContext = 0;
-                    _postContext = 0;
-                    _globalContextTracker = new ContextTracker(_preContext, _postContext);
-                    WarnFilterContext();
-                }
-            }
-            else
-            {
-                operandString = (string)LanguagePrimitives.ConvertTo(operand, typeof(string), CultureInfo.InvariantCulture);
-            }
-
-            return DoMatchWorker(operandString.AsSpan(), matchInfo, out matchResult);
-        }
-
-        /// <summary>
-        /// Check the operand and see if it matches, if this.quiet is not set, then
-        /// return a partially populated MatchInfo object with Line, Pattern, IgnoreCase set.
-        /// </summary>
-        /// <param name="operandString">The result of converting operand to a string.</param>
-        /// <param name="matchInfo">The input object in filter mode.</param>
-        /// <param name="matchResult">The match info object - this will be null if this.quiet is set.</param>
-        /// <returns>True if the input object matched.</returns>
-        private bool DoMatchWorker(ReadOnlySpan<char> operandString, MatchInfo? matchInfo, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult)
-        {
-            bool gotMatch = false;
-            Match[]? matches = null;
-            int patternIndex = 0;
-            matchResult = null;
-            Range? simpleMatchRange = null;
-            var flags = (!NoEmphasis, SimpleMatch.IsPresent) switch
-            {
-                (true, true) => MatchInfoFlags.Emphasize | MatchInfoFlags.SimpleMatch,
-                (false, true) => MatchInfoFlags.SimpleMatch,
-                (true, false) => MatchInfoFlags.Emphasize,
-                _ => MatchInfoFlags.None,
-            };
-            // TODO: remove comment
-            bool shouldEmphasize = !NoEmphasis; // && Host.UI.SupportsVirtualTerminal;
-
-            // If Emphasize is set and VT is supported,
-            // the lengths and starting indexes of regex matches
-            // need to be passed in to the matchInfo object.
-            if (shouldEmphasize)
-            {
-                //matchRanges = new List<Range>();
-            }
-
-            if (!SimpleMatch)
-            {
-                while (patternIndex < Pattern.Length)
-                {
-                    Regex r = _regexPattern![patternIndex];
-                    if (!r.IsMatch(operandString))
-                    {
-                        patternIndex++;
-                        continue;
-                    }
-
-                    if (!r.IsMatch(operandString))
-                    {
-                        patternIndex++;
-                        continue;
-                    }
-                    var line = operandString.ToString();
-                    // Only honor allMatches if notMatch is not set,
-                    // since it's a fairly expensive operation and
-                    // notMatch takes precedent over allMatch.
-                    if (AllMatches && !NotMatch)
-                    {
-                        MatchCollection mc = r.Matches(line);
-                        if (mc.Count > 0)
-                        {
-                            matches = new Match[mc.Count];
-                            ((ICollection)mc).CopyTo(matches, 0);
-                            gotMatch = true;
-                        }
-                    }
-                    else
-                    {
-                        Match match = r.Match(line);
-                        gotMatch = match.Success;
-
-                        if (match.Success)
-                        {
-                            matches = [match];
-                        }
-                    }
-
-                    if (gotMatch)
-                    {
-                        break;
-                    }
-
-                    patternIndex++;
-                }
-            }
-            else
-            {
-                while (patternIndex < Pattern.Length)
-                {
-                    string pat = Pattern[patternIndex];
-                    int index = _cultureInfoIndexOf.Invoke(operandString, pat.AsSpan(), _compareOptions);
-                    if (index >= 0)
-                    {
-                        simpleMatchRange = new Range(index, pat.Length);
-                        gotMatch = true;
-                        break;
-                    }
-
-                    patternIndex++;
-                }
-            }
-
-            if (NotMatch)
-            {
-                gotMatch = !gotMatch;
-
-                // If notMatch was specified with multiple
-                // patterns, then *none* of the patterns
-                // matched and any pattern could be picked
-                // to report in MatchInfo. However, that also
-                // means that patternIndex will have been
-                // incremented past the end of the pattern array.
-                // So reset it to select the first pattern.
-                patternIndex = 0;
-            }
-
-            if (gotMatch)
-            {
-                // if we were passed a MatchInfo object as the operand,
-                // we're operating in filter mode.
-                if (matchInfo != null)
-                {
-                    // If the original MatchInfo was tracking context,
-                    // we need to copy it and disable display context,
-                    // since we can't guarantee it will be displayed
-                    // correctly when filtered.
-                    matchResult = matchInfo.Context != null 
-                        ? matchInfo.Clone() 
-                        : matchInfo; // Otherwise, just pass the object as is.
-
-                    return true;
-                }
-
-                // otherwise construct and populate a new MatchInfo object
-                matchResult = new MatchInfo(flags, simpleMatchRange)
-                {
-                    IgnoreCase = !CaseSensitive,
-                    Line = operandString.ToString(),
-                    Pattern = Pattern[patternIndex],
-                    // Matches should be an empty list, rather than null,
-                    // in the cases of notMatch and simpleMatch.
-                    Matches = matches ?? [],
-                };
-
-                if (_preContext > 0 || _postContext > 0)
-                {
-                    matchResult.Context = new MatchInfoContext();
-                }
-
-                return true;
-            }
-
-            return false;
-        }
-
+        
         /// <summary>
         /// Get a list or resolved file paths.
         /// </summary>
@@ -2162,12 +1821,6 @@ namespace Microsoft.PowerShell.Commands
             string formattedMessage = StringUtil.Format(messageId, arguments);
             ArgumentException e = new(formattedMessage, innerException);
             return new ErrorRecord(e, errorId, ErrorCategory.InvalidArgument, null);
-        }
-
-        private void WarnFilterContext()
-        {
-            string msg = MatchStringStrings.FilterContextWarning;
-            WriteWarning(msg);
         }
 
         /// <summary>
@@ -2286,6 +1939,463 @@ namespace Microsoft.PowerShell.Commands
             }
 
             return result.ToArray();
+        }
+    }
+    
+    internal abstract class LineMatcher(
+        ICommandRuntime commandRuntime,
+        SelectStringCommand.IContextTracker contextTracker,
+        string[] patterns,
+        LineMatcherFlags flags,
+        Encoding encoding)
+    {
+        private bool _foundMatch;
+        private readonly Decoder _decoder = encoding.GetDecoder();
+        private SelectStringCommand.IContextTracker? _overrideTracker;
+
+        private string[] Patterns { get; } = patterns;
+        
+        protected bool NotMatch { get; } = flags.HasFlag(LineMatcherFlags.NotMatch);
+
+        protected bool AllMatches { get; } = flags.HasFlag(LineMatcherFlags.AllMatches);
+
+        protected bool CaseSensitive { get; } = !flags.HasFlag(LineMatcherFlags.IgnoreCase);
+
+        private Encoding Encoding { get; } = encoding;
+        
+        private SelectStringCommand.IContextTracker ContextTracker => _overrideTracker ?? contextTracker;
+
+        protected bool ShouldEmphasize { get; } = !flags.HasFlag(LineMatcherFlags.NoEmphasize);
+
+        private bool List { get; } = flags.HasFlag(LineMatcherFlags.List);
+
+        private bool IsTracking { get; } = flags.HasFlag(LineMatcherFlags.IsTracking);
+
+        private bool Quiet { get; } = flags.HasFlag(LineMatcherFlags.Quiet);
+
+        private bool Raw { get; } = flags.HasFlag(LineMatcherFlags.Raw);
+
+        public bool FoundMatch => _foundMatch;
+
+        public string? CurrentFileName { get; set; }
+        
+        public void ProcessLineBytes(ReadOnlySpan<byte> line, ulong lineNumber)
+        {
+            if (DoMatch(line, out MatchInfo? result))
+            {
+                result.Path = CurrentFileName ?? throw new InvalidOperationException();
+                result.LineNumber = lineNumber;
+                ContextTracker.TrackMatch(result);
+            }
+            else if (IsTracking)
+            {
+                TrackContextLine(line, ref _foundMatch);    
+            }
+        }
+
+        private void TrackContextLine(ReadOnlySpan<byte> line, ref bool foundMatch)
+        {
+            var strLine = ConvertToString(line);
+            ContextTracker.TrackLine(strLine);
+
+            // Flush queue of matches to emit.
+            if (ContextTracker.EmitQueue.Count > 0)
+            {
+                foundMatch = true;
+
+                // If -list or -quiet was specified, we only want to emit the first match
+                // for each file so record the object to emit and stop processing
+                // this file. It's done this way so the file is closed before emitting
+                // the result so the downstream cmdlet can actually manipulate the file
+                // that was found.
+                if (Quiet || List)
+                {
+                    return;
+                }
+
+                FlushTrackerQueue();
+            }
+        }
+        
+        private string ConvertToString(ReadOnlySpan<byte> line)
+        {
+            int maxChars = Encoding.GetMaxCharCount(line.Length);
+            char[] buffer = ArrayPool<char>.Shared.Rent(maxChars);
+            var span = new Span<char>(buffer);
+            var length = _decoder.GetChars(line, span, true);
+            span = span[..length];
+            var result = span.ToString();
+            ArrayPool<char>.Shared.Return(buffer);
+            return result;
+        }
+
+        private bool DoMatch(ReadOnlySpan<byte> operandString, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult)
+        {
+            char[] buffer = null!;
+            try
+            {
+                var maxCharCount = Encoding.GetMaxCharCount(operandString.Length);
+                buffer = ArrayPool<char>.Shared.Rent(maxCharCount);
+                var charSpan = buffer.AsSpan();
+                var length = _decoder.GetChars(operandString, charSpan, true);
+                return DoMatch(charSpan[..length], null, out matchResult);
+            }
+            finally
+            {
+                ArrayPool<char>.Shared.Return(buffer);
+            }
+        }
+
+        public bool DoMatch(string line, [NotNullWhen(returnValue: true)] out MatchInfo? matchInfo) => 
+            DoMatch(line.AsSpan(), null, out matchInfo);
+
+        /// <summary>
+        /// Reports match results and determin if 
+        /// </summary>
+        /// <param name="gotMatch"></param>
+        /// <param name="operandString"></param>
+        /// <param name="matchInfo"></param>
+        /// <param name="flags"></param>
+        /// <param name="simpleMatchRange"></param>
+        /// <param name="matches"></param>
+        /// <param name="patternIndex"></param>
+        /// <param name="matchResult"></param>
+        /// <returns>true if a more patterns should be processed </returns>
+        protected bool ReportMatchResult(bool gotMatch, ReadOnlySpan<char> operandString, MatchInfo? matchInfo, MatchInfoFlags flags, Range? simpleMatchRange, Match[]? matches, 
+            int patternIndex, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult)
+        {
+            matchResult = null;
+            if (NotMatch)
+            {
+                gotMatch = !gotMatch;
+
+                // If notMatch was specified with multiple
+                // patterns, then *none* of the patterns
+                // matched and any pattern could be picked
+                // to report in MatchInfo. However, that also
+                // means that patternIndex will have been
+                // incremented past the end of the pattern array.
+                // So reset it to select the first pattern.
+                patternIndex = 0;
+            }
+
+            if (gotMatch)
+            {
+                // if we were passed a MatchInfo object as the operand,
+                // we're operating in filter mode.
+                if (matchInfo != null)
+                {
+                    // If the original MatchInfo was tracking context,
+                    // we need to copy it and disable display context,
+                    // since we can't guarantee it will be displayed
+                    // correctly when filtered.
+                    matchResult = matchInfo.Context != null 
+                        ? matchInfo.Clone() 
+                        : matchInfo; // Otherwise, just pass the object as is.
+
+                    return true;
+                }
+
+                // otherwise construct and populate a new MatchInfo object
+                matchResult = new MatchInfo(flags, simpleMatchRange)
+                {
+                    IgnoreCase = !CaseSensitive,
+                    Line = operandString.ToString(),
+                    Pattern = Patterns[patternIndex],
+                    // Matches should be an empty list, rather than null,
+                    // in the cases of notMatch and simpleMatch.
+                    Matches = matches ?? [],
+                };
+
+                if (IsTracking)
+                {
+                    matchResult.Context = new MatchInfoContext();
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+
+        public bool DoMatch(object operand, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult, out string operandString)
+        {
+            MatchInfo? matchInfo = operand as MatchInfo;
+            if (matchInfo != null)
+            {
+                // We're operating in filter mode. Match
+                // against the provided MatchInfo's line.
+                // If the user has specified context tracking,
+                // inform them that it is not allowed in filter
+                // mode and disable it. Also, reset the global
+                // context tracker used for processing pipeline
+                // objects to use the new settings.
+                operandString = matchInfo.Line;
+
+                if (IsTracking)
+                {
+                    _overrideTracker = new SelectStringCommand.NoContextTracker();
+                    WarnFilterContext();
+                }
+            }
+            else
+            {
+                operandString = (string)LanguagePrimitives.ConvertTo(operand, typeof(string), CultureInfo.InvariantCulture);
+            }
+
+            return DoMatchWorker(operandString.AsSpan(), matchInfo, out matchResult);
+        }
+
+        private  bool DoMatch(ReadOnlySpan<char> span, MatchInfo? matchInfo, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult)
+        {
+            bool gotMatch = DoMatchWorker(span, matchInfo, out matchResult);
+            return gotMatch;
+        }
+        
+        /// <summary>
+        /// Check the operand and see if it matches, if this.quiet is not set, then
+        /// return a partially populated MatchInfo object with Line, Pattern, IgnoreCase set.
+        /// </summary>
+        /// <param name="operandString">The result of converting operand to a string.</param>
+        /// <param name="matchInfo">The input object in filter mode.</param>
+        /// <param name="matchResult">The match info object - this will be null if this.quiet is set.</param>
+        /// <returns>True if the input object matched.</returns>
+        protected abstract bool DoMatchWorker(ReadOnlySpan<char> operandString, MatchInfo? matchInfo, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult);
+
+        public bool DoMatch(ReadOnlySpan<char> operandString, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult) =>
+            DoMatchWorker(operandString, null, out matchResult);
+        
+        private void WarnFilterContext()
+        {
+            string msg = MatchStringStrings.FilterContextWarning;
+            commandRuntime.WriteWarning(msg);
+        }
+        
+        /// <summary>
+        /// Emit any objects which have been queued up, and clear the queue.
+        /// </summary>
+        /// <returns>Whether any objects were emitted.</returns>
+        public bool FlushTrackerQueue()
+        {
+            // Do we even have any matches to emit?
+            if (contextTracker.EmitQueue.Count < 1)
+            {
+                return false;
+            }
+
+            if (Raw)
+            {
+                foreach (MatchInfo match in contextTracker.EmitQueue)
+                {
+                    WriteObject(match.Line);
+                }
+            }
+            else if (Quiet && !List)
+            {
+                WriteObject(Boxed.True);
+            }
+            else if (List)
+            {
+                WriteObject(contextTracker.EmitQueue[0]);
+            }
+            else
+            {
+                foreach (MatchInfo match in contextTracker.EmitQueue)
+                {
+                    WriteObject(match);
+                }
+            }
+
+            contextTracker.EmitQueue.Clear();
+            return true;
+        }
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void WriteObject(object value) => commandRuntime.WriteObject(value);
+
+        public void TrackEOF() => ContextTracker.TrackEOF();
+
+        public void TrackMatch(MatchInfo result) => ContextTracker.TrackMatch(result);
+
+        public void TrackLine(string line) => ContextTracker.TrackLine(line);
+    }
+    
+    internal class RegexLineMatcher(
+        ICommandRuntime commandRuntime,
+        SelectStringCommand.IContextTracker contextTracker,
+        string[] patterns,
+        LineMatcherFlags flags,
+        Encoding encoding)
+        : LineMatcher(commandRuntime, contextTracker, patterns, flags, encoding)
+    {
+        private readonly Regex[] _patterns = CreateRegexPatterns(commandRuntime, patterns, flags.HasFlag(LineMatcherFlags.IgnoreCase));
+
+        private static Regex[] CreateRegexPatterns(ICommandRuntime commandRuntime, string[] patterns, bool ignoreCase)
+        {
+            RegexOptions regexOptions = ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None;
+            var regexes = new Regex[patterns.Length];
+            for (int i = 0; i < patterns.Length; i++)
+            {
+                try
+                {
+                    regexes[i] = new Regex(patterns[i], regexOptions);
+                }
+                catch (Exception ex)
+                {
+                    commandRuntime.ThrowTerminatingError(BuildErrorRecord(MatchStringStrings.InvalidRegex, patterns[i], "InvalidRegex", ex));
+                    throw;
+                }
+            }
+            
+            return regexes;
+            
+        }
+
+        private static ErrorRecord BuildErrorRecord(string messageId, string pattern, string errorId, Exception innerException)
+        {
+            string formattedMessage = StringUtil.Format(messageId, pattern, innerException.Message);
+            ArgumentException e = new(formattedMessage, innerException);
+            return new ErrorRecord(e, errorId, ErrorCategory.InvalidArgument, pattern);
+        }
+
+        protected override bool DoMatchWorker(ReadOnlySpan<char> operandString, MatchInfo? matchInfo, [NotNullWhen(true)] out MatchInfo? matchResult)
+         {
+            bool gotMatch = false;
+            Match[]? matches = null;
+            int patternIndex = 0;
+            matchResult = null;
+            
+            var flags = ShouldEmphasize ? MatchInfoFlags.Emphasize : MatchInfoFlags.None;
+
+            while (patternIndex < _patterns.Length)
+            {
+                Regex r = _patterns[patternIndex];
+                if (!r.IsMatch(operandString))
+                {
+                    patternIndex++;
+                    continue;
+                }
+                
+                var line = operandString.ToString();
+                // Only honor allMatches if notMatch is not set,
+                // since it's a fairly expensive operation and
+                // notMatch takes precedent over allMatch.
+                if (AllMatches && !NotMatch)
+                {
+                    MatchCollection mc = r.Matches(line);
+                    if (mc.Count > 0)
+                    {
+                        matches = new Match[mc.Count];
+                        ((ICollection)mc).CopyTo(matches, 0);
+                        gotMatch = true;
+                    }
+                }
+                else
+                {
+                    Match match = r.Match(line);
+                    gotMatch = match.Success;
+
+                    if (match.Success)
+                    {
+                        matches = [match];
+                    }
+                }
+
+                if (gotMatch)
+                {
+                    break;
+                }
+                
+                patternIndex++;
+            }
+            
+            return ReportMatchResult(gotMatch, operandString,  matchInfo, flags, null, matches, patternIndex, out matchResult);
+         }
+    }
+
+    internal sealed class SimpleLineMatcher : LineMatcher
+    {
+        private StringComparison _stringComparison;
+        private CompareOptions _compareOptions;
+        private  Func<ReadOnlySpan<char>, ReadOnlySpan<char>, CompareOptions, int> _cultureInfoIndexOf;
+        private readonly string[] _patterns;
+
+        public SimpleLineMatcher(ICommandRuntime commandRuntime, SelectStringCommand.IContextTracker contextTracker, string[] patterns, 
+            LineMatcherFlags flags, Encoding encoding, string cultureName) : base(commandRuntime, contextTracker, patterns, flags, encoding)
+        {
+            _patterns = patterns;
+            InitCulture(cultureName);
+        }
+        
+        [MemberNotNull(nameof(_cultureInfoIndexOf), nameof(_stringComparison), nameof(_compareOptions))]
+        private void InitCulture(string cultureName)
+        {
+            _stringComparison = default;
+
+            switch (cultureName)
+            {
+            case SelectStringCommand.OrdinalCultureName:
+                {
+                    _stringComparison = CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+                    _compareOptions = CaseSensitive ? CompareOptions.Ordinal : CompareOptions.OrdinalIgnoreCase;
+                    _cultureInfoIndexOf = CultureInfo.InvariantCulture.CompareInfo.IndexOf;
+                    break;
+                }
+
+            case SelectStringCommand.InvariantCultureName:
+                {
+                    _stringComparison = CaseSensitive ? StringComparison.InvariantCulture : StringComparison.InvariantCultureIgnoreCase;
+                    _compareOptions = CaseSensitive ? CompareOptions.None : CompareOptions.IgnoreCase;
+                    _cultureInfoIndexOf = CultureInfo.InvariantCulture.CompareInfo.IndexOf;
+                    break;
+                }
+
+            case SelectStringCommand.CurrentCultureName:
+                {
+                    _stringComparison = CaseSensitive ? StringComparison.CurrentCulture : StringComparison.CurrentCultureIgnoreCase;
+                    _compareOptions = CaseSensitive ? CompareOptions.None : CompareOptions.IgnoreCase;
+                    _cultureInfoIndexOf = CultureInfo.CurrentCulture.CompareInfo.IndexOf;
+                    break;
+                }
+
+            default:
+                {
+                    var cultureInfo = CultureInfo.GetCultureInfo(cultureName);
+                    _compareOptions = CaseSensitive ? CompareOptions.None : CompareOptions.IgnoreCase;
+                    _cultureInfoIndexOf = cultureInfo.CompareInfo.IndexOf;
+                    break;
+                }
+            }
+        }
+
+        protected override bool DoMatchWorker(ReadOnlySpan<char> operandString, MatchInfo? matchInfo, [NotNullWhen(true)] out MatchInfo? matchResult)
+        {
+            bool gotMatch = false;
+            int patternIndex = 0;
+            matchResult = null;
+            Range? simpleMatchRange = null;
+            
+            var flags = (ShouldEmphasize) switch
+            {
+                true => MatchInfoFlags.Emphasize | MatchInfoFlags.SimpleMatch,
+                false => MatchInfoFlags.SimpleMatch,
+            };
+            while (patternIndex < _patterns.Length)
+            {
+                string pat = _patterns[patternIndex];
+                // do the search
+                int index = _cultureInfoIndexOf.Invoke(operandString, pat.AsSpan(), _compareOptions);
+                if (index >= 0)
+                {
+                    simpleMatchRange = new Range(index, pat.Length);
+                    gotMatch = true;
+                    break;
+                }
+                
+                patternIndex++;
+            }
+
+            return ReportMatchResult(gotMatch, operandString,  matchInfo, flags, simpleMatchRange, null, patternIndex, out matchResult);
         }
     }
 }
