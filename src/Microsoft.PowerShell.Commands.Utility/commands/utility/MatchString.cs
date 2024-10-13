@@ -485,7 +485,7 @@ namespace Microsoft.PowerShell.Commands
             private int Capacity => _items.Length;
 
             /// <summary>
-            /// Whether or not the buffer is at capacity.
+            /// Whether not the buffer is at capacity.
             /// </summary>
             public bool IsFull => Count == Capacity;
 
@@ -676,7 +676,7 @@ namespace Microsoft.PowerShell.Commands
             // The context after the match.
             private readonly List<string> _collectedPostContext;
 
-            // Current match info we are tracking postcontext for.
+            // Current match info we are tracking post-context for.
             // At any given time, if set, this value will not be
             // in the emitQueue but will be the next to be added.
             private MatchInfo? _matchInfo;
@@ -730,7 +730,7 @@ namespace Microsoft.PowerShell.Commands
             public void TrackMatch(MatchInfo match)
             {
                 // Update the queue in case we were in the middle
-                // of collecting postcontext for an older match...
+                // of collecting post-context for an older match...
                 if (_contextState == ContextState.CollectPost)
                 {
                     UpdateQueue();
@@ -756,8 +756,8 @@ namespace Microsoft.PowerShell.Commands
             // Track having reached the end of the file.
             public void TrackEOF()
             {
-                // If we're in the middle of collecting postcontext, we
-                // already have a match and it's okay to queue it up
+                // If we're in the middle of collecting post-context, we
+                // already have a match, and it's okay to queue it up
                 // early since there are no more lines to track context
                 // for.
                 if (_contextState == ContextState.CollectPost)
@@ -832,7 +832,7 @@ namespace Microsoft.PowerShell.Commands
                 public override string ToString() => _lineOrMatch as string ?? ((MatchInfo)_lineOrMatch).Line;
             }
 
-            // Whether or not early entries found
+            // Whether early entries found
             // while still filling up the context buffer
             // have been added to the emit queue.
             // Used by UpdateQueue.
@@ -841,15 +841,15 @@ namespace Microsoft.PowerShell.Commands
             private readonly int _preContext;
             private readonly int _postContext;
 
-            // A circular buffer tracking both precontext and postcontext.
+            // A circular buffer tracking both pre-context and post-context.
             //
             // Essentially, the buffer is separated into regions:
-            // | prectxt region  (older entries, length = precontext)  |
+            // | pre-context region  (older entries, length = pre-context)  |
             // | match region    (length = 1)                          |
-            // | postctxt region (newer entries, length = postcontext) |
+            // | post-context region (newer entries, length = post-context) |
             //
             // When context entries containing a match reach the "middle"
-            // (the position between the pre/post context regions)
+            // (the position between the pre-/post-context regions)
             // of this buffer, and the buffer is full, we will know
             // enough context to populate the Context properties of the
             // match. At that point, we will add the match object
@@ -892,14 +892,14 @@ namespace Microsoft.PowerShell.Commands
             {
                 // If the buffer is already full,
                 // check for any matches with incomplete
-                // postcontext and add them to the emit queue.
+                // post-context and add them to the emit queue.
                 // These matches can be identified by being past
                 // the "middle" of the context buffer (still in
-                // the postcontext region.
+                // the post-context region).
                 //
                 // If the buffer isn't full, then nothing will have
                 // ever been emitted and everything is still waiting
-                // on postcontext. So process the whole buffer.
+                // on post-context. So process the whole buffer.
                 int startIndex = _collectedContext.IsFull ? _preContext + 1 : 0;
                 EmitAllInRange(startIndex, _collectedContext.Count - 1);
             }
@@ -937,28 +937,28 @@ namespace Microsoft.PowerShell.Commands
             /// </summary>
             private void UpdateQueue()
             {
-                // Are we at capacity and thus have enough postcontext?
+                // Are we at capacity and thus have enough post-context?
                 // Is there a match in the "middle" of the buffer
-                // that we know the pre/post context for?
+                // that we know the pre-/post-context for?
                 //
                 // If this is the first time we've reached full capacity,
                 // hasProcessedPreEntries will not be set, and we
                 // should go through the entire context, because it might
                 // have entries that never collected enough
-                // precontext. Otherwise, we should just look at the
+                // pre-context. Otherwise, we should just look at the
                 // middle region.
                 if (_collectedContext.IsFull)
                 {
                     if (_hasProcessedPreEntries)
                     {
                         // Only process a potential match with exactly
-                        // enough pre and post-context.
+                        // enough pre- and post-context.
                         EmitAllInRange(_preContext, _preContext);
                     }
                     else
                     {
                         // Some of our early entries may not
-                        // have enough precontext. Process them too.
+                        // have enough pre-context. Process them too.
                         EmitAllInRange(0, _preContext);
                         _hasProcessedPreEntries = true;
                     }
@@ -1081,7 +1081,7 @@ namespace Microsoft.PowerShell.Commands
         }
 
         /// <summary>
-        /// ContextTracker that does not work for the case when pre- and post context is 0.
+        /// ContextTracker that does not work for the case when pre- and post-context is 0.
         /// </summary>
         private sealed class NoContextTracker : IContextTracker
         {
@@ -1251,7 +1251,7 @@ namespace Microsoft.PowerShell.Commands
         public SwitchParameter SimpleMatch { get; set; }
 
         /// <summary>
-        /// Gets or sets a value indicating if the search is case sensitive.If true, then do case-sensitive searches.
+        /// Gets or sets a value indicating if the search is case-sensitive.If true, then do case-sensitive searches.
         /// </summary>
         [Parameter]
         public SwitchParameter CaseSensitive { get; set; }
@@ -1381,7 +1381,7 @@ namespace Microsoft.PowerShell.Commands
         /// Gets or sets the number of context lines to collect. If set to a
         /// single integer value N, collects N lines each of pre-
         /// and post- context. If set to a 2-tuple B,A, collects B
-        /// lines of pre- and A lines of post- context.
+        /// lines of pre- and A lines of post-context.
         /// If set to a list with more than 2 elements, the
         /// excess elements are ignored.
         /// </summary>
@@ -1419,7 +1419,7 @@ namespace Microsoft.PowerShell.Commands
 
         private int _postContext;
 
-        // When we are in Raw mode or pre- and postcontext are zero, use the _noContextTracker, since we will not be needing trackedLines.
+        // When we are in Raw mode or pre- and post-context are zero, use the _noContextTracker, since we will not be needing trackedLines.
         private IContextTracker GetContextTracker() => (Raw || (_preContext == 0 && _postContext == 0))
             ? _noContextTracker
             : new ContextTracker(_preContext, _postContext);
@@ -1607,7 +1607,7 @@ namespace Microsoft.PowerShell.Commands
             // Read the file one line at a time...
             try
             {
-                // see if the file is one the include exclude list...
+                // see if the file is one of the include exclude list...
                 if (!MeetsIncludeExcludeCriteria(filename))
                 {
                     return false;
@@ -1660,7 +1660,7 @@ namespace Microsoft.PowerShell.Commands
                 // Check for any remaining matches. This could be caused
                 // by breaking out of the loop early for quiet or list
                 // mode, or by reaching EOF before we collected all
-                // our postcontext.
+                // our post-context.
                 contextTracker.TrackEOF();
                 if (FlushTrackerQueue(contextTracker))
                 {
@@ -1966,8 +1966,8 @@ namespace Microsoft.PowerShell.Commands
 
         private static ErrorRecord BuildErrorRecord(string messageId, object[] arguments, string errorId, Exception? innerException)
         {
-            string fmtedMsg = StringUtil.Format(messageId, arguments);
-            ArgumentException e = new(fmtedMsg, innerException);
+            string formattedMessage = StringUtil.Format(messageId, arguments);
+            ArgumentException e = new(formattedMessage, innerException);
             return new ErrorRecord(e, errorId, ErrorCategory.InvalidArgument, null);
         }
 
