@@ -177,11 +177,13 @@ namespace Microsoft.PowerShell.Commands
 
         private string _path = InputStream;
 
+        // ReSharper disable UnusedAutoPropertyAccessor.Global
         /// <summary>
         /// Gets or sets the pattern that was used in the match.
         /// </summary>
         /// <value>The pattern string.</value>
         public string? Pattern { get; set; }
+        // ReSharper restore UnusedAutoPropertyAccessor.Global
 
         /// <summary>
         /// Gets or sets context for the match, or null if -context was not specified.
@@ -296,7 +298,7 @@ namespace Microsoft.PowerShell.Commands
                 lines.Add(FormatLine(contextLine, displayLineNumber++, displayPath, ContextPrefix));
             }
 
-            return string.Join(System.Environment.NewLine, lines.ToArray());
+            return string.Join(Environment.NewLine, lines.ToArray());
         }
 
         /// <summary>
@@ -512,10 +514,8 @@ namespace Microsoft.PowerShell.Commands
                 }
             }
 
-            IEnumerator IEnumerable.GetEnumerator()
-            {
-                return (IEnumerator)GetEnumerator();
-            }
+            IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
             #endregion
 
             #region ICollection<T> implementation
@@ -675,7 +675,7 @@ namespace Microsoft.PowerShell.Commands
             // Current match info we are tracking postcontext for.
             // At any given time, if set, this value will not be
             // in the emitQueue but will be the next to be added.
-            private MatchInfo? _matchInfo = null;
+            private MatchInfo? _matchInfo;
 
             /// <summary>
             /// Initializes a new instance of the <see cref="DisplayContextTracker"/> class.
@@ -1202,6 +1202,7 @@ namespace Microsoft.PowerShell.Commands
         [System.Management.Automation.AllowNull]
         [AllowEmptyString]
         [System.Diagnostics.CodeAnalysis.AllowNull]
+        // ReSharper disable once UnusedMember.Global
         public PSObject InputObject
         {
             get => _inputObject;
@@ -1256,6 +1257,7 @@ namespace Microsoft.PowerShell.Commands
         [Parameter(Mandatory = true, ParameterSetName = ParameterSetObjectRaw)]
         [Parameter(Mandatory = true, ParameterSetName = ParameterSetFileRaw)]
         [Parameter(Mandatory = true, ParameterSetName = ParameterSetLiteralFileRaw)]
+        // ReSharper disable UnusedAutoPropertyAccessor.Global
         public SwitchParameter Raw { get; set; }
 
         /// <summary>
@@ -1372,8 +1374,8 @@ namespace Microsoft.PowerShell.Commands
         /// Gets or sets the text encoding to process each file as.
         /// </summary>
         [Parameter]
-        [ArgumentToEncodingTransformationAttribute]
-        [ArgumentEncodingCompletionsAttribute]
+        [ArgumentToEncodingTransformation]
+        [ArgumentEncodingCompletions]
         [ValidateNotNullOrEmpty]
         public Encoding Encoding
         {
@@ -1425,12 +1427,13 @@ namespace Microsoft.PowerShell.Commands
                 }
             }
         }
+        // ReSharper restore UnusedAutoPropertyAccessor.Global
 
         private int[]? _context;
 
-        private int _preContext = 0;
+        private int _preContext;
 
-        private int _postContext = 0;
+        private int _postContext;
 
         // When we are in Raw mode or pre- and postcontext are zero, use the _noContextTracker, since we will not be needing trackedLines.
         private IContextTracker GetContextTracker() => (Raw || (_preContext == 0 && _postContext == 0))
@@ -1680,11 +1683,11 @@ namespace Microsoft.PowerShell.Commands
                     foundMatch = true;
                 }
             }
-            catch (System.NotSupportedException nse)
+            catch (NotSupportedException nse)
             {
                 WriteError(BuildErrorRecord(MatchStringStrings.FileReadError, filename, nse.Message, "ProcessingFile", nse));
             }
-            catch (System.IO.IOException ioe)
+            catch (IOException ioe)
             {
                 WriteError(BuildErrorRecord(MatchStringStrings.FileReadError, filename, ioe.Message, "ProcessingFile", ioe));
             }
@@ -1692,7 +1695,7 @@ namespace Microsoft.PowerShell.Commands
             {
                 WriteError(BuildErrorRecord(MatchStringStrings.FileReadError, filename, se.Message, "ProcessingFile", se));
             }
-            catch (System.UnauthorizedAccessException uae)
+            catch (UnauthorizedAccessException uae)
             {
                 WriteError(BuildErrorRecord(MatchStringStrings.FileReadError, filename, uae.Message, "ProcessingFile", uae));
             }
