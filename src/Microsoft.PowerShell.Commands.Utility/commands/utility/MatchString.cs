@@ -1208,7 +1208,7 @@ namespace Microsoft.PowerShell.Commands
         /// </summary>
         [Parameter(Position = 1, Mandatory = true, ValueFromPipelineByPropertyName = true, ParameterSetName = ParameterSetFile)]
         [Parameter(Position = 1, Mandatory = true, ValueFromPipelineByPropertyName = true, ParameterSetName = ParameterSetFileRaw)]
-        [FileinfoToString]
+        [FileInfoToString]
         [DisallowNull]
         public string[]? Path { get; set; }
 
@@ -1218,7 +1218,7 @@ namespace Microsoft.PowerShell.Commands
         /// </summary>
         [Parameter(Mandatory = true, ValueFromPipelineByPropertyName = true, ParameterSetName = ParameterSetLiteralFile)]
         [Parameter(Mandatory = true, ValueFromPipelineByPropertyName = true, ParameterSetName = ParameterSetLiteralFileRaw)]
-        [FileinfoToString]
+        [FileInfoToString]
         [Alias("PSPath", "LP")]
         [DisallowNull]
         public string[]? LiteralPath
@@ -1980,7 +1980,7 @@ namespace Microsoft.PowerShell.Commands
         /// <summary>
         /// Magic class that works around the limitations on ToString() for FileInfo.
         /// </summary>
-        private sealed class FileinfoToStringAttribute : ArgumentTransformationAttribute
+        private sealed class FileInfoToStringAttribute : ArgumentTransformationAttribute
         {
             public override object Transform(EngineIntrinsics engineIntrinsics, object inputData)
             {
