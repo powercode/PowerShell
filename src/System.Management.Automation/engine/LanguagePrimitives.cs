@@ -1057,7 +1057,7 @@ namespace System.Management.Automation
         /// </summary>
         /// <param name="obj">The object to test.</param>
         /// <returns>True if the object is null.</returns>
-        internal static bool IsNull(object obj)
+        internal static bool IsNull([NotNullWhen(returnValue: false)]object obj)
         {
             return (obj == null || obj == AutomationNull.Value);
         }

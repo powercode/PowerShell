@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-
+#nullable enable
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Management.Automation;
@@ -26,26 +27,26 @@ namespace Microsoft.PowerShell.Commands
         /// <summary>
         /// Gets or sets the lines found before a match.
         /// </summary>
-        public string[] PreContext { get; set; }
+        public string[]? PreContext { get; set; }
 
         /// <summary>
         /// Gets or sets the lines found after a match.
         /// </summary>
-        public string[] PostContext { get; set; }
+        public string[]? PostContext { get; set; }
 
         /// <summary>
         /// Gets or sets the lines found before a match. Does not include
         /// overlapping context and thus can be used to
         /// display contiguous match regions.
         /// </summary>
-        public string[] DisplayPreContext { get; set; }
+        public string[] DisplayPreContext { get; set; } = [];
 
         /// <summary>
         /// Gets or sets the lines found after a match. Does not include
         /// overlapping context and thus can be used to
         /// display contiguous match regions.
         /// </summary>
-        public string[] DisplayPostContext { get; set; }
+        public string[] DisplayPostContext { get; set; } = [];
 
         /// <summary>
         /// Produce a deep copy of this object.
@@ -55,10 +56,10 @@ namespace Microsoft.PowerShell.Commands
         {
             return new MatchInfoContext()
             {
-                PreContext = (string[])PreContext?.Clone(),
-                PostContext = (string[])PostContext?.Clone(),
-                DisplayPreContext = (string[])DisplayPreContext?.Clone(),
-                DisplayPostContext = (string[])DisplayPostContext?.Clone()
+                PreContext = (string[]?)PreContext?.Clone(),
+                PostContext = (string[]?)PostContext?.Clone(),
+                DisplayPreContext = (string[])DisplayPreContext.Clone(),
+                DisplayPostContext = (string[])DisplayPostContext.Clone()
             };
         }
     }
@@ -155,7 +156,7 @@ namespace Microsoft.PowerShell.Commands
             }
         }
 
-        private string _filename;
+        private string? _filename;
 
         /// <summary>
         /// Gets or sets the full path of the file containing the matching line.
@@ -180,12 +181,12 @@ namespace Microsoft.PowerShell.Commands
         /// Gets or sets the pattern that was used in the match.
         /// </summary>
         /// <value>The pattern string.</value>
-        public string Pattern { get; set; }
+        public string? Pattern { get; set; }
 
         /// <summary>
         /// Gets or sets context for the match, or null if -context was not specified.
         /// </summary>
-        public MatchInfoContext Context { get; set; }
+        public MatchInfoContext? Context { get; set; }
 
         /// <summary>
         /// Returns the path of the matching file truncated relative to the <paramref name="directory"/> parameter.
@@ -255,7 +256,7 @@ namespace Microsoft.PowerShell.Commands
         /// </summary>
         /// <param name="directory">Directory to use as the root when calculating the relative path.</param>
         /// <returns>The string representation of the match object.</returns>
-        public string ToString(string directory)
+        public string ToString(string? directory)
         {
             return ToString(directory, Line);
         }
@@ -268,7 +269,7 @@ namespace Microsoft.PowerShell.Commands
         /// <param name="directory">Directory to use as the root when calculating the relative path.</param>
         /// <param name="line">Line that the match occurs in.</param>
         /// <returns>The string representation of the match object.</returns>
-        private string ToString(string directory, string line)
+        private string ToString(string? directory, string line)
         {
             ReadOnlySpan<char> displayPath = (directory != null) ? RelativePath(directory) : _path;
 
@@ -304,7 +305,7 @@ namespace Microsoft.PowerShell.Commands
         /// </summary>
         /// <param name="directory">Directory to use as the root when calculating the relative path.</param>
         /// <returns>The string representation of the match object with matched text inverted.</returns>
-        public string ToEmphasizedString(string directory)
+        public string ToEmphasizedString(string? directory)
         {
             if (!_flags.HasFlag(MatchInfoFlags.Emphasize))
             {
@@ -674,7 +675,7 @@ namespace Microsoft.PowerShell.Commands
             // Current match info we are tracking postcontext for.
             // At any given time, if set, this value will not be
             // in the emitQueue but will be the next to be added.
-            private MatchInfo _matchInfo = null;
+            private MatchInfo? _matchInfo = null;
 
             /// <summary>
             /// Initializes a new instance of the <see cref="DisplayContextTracker"/> class.
@@ -814,22 +815,17 @@ namespace Microsoft.PowerShell.Commands
             // A union: string | MatchInfo. Needed since
             // context lines could be either proper matches
             // or non-matching lines.
-            private sealed class ContextEntry
+            private readonly struct ContextEntry
             {
-                public readonly string Line;
-                public readonly MatchInfo Match;
+                private readonly object _lineOrMatch;
 
-                public ContextEntry(string line)
-                {
-                    Line = line;
-                }
+                public ContextEntry(string line) => _lineOrMatch = line;
 
-                public ContextEntry(MatchInfo match)
-                {
-                    Match = match;
-                }
+                public ContextEntry(MatchInfo match) => _lineOrMatch = match;
 
-                public override string ToString() => Match?.Line ?? Line;
+                public MatchInfo? Match => _lineOrMatch as MatchInfo;
+                
+                public override string ToString() => _lineOrMatch as string ?? ((MatchInfo)_lineOrMatch).Line;
             }
 
             // Whether or not early entries found
@@ -920,7 +916,7 @@ namespace Microsoft.PowerShell.Commands
             {
                 for (int i = startIndex; i <= endIndex; i++)
                 {
-                    MatchInfo match = _collectedContext[i].Match;
+                    MatchInfo? match = _collectedContext[i].Match;
                     if (match != null)
                     {
                         int preStart = Math.Max(i - _preContext, 0);
@@ -1203,8 +1199,9 @@ namespace Microsoft.PowerShell.Commands
         /// </summary>
         [Parameter(ValueFromPipeline = true, Mandatory = true, ParameterSetName = ParameterSetObject)]
         [Parameter(ValueFromPipeline = true, Mandatory = true, ParameterSetName = ParameterSetObjectRaw)]
-        [AllowNull]
+        [System.Management.Automation.AllowNull]
         [AllowEmptyString]
+        [System.Diagnostics.CodeAnalysis.AllowNull]
         public PSObject InputObject
         {
             get => _inputObject;
@@ -1217,9 +1214,9 @@ namespace Microsoft.PowerShell.Commands
         /// Gets or sets the patterns to find.
         /// </summary>
         [Parameter(Mandatory = true, Position = 0)]
-        public string[] Pattern { get; set; }
+        public string[] Pattern { get; set; } = null!;
 
-        private Regex[] _regexPattern;
+        private Regex[]? _regexPattern;
 
         /// <summary>
         /// Gets or sets files to read from.
@@ -1228,7 +1225,8 @@ namespace Microsoft.PowerShell.Commands
         [Parameter(Position = 1, Mandatory = true, ValueFromPipelineByPropertyName = true, ParameterSetName = ParameterSetFile)]
         [Parameter(Position = 1, Mandatory = true, ValueFromPipelineByPropertyName = true, ParameterSetName = ParameterSetFileRaw)]
         [FileinfoToString]
-        public string[] Path { get; set; }
+        [DisallowNull]
+        public string[]? Path { get; set; }
 
         /// <summary>
         /// Gets or sets literal files to read from.
@@ -1238,7 +1236,8 @@ namespace Microsoft.PowerShell.Commands
         [Parameter(Mandatory = true, ValueFromPipelineByPropertyName = true, ParameterSetName = ParameterSetLiteralFileRaw)]
         [FileinfoToString]
         [Alias("PSPath", "LP")]
-        public string[] LiteralPath
+        [DisallowNull]
+        public string[]? LiteralPath
         {
             get => Path;
             set
@@ -1303,7 +1302,8 @@ namespace Microsoft.PowerShell.Commands
         /// <exception cref="WildcardPatternException">Invalid wildcard pattern was specified.</exception>
         [Parameter]
         [ValidateNotNullOrEmpty]
-        public string[] Include
+        [DisallowNull]
+        public string[]? Include
         {
             get => _includeStrings;
             set
@@ -1320,9 +1320,9 @@ namespace Microsoft.PowerShell.Commands
             }
         }
 
-        private string[] _includeStrings;
+        private string[]? _includeStrings;
 
-        private WildcardPattern[] _include;
+        private WildcardPattern[]? _include;
 
         /// <summary>
         /// Gets or sets files to exclude. Files matching
@@ -1330,7 +1330,8 @@ namespace Microsoft.PowerShell.Commands
         /// </summary>
         [Parameter]
         [ValidateNotNullOrEmpty]
-        public string[] Exclude
+        [DisallowNull]
+        public string[]? Exclude
         {
             get => _excludeStrings;
             set
@@ -1347,9 +1348,9 @@ namespace Microsoft.PowerShell.Commands
             }
         }
 
-        private string[] _excludeStrings;
+        private string[]? _excludeStrings;
 
-        private WildcardPattern[] _exclude;
+        private WildcardPattern[]? _exclude;
 
         /// <summary>
         /// Gets or sets a value indicating whether to only show lines which do not match.
@@ -1402,7 +1403,8 @@ namespace Microsoft.PowerShell.Commands
         [ValidateNotNullOrEmpty]
         [ValidateCount(1, 2)]
         [ValidateRange(0, int.MaxValue)]
-        public new int[] Context
+        [DisallowNull]
+        public new int[]? Context
         {
             get => _context;
             set
@@ -1424,7 +1426,7 @@ namespace Microsoft.PowerShell.Commands
             }
         }
 
-        private int[] _context;
+        private int[]? _context;
 
         private int _preContext = 0;
 
@@ -1442,9 +1444,9 @@ namespace Microsoft.PowerShell.Commands
         // use a single global tracker for both is that in the case of
         // a mixed list of strings and FileInfo, the context tracker
         // would get reset after each file.
-        private IContextTracker _globalContextTracker;
+        private IContextTracker _globalContextTracker = null!;  // set in BeginProcessing
 
-        private IContextTracker _noContextTracker;
+        private readonly IContextTracker _noContextTracker = new NoContextTracker();
 
         /// <summary>
         /// This is used to handle the case were we're done processing input objects.
@@ -1459,6 +1461,8 @@ namespace Microsoft.PowerShell.Commands
         /// </summary>
         protected override void BeginProcessing()
         {
+            _globalContextTracker = GetContextTracker();
+            
             if (this.MyInvocation.BoundParameters.ContainsKey(nameof(Culture)) && !this.MyInvocation.BoundParameters.ContainsKey(nameof(SimpleMatch)))
             {
                 InvalidOperationException exception = new(MatchStringStrings.CannotSpecifyCultureWithoutSimpleMatch);
@@ -1468,7 +1472,7 @@ namespace Microsoft.PowerShell.Commands
 
             InitCulture();
 
-            string suppressVt = Environment.GetEnvironmentVariable("__SuppressAnsiEscapeSequences");
+            string? suppressVt = Environment.GetEnvironmentVariable("__SuppressAnsiEscapeSequences");
             if (!string.IsNullOrEmpty(suppressVt))
             {
                 NoEmphasis = true;
@@ -1491,9 +1495,6 @@ namespace Microsoft.PowerShell.Commands
                     }
                 }
             }
-
-            _noContextTracker = new NoContextTracker();
-            _globalContextTracker = GetContextTracker();
         }
 
         private readonly List<string> _inputObjectFileList = new(1) { string.Empty };
@@ -1513,11 +1514,11 @@ namespace Microsoft.PowerShell.Commands
 
             // We may only have directories when we have resolved wildcards
             var expandedPathsMaybeDirectory = false;
-            List<string> expandedPaths = null;
+            List<string>? expandedPaths = null;
             if (Path != null)
             {
                 expandedPaths = ResolveFilePaths(Path, _isLiteralPath);
-                if (expandedPaths == null)
+                if (expandedPaths.Count == 0)
                 {
                     return;
                 }
@@ -1562,8 +1563,8 @@ namespace Microsoft.PowerShell.Commands
                 _inputRecordNumber++;
 
                 bool matched;
-                MatchInfo result;
-                MatchInfo matchInfo = null;
+                MatchInfo? result;
+                MatchInfo? matchInfo = null;
                 if (_inputObject.BaseObject is string line)
                 {
                     matched = DoMatch(line, out result);
@@ -1575,7 +1576,7 @@ namespace Microsoft.PowerShell.Commands
                     matched = DoMatch(objectToCheck, out result, out line);
                 }
 
-                if (matched)
+                if (matched && result is not null)
                 {
                     // Don't re-write the line number if it was already set...
                     if (matchInfo == null)
@@ -1629,16 +1630,15 @@ namespace Microsoft.PowerShell.Commands
                 {
                     using (StreamReader sr = new(fs, Encoding))
                     {
-                        string line;
                         ulong lineNo = 0;
 
                         // Read and display lines from the file until the end of
                         // the file is reached.
-                        while ((line = sr.ReadLine()) != null)
+                        while (sr.ReadLine() is { } line)
                         {
                             lineNo++;
 
-                            if (DoMatch(line, out MatchInfo result))
+                            if (DoMatch(line, out MatchInfo? result))
                             {
                                 result.Path = filename;
                                 result.LineNumber = lineNo;
@@ -1754,14 +1754,14 @@ namespace Microsoft.PowerShell.Commands
             }
         }
 
-        private bool DoMatch(string operandString, out MatchInfo matchResult)
+        private bool DoMatch(string operandString, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult)
         {
             return DoMatchWorker(operandString, null, out matchResult);
         }
 
-        private bool DoMatch(object operand, out MatchInfo matchResult, out string operandString)
+        private bool DoMatch(object operand,  [NotNullWhen(returnValue: true)] out MatchInfo? matchResult, out string operandString)
         {
-            MatchInfo matchInfo = operand as MatchInfo;
+            MatchInfo? matchInfo = operand as MatchInfo;
             if (matchInfo != null)
             {
                 // We're operating in filter mode. Match
@@ -1797,10 +1797,10 @@ namespace Microsoft.PowerShell.Commands
         /// <param name="matchInfo">The input object in filter mode.</param>
         /// <param name="matchResult">The match info object - this will be null if this.quiet is set.</param>
         /// <returns>True if the input object matched.</returns>
-        private bool DoMatchWorker(string operandString, MatchInfo matchInfo, out MatchInfo matchResult)
+        private bool DoMatchWorker(string operandString, MatchInfo? matchInfo,  [NotNullWhen(returnValue: true)] out MatchInfo? matchResult)
         {
             bool gotMatch = false;
-            Match[] matches = null;
+            Match[]? matches = null;
             int patternIndex = 0;
             matchResult = null;
             Range? simpleMatchRange = null;
@@ -1825,7 +1825,7 @@ namespace Microsoft.PowerShell.Commands
             {
                 while (patternIndex < Pattern.Length)
                 {
-                    Regex r = _regexPattern[patternIndex];
+                    Regex r = _regexPattern![patternIndex];
 
                     // Only honor allMatches if notMatch is not set,
                     // since it's a fairly expensive operation and
@@ -1901,17 +1901,9 @@ namespace Microsoft.PowerShell.Commands
                     // we need to copy it and disable display context,
                     // since we can't guarantee it will be displayed
                     // correctly when filtered.
-                    if (matchInfo.Context != null)
-                    {
-                        matchResult = matchInfo.Clone();
-                        matchResult.Context.DisplayPreContext = [];
-                        matchResult.Context.DisplayPostContext = [];
-                    }
-                    else
-                    {
-                        // Otherwise, just pass the object as is.
-                        matchResult = matchInfo;
-                    }
+                    matchResult = matchInfo.Context != null 
+                        ? matchInfo.Clone() 
+                        : matchInfo; // Otherwise, just pass the object as is.
 
                     return true;
                 }
@@ -1975,17 +1967,17 @@ namespace Microsoft.PowerShell.Commands
             return allPaths;
         }
 
-        private static ErrorRecord BuildErrorRecord(string messageId, string argument, string errorId, Exception innerException)
+        private static ErrorRecord BuildErrorRecord(string messageId, string argument, string errorId, Exception? innerException)
         {
             return BuildErrorRecord(messageId, new object[] { argument }, errorId, innerException);
         }
 
-        private static ErrorRecord BuildErrorRecord(string messageId, string arg0, string arg1, string errorId, Exception innerException)
+        private static ErrorRecord BuildErrorRecord(string messageId, string arg0, string arg1, string errorId, Exception? innerException)
         {
             return BuildErrorRecord(messageId, new object[] { arg0, arg1 }, errorId, innerException);
         }
 
-        private static ErrorRecord BuildErrorRecord(string messageId, object[] arguments, string errorId, Exception innerException)
+        private static ErrorRecord BuildErrorRecord(string messageId, object[] arguments, string errorId, Exception? innerException)
         {
             string fmtedMsg = StringUtil.Format(messageId, arguments);
             ArgumentException e = new(fmtedMsg, innerException);
@@ -2012,33 +2004,30 @@ namespace Microsoft.PowerShell.Commands
                     result = mso.BaseObject;
                 }
 
-                FileInfo fileInfo;
-
                 // Handle an array of elements...
                 if (result is IList argList)
                 {
-                    object[] resultList = new object[argList.Count];
+                    object?[] resultList = new object?[argList.Count];
 
                     for (int i = 0; i < argList.Count; i++)
                     {
-                        object element = argList[i];
+                        object? element = argList[i];
 
-                        mso = element as PSObject;
-                        if (mso != null)
+                        if (element is PSObject pso)
                         {
-                            element = mso.BaseObject;
+                            element = pso.BaseObject;
                         }
 
-                        fileInfo = element as FileInfo;
-                        resultList[i] = fileInfo?.FullName ?? element;
+                        resultList[i] = element is FileInfo fileInfoElement 
+                            ? fileInfoElement.FullName 
+                            : element;
                     }
 
                     return resultList;
                 }
 
                 // Handle the singleton case...
-                fileInfo = result as FileInfo;
-                if (fileInfo != null)
+                if (result is FileInfo fileInfo)
                 {
                     return fileInfo.FullName;
                 }
