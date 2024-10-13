@@ -5,6 +5,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
@@ -13,6 +14,7 @@ using System.Management.Automation.Internal;
 using System.Text;
 using System.Text.RegularExpressions;
 
+// ReSharper disable once CheckNamespace
 namespace Microsoft.PowerShell.Commands
 {
     /// <summary>
@@ -110,7 +112,7 @@ namespace Microsoft.PowerShell.Commands
         /// Gets or sets the text of the matching line.
         /// </summary>
         /// <value>The text of the matching line.</value>
-        public string Line { get; set; } = string.Empty;
+        public string Line { get; init; } = string.Empty;
 
         /// <summary>
         /// Gets or sets a value indicating whether the matched portion of the string is highlighted.
@@ -252,6 +254,7 @@ namespace Microsoft.PowerShell.Commands
             return ToString(null);
         }
 
+        // ReSharper disable once MemberCanBePrivate.Global
         /// <summary>
         /// Returns the string representation of the match object same format as ToString()
         /// but trims the path to be relative to the <paramref name="directory"/> argument.
@@ -429,6 +432,7 @@ namespace Microsoft.PowerShell.Commands
         }
     }
 
+    // ReSharper disable once ClassNeverInstantiated.Global
     /// <summary>
     /// A cmdlet to search through strings and files for particular patterns.
     /// </summary>
@@ -478,7 +482,7 @@ namespace Microsoft.PowerShell.Commands
             /// older items will be removed from the buffer with
             /// a first-in, first-out policy.
             /// </summary>
-            public int Capacity => _items.Length;
+            private int Capacity => _items.Length;
 
             /// <summary>
             /// Whether or not the buffer is at capacity.
@@ -560,7 +564,7 @@ namespace Microsoft.PowerShell.Commands
 
             public bool Contains(T item)
             {
-                throw new NotImplementedException();
+                throw new UnreachableException();
             }
 
             public void CopyTo(T[] array, int arrayIndex)
@@ -582,7 +586,7 @@ namespace Microsoft.PowerShell.Commands
 
             public bool Remove(T item)
             {
-                throw new NotImplementedException();
+                throw new UnreachableException();
             }
             #endregion
 
@@ -1104,36 +1108,13 @@ namespace Microsoft.PowerShell.Commands
         [ValidateNotNull]
         public string Culture
         {
-            get
-            {
-                switch (_stringComparison)
+            get => _stringComparison switch
                 {
-                    case StringComparison.Ordinal:
-                    case StringComparison.OrdinalIgnoreCase:
-                        {
-                            return OrdinalCultureName;
-                        }
-
-                    case StringComparison.InvariantCulture:
-                    case StringComparison.InvariantCultureIgnoreCase:
-                        {
-                            return InvariantCultureName;
-                        }
-
-                    case StringComparison.CurrentCulture:
-                    case StringComparison.CurrentCultureIgnoreCase:
-                        {
-                            return CurrentCultureName;
-                        }
-
-                    default:
-                        {
-                            break;
-                        }
-                }
-
-                return _cultureName;
-            }
+                    StringComparison.Ordinal or StringComparison.OrdinalIgnoreCase => OrdinalCultureName,
+                    StringComparison.InvariantCulture or StringComparison.InvariantCultureIgnoreCase => InvariantCultureName,
+                    StringComparison.CurrentCulture or StringComparison.CurrentCultureIgnoreCase => CurrentCultureName,
+                    _ => _cultureName
+                };
 
             set
             {
@@ -1186,9 +1167,9 @@ namespace Microsoft.PowerShell.Commands
 
                 default:
                     {
-                        var _cultureInfo = CultureInfo.GetCultureInfo(_cultureName);
+                        var cultureInfo = CultureInfo.GetCultureInfo(_cultureName);
                         _compareOptions = CaseSensitive ? CompareOptions.None : CompareOptions.IgnoreCase;
-                        _cultureInfoIndexOf = _cultureInfo.CompareInfo.IndexOf;
+                        _cultureInfoIndexOf = cultureInfo.CompareInfo.IndexOf;
                         break;
                     }
             }
@@ -1211,6 +1192,7 @@ namespace Microsoft.PowerShell.Commands
 
         private PSObject _inputObject = AutomationNull.Value;
 
+        // ReSharper disable once PropertyCanBeMadeInitOnly.Global
         /// <summary>
         /// Gets or sets the patterns to find.
         /// </summary>
@@ -1219,6 +1201,7 @@ namespace Microsoft.PowerShell.Commands
 
         private Regex[]? _regexPattern;
 
+        // ReSharper disable once MemberCanBePrivate.Global
         /// <summary>
         /// Gets or sets files to read from.
         /// Globbing is done on these.
@@ -1291,6 +1274,7 @@ namespace Microsoft.PowerShell.Commands
         [Parameter]
         public SwitchParameter List { get; set; }
 
+        // ReSharper disable once MemberCanBePrivate.Global
         /// <summary>
         /// Gets or sets a value indicating if highlighting should be disabled.
         /// </summary>
@@ -1500,7 +1484,7 @@ namespace Microsoft.PowerShell.Commands
             }
         }
 
-        private readonly List<string> _inputObjectFileList = new(1) { string.Empty };
+        private readonly List<string> _inputObjectFileList = [string.Empty];
 
         /// <summary>
         /// Process the input.
@@ -2097,10 +2081,12 @@ namespace Microsoft.PowerShell.Commands
         string[] IValidateSetValuesGenerator.GetValidValues()
         {
             var cultures = CultureInfo.GetCultures(CultureTypes.AllCultures);
-            var result = new List<string>(cultures.Length + 3);
-            result.Add(SelectStringCommand.OrdinalCultureName);
-            result.Add(SelectStringCommand.InvariantCultureName);
-            result.Add(SelectStringCommand.CurrentCultureName);
+            var result = new List<string>(cultures.Length + 3)
+            {
+                SelectStringCommand.OrdinalCultureName, 
+                SelectStringCommand.InvariantCultureName, 
+                SelectStringCommand.CurrentCultureName
+            };
             foreach (var cultureInfo in cultures)
             {
                 result.Add(cultureInfo.Name);
