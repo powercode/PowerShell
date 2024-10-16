@@ -467,8 +467,6 @@ namespace Microsoft.PowerShell.Commands
         internal const string OrdinalCultureName = "Ordinal";
         internal const string InvariantCultureName = "Invariant";
         internal const string CurrentCultureName = "Current";
-
-        private static readonly SearchValues<byte> s_newLineSearchValues = SearchValues.Create([(byte)'\r', (byte)'\n']);
         
         /// <summary>
         /// Gets or sets the current pipeline object.
@@ -720,6 +718,7 @@ namespace Microsoft.PowerShell.Commands
         private bool _doneProcessing;
 
         private ulong _inputRecordNumber;
+        private IFileProcessor? _fileProcessor;
 
         /// <summary>
         /// Read command line parameters.
@@ -867,135 +866,6 @@ namespace Microsoft.PowerShell.Commands
             }
         }
 
-        private static async Task FillPipeAsync(FileStream fs, PipeWriter writer, CancellationToken cancellationToken)
-        {
-            const int minimumBufferSize = 8192;
-            while (true)
-            {
-                Memory<byte> memory = writer.GetMemory(minimumBufferSize);
-                int bytesRead = await fs.ReadAsync(memory, cancellationToken);
-                if (bytesRead == 0)
-                {
-                    break;
-                }
-                writer.Advance(bytesRead);
-                FlushResult result = await writer.FlushAsync(cancellationToken);
-                if (result.IsCompleted || result.IsCompleted)
-                {
-                    break;
-                }
-            }
-            await writer.CompleteAsync();
-        }
-        
-        private static void ReadPipe(PipeReader reader, SearchValues<byte> searchValues, Action<ReadOnlySpan<byte>, ulong> action, CancellationToken cancellationToken)
-        {
-            var pool = ArrayPool<byte>.Shared;
-            ulong lineNumber = 0;
-            while (true)
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                ReadResult result;
-                while (!reader.TryRead(out result))
-                {
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        return;
-                    }
-                    Thread.Yield();
-                }
-                
-                ReadOnlySequence<byte> bufferSequence = result.Buffer;
-                SequencePosition? newLinePosition;
-
-                if (bufferSequence.IsEmpty)
-                {
-                    return;
-                }
-
-                do
-                {
-                    newLinePosition = GetNewLineSequencePosition(bufferSequence, searchValues);
-                    if (!newLinePosition.HasValue && !result.IsCompleted)
-                    {
-                        break;
-                    }
-                    
-                    lineNumber++;
-                    
-                    var chunk = newLinePosition.HasValue 
-                        ? bufferSequence.Slice(0, newLinePosition.Value) 
-                        : bufferSequence;
-
-                    if (chunk.IsSingleSegment)
-                    {
-                        action(chunk.FirstSpan, lineNumber);    
-                    }
-                    else {
-                        byte[] chunkArray = pool.Rent((int)chunk.Length);
-                        chunk.CopyTo(chunkArray.AsSpan());
-                        try{
-                            action(chunkArray.AsSpan(), lineNumber);
-                        }
-                        finally{
-                            pool.Return(chunkArray);
-                        }
-                    }
-                    if (newLinePosition.HasValue)
-                    {
-                        bufferSequence = bufferSequence.Slice(bufferSequence.GetPosition(1, newLinePosition.Value));
-                        // in case we found \r and the next position in \n, move forward one more step
-                        if (bufferSequence.Length > 0 && bufferSequence.FirstSpan[0] == '\n')
-                        {
-                            bufferSequence = bufferSequence.Slice(bufferSequence.GetPosition(1));
-                        }
-                    }
-                } while (newLinePosition.HasValue);
-
-                reader.AdvanceTo(bufferSequence.Start, bufferSequence.End);
-                if (result.IsCompleted)
-                {
-                    break;
-                }
-            }
-            var task = reader.CompleteAsync();
-            _ = task;
-            return;
-            
-            static SequencePosition? GetNewLineSequencePosition(ReadOnlySequence<byte> buffer, SearchValues<byte> searchValues)
-            {
-                if (buffer.IsSingleSegment)
-                {
-                    long index = buffer.FirstSpan.IndexOfAny(searchValues);
-                    if (index != -1)
-                    {
-                        // roll forward passed search values
-                        return buffer.GetPosition(index);
-                    }
-                }
-                else
-                {
-                    long startIndex = 0;
-                    foreach (var segment in buffer)
-                    {
-                        long index = segment.Span.IndexOfAny(searchValues);
-                        if (index != -1)
-                        {
-                            return buffer.GetPosition(startIndex + index);
-                        }
-
-                        startIndex += segment.Length;
-                    }
-                }
-
-                return null;
-            }
-        }
-
         /// <summary>
         /// Process a file which was either specified on the
         /// command line or passed in as a FileInfo object.
@@ -1019,31 +889,9 @@ namespace Microsoft.PowerShell.Commands
                 
                 _lineMatcher.CurrentFileName = filename;
                 
-                var fileStreamOptions = new FileStreamOptions()
-                {
-                    Access = FileAccess.Read,
-                    BufferSize = 8 * 1024,
-                    Mode = FileMode.Open,
-                    Share = FileShare.ReadWrite,
-                    Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
-                };
-                using (FileStream fsx = new(filename, fileStreamOptions))
-                {
-                    var pipe = new System.IO.Pipelines.Pipe();
-                    _ = FillPipeAsync(fsx, pipe.Writer, cancellationToken);
-                    
-                    ReadPipe(pipe.Reader, s_newLineSearchValues,  _lineMatcher.ProcessLineBytes, cancellationToken);
-                }
-                
-                // Check for any remaining matches. This could be caused
-                // by breaking out of the loop early for quiet or list
-                // mode, or by reaching EOF before we collected all
-                // our post-context.
-                _lineMatcher.TrackEOF();
-                if (_lineMatcher.FlushTrackerQueue())
-                {
-                    foundMatch = true;
-                }
+                _fileProcessor ??= CreateFileFileProcessor(_lineMatcher);
+
+                foundMatch = _fileProcessor.ProcessFileName(filename, cancellationToken);
             }
             catch (NotSupportedException nse)
             {
@@ -1064,7 +912,12 @@ namespace Microsoft.PowerShell.Commands
 
             return foundMatch;
         }
-        
+
+        private static IFileProcessor CreateFileFileProcessor(LineMatcher lineMatcher)
+        {
+            return new PipeReaderFileProcessor(lineMatcher);
+        }
+
         /// <summary>
         /// Complete processing. Emits any objects which have been queued up
         /// due to -context tracking.
@@ -2399,4 +2252,186 @@ namespace Microsoft.PowerShell.Commands
             return ReportMatchResult(gotMatch, operandString,  matchInfo, flags, simpleMatchRange, null, patternIndex, out matchResult);
         }
     }
+
+    internal interface IFileProcessor
+    {
+        /// <summary>
+        /// Searches a file for pattern matches.
+        /// </summary>
+        /// <param name="filename">the name of the file to search</param>
+        /// <param name="cancellationToken">The cancellation token to cancel the operation.</param>
+        /// <returns><see langword="true"/> if matches are found, otherwise <see langword="false"/>.</returns>
+        bool ProcessFileName(string filename, CancellationToken cancellationToken);
+    }
+    
+    /// <summary>
+    /// An <see cref="IFileProcessor"/> that uses <see cref="System.IO.Pipelines.PipeReader" /> to read file content. 
+    /// </summary>
+    /// <param name="lineMatcher">a <see cref="LineMatcher"/> that is used to match each line found by the processor.</param>
+    internal class PipeReaderFileProcessor(LineMatcher lineMatcher) : IFileProcessor
+    {
+        private static readonly SearchValues<byte> s_newLineSearchValues = SearchValues.Create([(byte)'\r', (byte)'\n']);
+
+        public bool ProcessFileName(string filename, CancellationToken cancellationToken)
+        {
+            FileStreamOptions fileStreamOptions = GetFileStreamOptions();
+            using FileStream fsx = new(filename, fileStreamOptions);
+            var pipe = new System.IO.Pipelines.Pipe();
+            _ = FillPipeAsync(fsx, pipe.Writer, cancellationToken);
+                    
+            // process the file content
+            ReadPipe(pipe.Reader, s_newLineSearchValues,  lineMatcher.ProcessLineBytes, cancellationToken);
+            
+            // Check for any remaining matches. This could be caused
+            // by breaking out of the loop early for quiet or list
+            // mode, or by reaching EOF before we collected all
+            // our post-context.
+            lineMatcher.TrackEOF();
+            // returns false if there is nothing in the emit queue 
+            return lineMatcher.FlushTrackerQueue();
+        }
+        
+        private static async Task FillPipeAsync(FileStream fs, PipeWriter writer, CancellationToken cancellationToken)
+        {
+            const int minimumBufferSize = 8192;
+            while (true)
+            {
+                Memory<byte> memory = writer.GetMemory(minimumBufferSize);
+                int bytesRead = await fs.ReadAsync(memory, cancellationToken);
+                if (bytesRead == 0)
+                {
+                    break;
+                }
+                writer.Advance(bytesRead);
+                FlushResult result = await writer.FlushAsync(cancellationToken);
+                if (result.IsCompleted || result.IsCompleted)
+                {
+                    break;
+                }
+            }
+            await writer.CompleteAsync();
+        }
+        
+         private static void ReadPipe(PipeReader reader, SearchValues<byte> searchValues, Action<ReadOnlySpan<byte>, ulong> action, CancellationToken cancellationToken)
+        {
+            var pool = ArrayPool<byte>.Shared;
+            ulong lineNumber = 0;
+            while (true)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                ReadResult result;
+                while (!reader.TryRead(out result))
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                    Thread.Yield();
+                }
+                
+                ReadOnlySequence<byte> bufferSequence = result.Buffer;
+                SequencePosition? newLinePosition;
+
+                if (bufferSequence.IsEmpty)
+                {
+                    return;
+                }
+
+                do
+                {
+                    newLinePosition = GetNewLineSequencePosition(bufferSequence, searchValues);
+                    if (!newLinePosition.HasValue && !result.IsCompleted)
+                    {
+                        break;
+                    }
+                    
+                    lineNumber++;
+                    
+                    var chunk = newLinePosition.HasValue 
+                        ? bufferSequence.Slice(0, newLinePosition.Value) 
+                        : bufferSequence;
+
+                    if (chunk.IsSingleSegment)
+                    {
+                        action(chunk.FirstSpan, lineNumber);    
+                    }
+                    else {
+                        byte[] chunkArray = pool.Rent((int)chunk.Length);
+                        chunk.CopyTo(chunkArray.AsSpan());
+                        try{
+                            action(chunkArray.AsSpan(), lineNumber);
+                        }
+                        finally{
+                            pool.Return(chunkArray);
+                        }
+                    }
+                    if (newLinePosition.HasValue)
+                    {
+                        bufferSequence = bufferSequence.Slice(bufferSequence.GetPosition(1, newLinePosition.Value));
+                        // in case we found \r and the next position in \n, move forward one more step
+                        if (bufferSequence.Length > 0 && bufferSequence.FirstSpan[0] == '\n')
+                        {
+                            bufferSequence = bufferSequence.Slice(bufferSequence.GetPosition(1));
+                        }
+                    }
+                } while (newLinePosition.HasValue);
+
+                reader.AdvanceTo(bufferSequence.Start, bufferSequence.End);
+                if (result.IsCompleted)
+                {
+                    break;
+                }
+            }
+            var task = reader.CompleteAsync();
+            _ = task;
+            return;
+            
+            static SequencePosition? GetNewLineSequencePosition(ReadOnlySequence<byte> buffer, SearchValues<byte> searchValues)
+            {
+                if (buffer.IsSingleSegment)
+                {
+                    long index = buffer.FirstSpan.IndexOfAny(searchValues);
+                    if (index != -1)
+                    {
+                        // roll forward passed search values
+                        return buffer.GetPosition(index);
+                    }
+                }
+                else
+                {
+                    long startIndex = 0;
+                    foreach (var segment in buffer)
+                    {
+                        long index = segment.Span.IndexOfAny(searchValues);
+                        if (index != -1)
+                        {
+                            return buffer.GetPosition(startIndex + index);
+                        }
+
+                        startIndex += segment.Length;
+                    }
+                }
+
+                return null;
+            }
+        }
+
+        private static FileStreamOptions GetFileStreamOptions()
+        {
+            var fileStreamOptions = new FileStreamOptions()
+            {
+                Access = FileAccess.Read,
+                BufferSize = 8 * 1024,
+                Mode = FileMode.Open,
+                Share = FileShare.ReadWrite,
+                Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+            };
+            return fileStreamOptions;
+        }
+    }
+
 }
