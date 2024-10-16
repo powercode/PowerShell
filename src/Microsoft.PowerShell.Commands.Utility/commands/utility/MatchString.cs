@@ -1554,6 +1554,8 @@ namespace Microsoft.PowerShell.Commands
 
         public void TrackLine(string line) => _contextTracker.TrackLine(line);
         
+        #region ContextTracking
+        
         /// <summary>
         /// A generic circular buffer.
         /// </summary>
@@ -2214,6 +2216,8 @@ namespace Microsoft.PowerShell.Commands
             {
             }
         }
+        
+        #endregion // ContextTracking
     }
 
     internal sealed class RegexLineMatcher(
