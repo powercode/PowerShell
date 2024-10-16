@@ -435,20 +435,6 @@ namespace Microsoft.PowerShell.Commands
             return clone;
         }
     }
-    
-    [Flags]
-    internal enum LineMatcherFlags
-    {
-        None = 0,
-        NoEmphasize = 1 << 1,
-        AllMatches = 1 << 2,
-        NotMatch = 1 << 3,
-        IsTracking = 1 << 4,
-        IgnoreCase = 1 << 5,
-        Quiet = 1 << 6,
-        List = 1 << 7,
-        Raw = 1 << 8,
-    }
 
     // ReSharper disable once ClassNeverInstantiated.Global
     /// <summary>
@@ -1266,6 +1252,20 @@ namespace Microsoft.PowerShell.Commands
         }
     }
     
+    [Flags]
+    internal enum LineMatcherFlags
+    {
+        None = 0,
+        NoEmphasize = 1 << 1,
+        AllMatches = 1 << 2,
+        NotMatch = 1 << 3,
+        IsTracking = 1 << 4,
+        IgnoreCase = 1 << 5,
+        Quiet = 1 << 6,
+        List = 1 << 7,
+        Raw = 1 << 8,
+    }
+
     internal abstract class LineMatcher
     {
         private bool _foundMatch;
