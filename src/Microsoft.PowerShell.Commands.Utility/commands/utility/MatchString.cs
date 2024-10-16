@@ -1384,7 +1384,7 @@ namespace Microsoft.PowerShell.Commands
             DoMatch(line.AsSpan(), null, out matchInfo);
 
         /// <summary>
-        /// Reports match results and determin if 
+        /// Reports match results and determine if 
         /// </summary>
         /// <param name="gotMatch"></param>
         /// <param name="operandString"></param>
@@ -2019,7 +2019,7 @@ namespace Microsoft.PowerShell.Commands
 
             /// <summary>
             /// Add all matches found in the specified range
-            /// to the emit queue, collecting as much context
+            /// to our emit-queue, collecting as much context
             /// as possible up to the limits specified in the constructor.
             /// </summary>
             /// <remarks>
