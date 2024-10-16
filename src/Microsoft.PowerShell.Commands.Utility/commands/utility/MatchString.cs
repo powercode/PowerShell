@@ -1271,18 +1271,12 @@ namespace Microsoft.PowerShell.Commands
         private bool _foundMatch;
         private readonly Decoder _decoder;
 
-        private string[] Patterns { get; }
-        
-        protected bool NotMatch { get; }
-
-        protected bool AllMatches { get; }
-
-        protected bool CaseSensitive { get; }
-
-        private Encoding Encoding { get; }
+        private readonly string[] _patterns;
+        private readonly Encoding _encoding;
 
         private IContextTracker _contextTracker;
         private readonly ICommandRuntime _commandRuntime;
+        private readonly LineMatcherFlags _flags;
 
         protected LineMatcher(ICommandRuntime commandRuntime,
             int preContext, 
@@ -1292,29 +1286,28 @@ namespace Microsoft.PowerShell.Commands
             Encoding encoding)
         {
             _commandRuntime = commandRuntime;
+            _flags = flags;
+            _encoding = encoding;
             _decoder = encoding.GetDecoder();
-            Patterns = patterns;
-            NotMatch = flags.HasFlag(LineMatcherFlags.NotMatch);
-            AllMatches = flags.HasFlag(LineMatcherFlags.AllMatches);
-            CaseSensitive = !flags.HasFlag(LineMatcherFlags.IgnoreCase);
-            Encoding = encoding;
-            ShouldEmphasize = !flags.HasFlag(LineMatcherFlags.NoEmphasize);
-            List = flags.HasFlag(LineMatcherFlags.List);
-            IsTracking = flags.HasFlag(LineMatcherFlags.IsTracking);
-            Quiet = flags.HasFlag(LineMatcherFlags.Quiet);
-            Raw = flags.HasFlag(LineMatcherFlags.Raw);
+            _patterns = patterns;
             _contextTracker = !Raw && IsTracking ? new ContextTracker(preContext, postContext) : new NoContextTracker();
         }
+        
+        protected bool NotMatch => _flags.HasFlag(LineMatcherFlags.NotMatch);
 
-        protected bool ShouldEmphasize { get; }
+        protected bool AllMatches => _flags.HasFlag(LineMatcherFlags.AllMatches);
 
-        private bool List { get; }
+        protected bool CaseSensitive => !_flags.HasFlag(LineMatcherFlags.IgnoreCase);
 
-        private bool IsTracking { get; }
+        protected bool ShouldEmphasize => !_flags.HasFlag(LineMatcherFlags.NoEmphasize);
 
-        private bool Quiet { get; }
+        private bool List => _flags.HasFlag(LineMatcherFlags.List);
 
-        private bool Raw { get; }
+        private bool IsTracking => _flags.HasFlag(LineMatcherFlags.IsTracking);
+
+        private bool Quiet => _flags.HasFlag(LineMatcherFlags.Quiet);
+
+        private bool Raw => _flags.HasFlag(LineMatcherFlags.Raw);
 
         public bool FoundMatch => _foundMatch;
 
@@ -1360,7 +1353,7 @@ namespace Microsoft.PowerShell.Commands
         
         private string ConvertToString(ReadOnlySpan<byte> line)
         {
-            int maxChars = Encoding.GetMaxCharCount(line.Length);
+            int maxChars = _encoding.GetMaxCharCount(line.Length);
             char[] buffer = ArrayPool<char>.Shared.Rent(maxChars);
             var span = new Span<char>(buffer);
             var length = _decoder.GetChars(line, span, true);
@@ -1375,7 +1368,7 @@ namespace Microsoft.PowerShell.Commands
             char[] buffer = null!;
             try
             {
-                var maxCharCount = Encoding.GetMaxCharCount(operandString.Length);
+                var maxCharCount = _encoding.GetMaxCharCount(operandString.Length);
                 buffer = ArrayPool<char>.Shared.Rent(maxCharCount);
                 var charSpan = buffer.AsSpan();
                 var length = _decoder.GetChars(operandString, charSpan, true);
@@ -1442,7 +1435,7 @@ namespace Microsoft.PowerShell.Commands
                 {
                     IgnoreCase = !CaseSensitive,
                     Line = operandString.ToString(),
-                    Pattern = Patterns[patternIndex],
+                    Pattern = _patterns[patternIndex],
                     // Matches should be an empty list, rather than null,
                     // in the cases of notMatch and simpleMatch.
                     Matches = matches ?? [],
