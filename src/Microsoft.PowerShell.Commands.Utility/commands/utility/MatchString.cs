@@ -661,6 +661,7 @@ namespace Microsoft.PowerShell.Commands
                 return _encoding;
             }
 
+            // ReSharper disable once UnusedMember.Global
             set
             {
                 EncodingConversion.WarnIfObsolete(this, value);
