@@ -747,7 +747,7 @@ namespace Microsoft.PowerShell.Commands
 
         private LineMatcherFlags GetLineMatcherFlags()
         {
-            bool isTracking = !Raw && _preContext == 0 && _postContext != 0;
+            bool isTracking = !Raw && _preContext != 0 && _postContext != 0;
             var flags  = LineMatcherFlags.None;
             if (isTracking) flags |= LineMatcherFlags.IsTracking;
             if (NotMatch) flags |= LineMatcherFlags.NotMatch;
