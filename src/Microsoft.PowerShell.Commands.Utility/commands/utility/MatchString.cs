@@ -2215,8 +2215,8 @@ namespace Microsoft.PowerShell.Commands
             }
         }
     }
-    
-    internal class RegexLineMatcher(
+
+    internal sealed class RegexLineMatcher(
         ICommandRuntime commandRuntime,
         int preContext,
         int postContext,
