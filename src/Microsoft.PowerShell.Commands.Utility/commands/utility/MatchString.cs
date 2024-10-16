@@ -445,7 +445,7 @@ namespace Microsoft.PowerShell.Commands
     [Cmdlet(VerbsCommon.Select, "String", DefaultParameterSetName = ParameterSetFile, HelpUri = "https://go.microsoft.com/fwlink/?LinkID=2097119")]
     [OutputType(typeof(bool), typeof(MatchInfo), ParameterSetName = new[] { ParameterSetFile, ParameterSetObject, ParameterSetLiteralFile })]
     [OutputType(typeof(string), ParameterSetName = new[] { ParameterSetFileRaw, ParameterSetObjectRaw, ParameterSetLiteralFileRaw })]
-    public sealed class SelectStringCommand : PSCmdlet
+    public sealed class SelectStringCommand : PSCmdlet, IDisposable
     {
         private const string ParameterSetFile = "File";
         private const string ParameterSetFileRaw = "FileRaw";
@@ -453,7 +453,8 @@ namespace Microsoft.PowerShell.Commands
         private const string ParameterSetObjectRaw = "ObjectRaw";
         private const string ParameterSetLiteralFile = "LiteralFile";
         private const string ParameterSetLiteralFileRaw = "LiteralFileRaw";
-        
+
+        private readonly CancellationTokenSource _cancellationTokenSource = new();
         private readonly List<string> _inputObjectFileList = [string.Empty];
         private LineMatcher _lineMatcher = null!;
         
@@ -747,6 +748,9 @@ namespace Microsoft.PowerShell.Commands
                 : new RegexLineMatcher(CommandRuntime, _preContext, _postContext, Pattern, lineMatcherFlags, Encoding);
         }
 
+        /// <inheritdoc />
+        protected override void StopProcessing() => _cancellationTokenSource.Cancel();
+
         private LineMatcherFlags GetLineMatcherFlags()
         {
             bool isTracking = !Raw && _preContext != 0 && _postContext != 0;
@@ -876,7 +880,6 @@ namespace Microsoft.PowerShell.Commands
         /// <returns>True if a match was found; otherwise false.</returns>
         private bool ProcessFile(string filename)
         {
-            CancellationToken cancellationToken = CancellationToken.None;
             
             bool foundMatch = false;
 
@@ -890,7 +893,7 @@ namespace Microsoft.PowerShell.Commands
                 }
                 
                 _fileProcessor ??= CreateFileFileProcessor(_lineMatcher);
-                foundMatch = _fileProcessor.ProcessFileName(filename, cancellationToken);
+                foundMatch = _fileProcessor.ProcessFileName(filename, _cancellationTokenSource.Token);
             }
             catch (NotSupportedException nse)
             {
@@ -1084,6 +1087,9 @@ namespace Microsoft.PowerShell.Commands
 
             return ok;
         }
+
+        /// <inheritdoc />
+        public void Dispose() => _cancellationTokenSource.Dispose();
     }
 
     /// <summary>
