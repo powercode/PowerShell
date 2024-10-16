@@ -466,6 +466,9 @@ namespace Microsoft.PowerShell.Commands
         private const string ParameterSetLiteralFile = "LiteralFile";
         private const string ParameterSetLiteralFileRaw = "LiteralFileRaw";
         
+        private readonly List<string> _inputObjectFileList = [string.Empty];
+        private LineMatcher _lineMatcher = null!;
+        
         /// <summary>
         /// Gets or sets a culture name.
         /// </summary>
@@ -770,9 +773,6 @@ namespace Microsoft.PowerShell.Commands
             if (Raw) flags |= LineMatcherFlags.Raw;
             return flags;
         }
-
-        private readonly List<string> _inputObjectFileList = [string.Empty];
-        private LineMatcher _lineMatcher = null!;
 
         /// <summary>
         /// Process the input.
