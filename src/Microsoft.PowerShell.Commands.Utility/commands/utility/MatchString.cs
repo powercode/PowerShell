@@ -4,6 +4,7 @@
 using System;
 using System.Buffers;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -13,13 +14,14 @@ using System.IO;
 using System.IO.Pipelines;
 using System.Linq;
 using System.Management.Automation;
+using System.Management.Automation.Host;
 using System.Management.Automation.Internal;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.PowerShell.Commands
@@ -457,6 +459,7 @@ namespace Microsoft.PowerShell.Commands
         private readonly CancellationTokenSource _cancellationTokenSource = new();
         private readonly List<string> _inputObjectFileList = [string.Empty];
         private LineMatcher _lineMatcher = null!;
+        private InputStreamLineReader? _inputStreamLineReader;
         
         /// <summary>
         /// Gets or sets a culture name.
@@ -719,8 +722,7 @@ namespace Microsoft.PowerShell.Commands
         /// If true, process record will just return.
         /// </summary>
         private bool _doneProcessing;
-
-        private ulong _inputRecordNumber;
+        
         private FileLineReader? _fileProcessor;
 
         /// <summary>
@@ -742,7 +744,7 @@ namespace Microsoft.PowerShell.Commands
             }
             
             var lineMatcherFlags = GetLineMatcherFlags();
-
+            
             _lineMatcher = SimpleMatch 
                 ? new SimpleLineMatcher(CommandRuntime, _preContext, _postContext, Pattern, lineMatcherFlags,  Encoding, Culture) 
                 : new RegexLineMatcher(CommandRuntime, _preContext, _postContext, Pattern, lineMatcherFlags, Encoding);
@@ -780,17 +782,78 @@ namespace Microsoft.PowerShell.Commands
             }
 
             // We may only have directories when we have resolved wildcards
-            var expandedPathsMaybeDirectory = false;
-            List<string>? expandedPaths = null;
+            if (AllExpandedPathsAreDirectories(out bool expandedPathsMaybeDirectory, out List<string>? expandedPaths))
+            {
+                return;
+            }
+
+            if (expandedPaths != null)
+            {
+                if (ProcessExpandedPaths(expandedPaths, expandedPathsMaybeDirectory))
+                {
+                    _doneProcessing = true;
+                }
+            }
+            else
+            {
+                _doneProcessing = ProcessLineFromInputObject();
+            }
+        }
+
+        private bool ProcessLineFromInputObject()
+        {
+            
+            _inputStreamLineReader ??= CreateInputStreamLineReader(_lineMatcher);
+            return _inputStreamLineReader.MatchInputObject(InputObject);
+        }
+
+        private static InputStreamLineReader CreateInputStreamLineReader(LineMatcher lineMatcher) => new(lineMatcher);
+
+        /// <summary>
+        /// Processes a set of expanded paths
+        /// </summary>
+        /// <param name="expandedPaths"></param>
+        /// <param name="expandedPathsMaybeDirectory"></param>
+        /// <returns><see langword="true"/> if we are done processing.</returns>
+        private bool ProcessExpandedPaths(List<string> expandedPaths, bool expandedPathsMaybeDirectory)
+        {
+            foreach (var filename in expandedPaths)
+            {
+                if (expandedPathsMaybeDirectory && Directory.Exists(filename))
+                {
+                    continue;
+                }
+
+                var foundMatch = ProcessFile(filename);
+                if (Quiet && foundMatch)
+                {
+                    return true;
+                }
+            }
+
+            // No results in any files.
+            if (Quiet)
+            {
+                var res = List ? null : Boxed.False;
+                WriteObject(res);
+            }
+
+            return false;
+        }
+        
+        private bool AllExpandedPathsAreDirectories(out bool allPathsArePotentiallyDirectories, out List<string>? expandedPaths)
+        {
+            allPathsArePotentiallyDirectories = false;
+            expandedPaths = null;
             if (Path != null)
             {
                 expandedPaths = ResolveFilePaths(Path, _isLiteralPath);
                 if (expandedPaths.Count == 0)
                 {
-                    return;
+                    return true;
                 }
 
-                expandedPathsMaybeDirectory = true;
+                allPathsArePotentiallyDirectories = true;
             }
             else
             {
@@ -801,75 +864,7 @@ namespace Microsoft.PowerShell.Commands
                 }
             }
 
-            if (expandedPaths != null)
-            {
-                foreach (var filename in expandedPaths)
-                {
-                    if (expandedPathsMaybeDirectory && Directory.Exists(filename))
-                    {
-                        continue;
-                    }
-
-                    var foundMatch = ProcessFile(filename);
-                    if (Quiet && foundMatch)
-                    {
-                        return;
-                    }
-                }
-
-                // No results in any files.
-                if (Quiet)
-                {
-                    var res = List ? null : Boxed.False;
-                    WriteObject(res);
-                }
-            }
-            else
-            {
-                // Set the line number in the matched object to be the record number
-                _inputRecordNumber++;
-
-                bool matched;
-                MatchInfo? result;
-                MatchInfo? matchInfo = null;
-                if (_inputObject.BaseObject is string line)
-                {
-                    matched = _lineMatcher.DoMatch(line.AsSpan(), out result);
-                }
-                else
-                {
-                    matchInfo = _inputObject.BaseObject as MatchInfo;
-                    object objectToCheck = matchInfo ?? (object)_inputObject;
-                    matched = _lineMatcher.DoMatch(objectToCheck, out result, out line);
-                }
-
-                if (matched && result is not null)
-                {
-                    // Don't re-write the line number if it was already set...
-                    if (matchInfo == null)
-                    {
-                        result.LineNumber = _inputRecordNumber;
-                    }
-
-                    // doMatch will have already set the pattern and line text...
-                    _lineMatcher.TrackMatch(result);
-                }
-                else
-                {
-                    _lineMatcher.TrackLine(line);
-                }
-
-                // Emit any queued up objects...
-                if (_lineMatcher.FlushTrackerQueue())
-                {
-                    // If we're in quiet mode, go ahead and stop processing
-                    // now.
-                    if (Quiet)
-                    {
-                        _doneProcessing = true;
-                    }
-                }
-            }
+            return false;
         }
 
         /// <summary>
@@ -893,7 +888,8 @@ namespace Microsoft.PowerShell.Commands
                 }
                 
                 _fileProcessor ??= CreateFileFileProcessor(_lineMatcher);
-                foundMatch = _fileProcessor.ProcessFileName(filename, _cancellationTokenSource.Token);
+                var foundMatchTask = _fileProcessor.ProcessFileNameAsync(filename, _cancellationTokenSource.Token);
+                foundMatch = foundMatchTask.Result;
             }
             catch (NotSupportedException nse)
             {
@@ -922,7 +918,7 @@ namespace Microsoft.PowerShell.Commands
         /// <summary>
         /// Set to true to use new <see cref="PipeReaderFileLineReader"/> , or false to use <see cref="UseFileStreamFileLineReader"/> 
         /// </summary>
-        public static bool UseFileStreamFileLineReader { get; set; } = false;
+        public static bool UseFileStreamFileLineReader { get; set; }
 
         /// <summary>
         /// Complete processing. Emits any objects which have been queued up
@@ -934,7 +930,7 @@ namespace Microsoft.PowerShell.Commands
             _lineMatcher.TrackEOF();
             if (!_doneProcessing)
             {
-                _lineMatcher.FlushTrackerQueue();
+                _lineMatcher.FlushTrackerQueue(LineMatcher.InputStreamMoniker);
             }
         }
         
@@ -1114,6 +1110,96 @@ namespace Microsoft.PowerShell.Commands
             return result.ToArray();
         }
     }
+
+    internal class SynchronizedCommandRuntime(ICommandRuntime commandRuntime) : ICommandRuntime
+    {
+        private enum MessageKind
+        {
+            Object,
+            Warning,
+            TerminatingError,
+        }
+        
+        private BlockingCollection<(MessageKind, object?)>? _syncQueue = new();
+        
+        private BlockingCollection<(MessageKind, object?)> CurrentQueue => _syncQueue ?? throw new InvalidOperationException();
+
+        public PSHost? Host { get; } = null;
+        
+        public void WriteDebug(string text) => throw new InvalidOperationException();
+
+        public void WriteError(ErrorRecord errorRecord) => throw new InvalidOperationException();
+
+        public void WriteObject(object? sendToPipeline) => CurrentQueue.Add((MessageKind.Object, sendToPipeline));
+        
+        public void WriteObject(object? sendToPipeline, bool enumerateCollection) => throw new InvalidOperationException();
+
+        public void WriteProgress(ProgressRecord progressRecord) => throw new InvalidOperationException();
+
+        public void WriteProgress(long sourceId, ProgressRecord progressRecord) => throw new InvalidOperationException();
+
+        public void WriteVerbose(string text) => throw new InvalidOperationException();
+
+        public void WriteWarning(string message) => CurrentQueue.Add((MessageKind.Warning, message));
+        
+        public void WriteCommandDetail(string text) => throw new InvalidOperationException();
+
+        public bool ShouldProcess(string? target) => throw new InvalidOperationException();
+
+        public bool ShouldProcess(string? target, string? action) => throw new InvalidOperationException();
+
+        public bool ShouldProcess(string? verboseDescription, string? verboseWarning, string? caption) => throw new InvalidOperationException();
+
+        public bool ShouldProcess(string? verboseDescription, string? verboseWarning, string? caption, out ShouldProcessReason shouldProcessReason) => throw new InvalidOperationException();
+
+        public bool ShouldContinue(string? query, string? caption) => throw new InvalidOperationException();
+
+        public bool ShouldContinue(string? query, string? caption, ref bool yesToAll, ref bool noToAll) => throw new InvalidOperationException();
+
+        public bool TransactionAvailable() => throw new InvalidOperationException();
+
+        public PSTransactionContext? CurrentPSTransaction { get; } = null;
+        
+#pragma warning disable CS8770 // Method lacks `[DoesNotReturn]` annotation to match implemented or overridden member.
+        public void ThrowTerminatingError(ErrorRecord errorRecord) => CurrentQueue.Add((MessageKind.TerminatingError, errorRecord));
+#pragma warning restore CS8770 // Method lacks `[DoesNotReturn]` annotation to match implemented or overridden member.
+
+        public void ProcessQueue(CancellationToken cancellationToken)
+        {
+            Debug.Assert(Thread.CurrentThread.Name == "Pipeline Execution Thread");
+
+            var queue = _syncQueue ?? throw new UnreachableException();
+            
+            foreach (var (kind, obj) in queue.GetConsumingEnumerable(cancellationToken))
+            {
+                switch (kind)
+                {
+                    case MessageKind.Object:
+                        commandRuntime.WriteObject(obj);
+                        break;
+                    case MessageKind.Warning:
+                        commandRuntime.WriteWarning((string)obj!);
+                        break;
+                    case MessageKind.TerminatingError:
+                        commandRuntime.ThrowTerminatingError((ErrorRecord)obj!);
+                        break;
+                }
+            }
+            queue.Dispose();
+            _syncQueue = null;
+        }
+
+        public void BeginFile()
+        {
+            _syncQueue = new BlockingCollection<(MessageKind, object?)>();
+        }
+
+        public void EndFile()
+        {
+            if (_syncQueue is null) throw new InvalidOperationException();
+            _syncQueue.CompleteAdding();
+        }
+    }
     
     [Flags]
     internal enum LineMatcherFlags
@@ -1131,12 +1217,14 @@ namespace Microsoft.PowerShell.Commands
 
     internal abstract class LineMatcher
     {
+        internal const string InputStreamMoniker = "InputStream";
         private bool _foundMatch;
         private readonly Decoder _decoder;
 
         private readonly string[] _patterns;
 
         private IContextTracker _contextTracker;
+        private readonly SynchronizedCommandRuntime _synchronizedCommandRuntime;
         private readonly ICommandRuntime _commandRuntime;
         private readonly LineMatcherFlags _flags;
 
@@ -1147,6 +1235,7 @@ namespace Microsoft.PowerShell.Commands
             LineMatcherFlags flags,
             Encoding encoding)
         {
+            _synchronizedCommandRuntime = new SynchronizedCommandRuntime(commandRuntime);
             _commandRuntime = commandRuntime;
             _flags = flags;
             Encoding = encoding;
@@ -1167,23 +1256,22 @@ namespace Microsoft.PowerShell.Commands
 
         private bool IsTracking => _flags.HasFlag(LineMatcherFlags.IsTracking);
 
-        private bool Quiet => _flags.HasFlag(LineMatcherFlags.Quiet);
+        public bool Quiet => _flags.HasFlag(LineMatcherFlags.Quiet);
 
         private bool Raw => _flags.HasFlag(LineMatcherFlags.Raw);
 
         public bool FoundMatch => _foundMatch;
-
-        public string? CurrentFileName { get; set; }
+        
+        private ICommandRuntime GetCommandRuntime(string fileName) => fileName == InputStreamMoniker ?  _commandRuntime : _synchronizedCommandRuntime;
         
         public Encoding Encoding { get; }
 
-        public void ProcessLineBytes(ReadOnlySpan<byte> line, ulong lineNumber) => ConvertToEncodedCharArrayAndFindMatches(line, lineNumber);
+        public void ProcessLineBytes(string fileName, ReadOnlySpan<byte> line, ulong lineNumber) => ConvertToEncodedCharArrayAndFindMatches(fileName, line, lineNumber);
 
-        public void ProcessLine(string line, ulong lineNumber) => DoMatch(line, lineNumber);
+        public void ProcessLine(string fileName, string line, ulong lineNumber) => DoMatch(fileName, line, lineNumber);
 
-        private void ConvertToEncodedCharArrayAndFindMatches(ReadOnlySpan<byte> operandString, ulong lineNumber)
+        private void ConvertToEncodedCharArrayAndFindMatches(string fileName, ReadOnlySpan<byte> operandString, ulong lineNumber)
         {
-            MatchInfo? matchResult;
             char[] buffer = null!;
             try
             {
@@ -1191,21 +1279,17 @@ namespace Microsoft.PowerShell.Commands
                 buffer = ArrayPool<char>.Shared.Rent(maxCharCount);
                 var charSpan = buffer.AsSpan();
                 var length = _decoder.GetChars(operandString, charSpan, true);
-                DoMatch(charSpan[..length], lineNumber,  null, out matchResult);
+                DoMatch(fileName, charSpan[..length], lineNumber);
             }
             finally
             {
                 ArrayPool<char>.Shared.Return(buffer);
             }
         }
-        
-        public void DoMatch(string line, ulong lineNumber)
-        {
-            MatchInfo? result;
-            DoMatch(line.AsSpan(), lineNumber, null, out result);
-        }
 
-        public bool DoMatch(object operand, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult, out string operandString)
+        private void DoMatch(string fileName, string line, ulong lineNumber) => DoMatch(fileName, line.AsSpan(), lineNumber);
+
+        public bool DoMatch(string fileName, object operand, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult, out string operandString)
         {
             MatchInfo? matchInfo = operand as MatchInfo;
             if (matchInfo != null)
@@ -1222,7 +1306,8 @@ namespace Microsoft.PowerShell.Commands
                 if (IsTracking)
                 {
                     _contextTracker = new NoContextTracker();
-                    WarnFilterContext();
+
+                    WarnFilterContext(GetCommandRuntime(fileName));
                 }
             }
             else
@@ -1230,10 +1315,10 @@ namespace Microsoft.PowerShell.Commands
                 operandString = (string)LanguagePrimitives.ConvertTo(operand, typeof(string), CultureInfo.InvariantCulture);
             }
 
-            return DoMatchWorker(operandString.AsSpan(), matchInfo, out matchResult);
+            return DoMatchWorker(fileName, operandString.AsSpan(), matchInfo, out matchResult);
         }
 
-        private void TrackContextLine(ReadOnlySpan<char> line, ref bool foundMatch)
+        private void TrackContextLine(string fileName, ReadOnlySpan<char> line, ref bool foundMatch)
         {
             _contextTracker.TrackLine(line);
 
@@ -1252,7 +1337,7 @@ namespace Microsoft.PowerShell.Commands
                     return;
                 }
 
-                FlushTrackerQueue();
+                FlushTrackerQueue(fileName);
             }
         }
         
@@ -1337,46 +1422,46 @@ namespace Microsoft.PowerShell.Commands
             return false;
         }
         
-        private bool DoMatch(ReadOnlySpan<char> span, ulong lineNumber, MatchInfo? matchInfo, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult)
+        private void DoMatch(string fileName, ReadOnlySpan<char> span, ulong lineNumber)
         {
-            if (DoMatchWorker(span, matchInfo, out matchResult))
+            if (DoMatchWorker(fileName, span, null, out var matchResult))
             {
-                matchResult.Path = CurrentFileName ?? throw new InvalidOperationException();
+                matchResult.Path = fileName;
                 matchResult.LineNumber = lineNumber;
                 _contextTracker.TrackMatch(matchResult);
-                return true;
             }
-            if (IsTracking)
+            else if (IsTracking)
             {
-                TrackContextLine(span, ref _foundMatch);
+                TrackContextLine(fileName, span, ref _foundMatch);
             }
-            return false;
         }
-        
+
         /// <summary>
         /// Check the operand and see if it matches, if this.quiet is not set, then
         /// return a partially populated MatchInfo object with Line, Pattern, IgnoreCase set.
         /// </summary>
+        /// <param name="fileName">The name of the file currently being processed, or "InputStream"</param>
         /// <param name="operandString">The result of converting operand to a string.</param>
         /// <param name="matchInfo">The input object in filter mode.</param>
         /// <param name="matchResult">The match info object - this will be null if this.quiet is set.</param>
         /// <returns>True if the input object matched.</returns>
-        protected abstract bool DoMatchWorker(ReadOnlySpan<char> operandString, MatchInfo? matchInfo, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult);
+        protected abstract bool DoMatchWorker(string fileName, ReadOnlySpan<char> operandString, MatchInfo? matchInfo, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult);
 
         public bool DoMatch(ReadOnlySpan<char> operandString, [NotNullWhen(returnValue: true)] out MatchInfo? matchResult) =>
-            DoMatchWorker(operandString, null, out matchResult);
+            DoMatchWorker(InputStreamMoniker, operandString, null, out matchResult);
         
-        private void WarnFilterContext()
+        private static void WarnFilterContext(ICommandRuntime commandRuntime)
         {
             string msg = MatchStringStrings.FilterContextWarning;
-            _commandRuntime.WriteWarning(msg);
+            
+            commandRuntime.WriteWarning(msg);
         }
         
         /// <summary>
         /// Emit any objects which have been queued up, and clear the queue.
         /// </summary>
         /// <returns>Whether any objects were emitted.</returns>
-        public bool FlushTrackerQueue()
+        public bool FlushTrackerQueue(string fileName)
         {
             // Do we even have any matches to emit?
             if (_contextTracker.EmitQueue.Count < 1)
@@ -1384,26 +1469,27 @@ namespace Microsoft.PowerShell.Commands
                 return false;
             }
 
+            var commandRuntime = GetCommandRuntime(fileName);   
             if (Raw)
             {
                 foreach (MatchInfo match in _contextTracker.EmitQueue)
                 {
-                    WriteObject(match.Line);
+                    commandRuntime.WriteObject(match.Line);
                 }
             }
             else if (Quiet && !List)
             {
-                WriteObject(Boxed.True);
+                commandRuntime.WriteObject(Boxed.True);
             }
             else if (List)
             {
-                WriteObject(_contextTracker.EmitQueue[0]);
+                commandRuntime.WriteObject(_contextTracker.EmitQueue[0]);
             }
             else
             {
                 foreach (MatchInfo match in _contextTracker.EmitQueue)
                 {
-                    WriteObject(match);
+                    commandRuntime.WriteObject(match);
                 }
             }
 
@@ -1411,9 +1497,6 @@ namespace Microsoft.PowerShell.Commands
             return true;
         }
         
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void WriteObject(object value) => _commandRuntime.WriteObject(value);
-
         public void TrackEOF() => _contextTracker.TrackEOF();
 
         public void TrackMatch(MatchInfo result) => _contextTracker.TrackMatch(result);
@@ -2084,7 +2167,39 @@ namespace Microsoft.PowerShell.Commands
         }
         
         #endregion // ContextTracking
+
+        public void ProcessMessages(CancellationToken cancellationToken) => _synchronizedCommandRuntime.ProcessQueue(cancellationToken);
         
+        public IDisposable CreateFilenameScope()
+        {
+            return new FileNameScope(this);
+        }
+
+        private readonly struct FileNameScope : IDisposable
+        {
+            private readonly LineMatcher _lineMatcher;
+
+            public FileNameScope(LineMatcher lineMatcher)
+            {
+                _lineMatcher = lineMatcher;
+                _lineMatcher.BeingFile();
+            }
+
+            public void Dispose()
+            {
+                _lineMatcher.EndFile();
+            }
+        }
+
+        private void BeingFile()
+        {
+            _synchronizedCommandRuntime.BeginFile();
+        }
+
+        private void EndFile()
+        {
+            _synchronizedCommandRuntime.EndFile();
+        }
     }
 
     internal sealed class RegexLineMatcher(
@@ -2126,7 +2241,7 @@ namespace Microsoft.PowerShell.Commands
             return new ErrorRecord(e, errorId, ErrorCategory.InvalidArgument, pattern);
         }
 
-        protected override bool DoMatchWorker(ReadOnlySpan<char> operandString, MatchInfo? matchInfo, [NotNullWhen(true)] out MatchInfo? matchResult)
+        protected override bool DoMatchWorker(string fileName, ReadOnlySpan<char> operandString, MatchInfo? matchInfo, [NotNullWhen(true)] out MatchInfo? matchResult)
          {
             bool gotMatch = false;
             Match[]? matches = null;
@@ -2236,7 +2351,7 @@ namespace Microsoft.PowerShell.Commands
             }
         }
 
-        protected override bool DoMatchWorker(ReadOnlySpan<char> operandString, MatchInfo? matchInfo, [NotNullWhen(true)] out MatchInfo? matchResult)
+        protected override bool DoMatchWorker(string fileName, ReadOnlySpan<char> operandString, MatchInfo? matchInfo, [NotNullWhen(true)] out MatchInfo? matchResult)
         {
             bool gotMatch = false;
             int patternIndex = 0;
@@ -2276,21 +2391,29 @@ namespace Microsoft.PowerShell.Commands
         /// <param name="filename">the name of the file to search</param>
         /// <param name="cancellationToken">The cancellation token to cancel the operation.</param>
         /// <returns><see langword="true"/> if matches are found, otherwise <see langword="false"/>.</returns>
-        public bool ProcessFileName(string filename, CancellationToken cancellationToken)
+        public Task<bool> ProcessFileNameAsync(string filename, CancellationToken cancellationToken)
         {
-            LineMatcher.CurrentFileName = filename;
-            ProcessFileContent(filename, cancellationToken);
+            var result = ProcessFile(filename, cancellationToken);
+            LineMatcher.ProcessMessages(cancellationToken);
+            return result;
+        }
+
+        private async Task<bool> ProcessFile(string filename, CancellationToken cancellationToken)
+        {
+            using var _ = LineMatcher.CreateFilenameScope();
+            await ProcessFileContentAsync(filename, cancellationToken);
             
             // Check for any remaining matches. This could be caused
             // by breaking out of the loop early for quiet or list
             // mode, or by reaching EOF before we collected all
             // our post-context.
             LineMatcher.TrackEOF();
-            // returns false if there is nothing in the emit queue 
-            return LineMatcher.FlushTrackerQueue();
+            // returns false if there is nothing in the emit queue
+            var result =  LineMatcher.FlushTrackerQueue(filename);
+            return result;
         }
         
-        protected abstract void ProcessFileContent(string filename, CancellationToken cancellationToken);
+        protected abstract Task ProcessFileContentAsync(string fileName, CancellationToken cancellationToken);
     }
 
     /// <summary>
@@ -2308,15 +2431,17 @@ namespace Microsoft.PowerShell.Commands
 
         private static readonly SearchValues<byte> s_newLineSearchValues = SearchValues.Create([(byte)'\r', (byte)'\n']);
 
-        protected override void ProcessFileContent(string filename, CancellationToken cancellationToken)
+        protected override async Task ProcessFileContentAsync(string fileName, CancellationToken cancellationToken)
         {
+            await Task.Delay(0, cancellationToken).ConfigureAwait(false);
             FileStreamOptions fileStreamOptions = GetFileStreamOptions();
-            using FileStream fsx = new(filename, fileStreamOptions);
+            await using FileStream fsx = new(fileName, fileStreamOptions);
             var pipe = new System.IO.Pipelines.Pipe();
-            _ = FillPipeAsync(fsx, pipe.Writer, cancellationToken);
+            var fillPipeTask = FillPipeAsync(fsx, pipe.Writer, cancellationToken);
                     
             // process the file content
-            ReadPipe(pipe.Reader, s_newLineSearchValues,  LineMatcher.ProcessLineBytes, cancellationToken);
+            await ReadPipeAsync(pipe.Reader, s_newLineSearchValues, (span, action) =>  LineMatcher.ProcessLineBytes(fileName, span, action), cancellationToken);
+            await fillPipeTask;
         }
         
         private static async Task FillPipeAsync(FileStream fs, PipeWriter writer, CancellationToken cancellationToken)
@@ -2332,7 +2457,7 @@ namespace Microsoft.PowerShell.Commands
                 }
                 writer.Advance(bytesRead);
                 FlushResult result = await writer.FlushAsync(cancellationToken);
-                if (result.IsCompleted || result.IsCompleted)
+                if (result.IsCompleted)
                 {
                     break;
                 }
@@ -2340,7 +2465,7 @@ namespace Microsoft.PowerShell.Commands
             await writer.CompleteAsync();
         }
         
-         private static void ReadPipe(PipeReader reader, SearchValues<byte> searchValues, Action<ReadOnlySpan<byte>, ulong> action, CancellationToken cancellationToken)
+         private static async Task ReadPipeAsync(PipeReader reader, SearchValues<byte> searchValues, Action<ReadOnlySpan<byte>, ulong> action, CancellationToken cancellationToken)
         {
             var pool = ArrayPool<byte>.Shared;
             ulong lineNumber = 0;
@@ -2350,16 +2475,8 @@ namespace Microsoft.PowerShell.Commands
                 {
                     return;
                 }
-
-                ReadResult result;
-                while (!reader.TryRead(out result))
-                {
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        return;
-                    }
-                    Thread.Yield();
-                }
+                
+                var result = await reader.ReadAsync(cancellationToken);
                 
                 ReadOnlySequence<byte> bufferSequence = result.Buffer;
                 SequencePosition? newLinePosition;
@@ -2414,8 +2531,8 @@ namespace Microsoft.PowerShell.Commands
                     break;
                 }
             }
-            var task = reader.CompleteAsync();
-            _ = task;
+            await reader.CompleteAsync();
+            
             return;
             
             static SequencePosition? GetNewLineSequencePosition(ReadOnlySequence<byte> buffer, SearchValues<byte> searchValues)
@@ -2463,7 +2580,7 @@ namespace Microsoft.PowerShell.Commands
     }
 
     /// <summary>
-    /// An <see cref="FileLineReader"/> that uses <see cref="System.IO.StreamReader" /> to read file content. 
+    /// A <see cref="FileLineReader"/> that uses <see cref="System.IO.StreamReader" /> to read file content. 
     /// </summary>
     internal sealed class FileStreamFileLineReader : FileLineReader
     {
@@ -2478,9 +2595,9 @@ namespace Microsoft.PowerShell.Commands
             _encoding = lineMatcher.Encoding;
         }
 
-        protected override void ProcessFileContent(string filename, CancellationToken cancellationToken)
+        protected override Task ProcessFileContentAsync(string fileName, CancellationToken cancellationToken)
         {
-            using FileStream fs = new(filename, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using FileStream fs = new(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using StreamReader sr = new(fs, _encoding);
             ulong lineNo = 0;
 
@@ -2490,11 +2607,78 @@ namespace Microsoft.PowerShell.Commands
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    return;
+                    break;
                 }
                 lineNo++;
-                LineMatcher.ProcessLine(line, lineNo);
+                LineMatcher.ProcessLine(fileName, line, lineNo);
             }
+
+            return Task.CompletedTask;
         }
+    }
+
+    /// <summary>
+    /// A <see cref="FileLineReader"/> that uses objects from the input stream to get content lines.
+    /// </summary>
+    /// <param name="lineMatcher"></param>
+    internal sealed class InputStreamLineReader(LineMatcher lineMatcher)
+    {
+        private ulong _inputRecordNumber;
+        
+        public bool MatchInputObject(PSObject inputObject)
+        {
+            // Set the line number in the matched object to be the record number
+            _inputRecordNumber++;
+
+            return MatchInputObject(inputObject, _inputRecordNumber);
+        }
+
+        private bool MatchInputObject(PSObject inputObject, ulong inputRecordNumber)
+        {
+            using var scope = lineMatcher.CreateFilenameScope();
+            bool matched;
+            MatchInfo? result;
+            MatchInfo? matchInfo = null;
+            if (inputObject.BaseObject is string line)
+            {
+                matched = lineMatcher.DoMatch(line.AsSpan(), out result);
+            }
+            else
+            {
+                matchInfo = inputObject.BaseObject as MatchInfo;
+                object objectToCheck = matchInfo ?? (object)inputObject;
+                matched = lineMatcher.DoMatch("InputStream", objectToCheck, out result, out line);
+            }
+
+            if (matched && result is not null)
+            {
+                // Don't re-write the line number if it was already set...
+                if (matchInfo == null)
+                {
+                    result.LineNumber = inputRecordNumber;
+                }
+
+                // doMatch will have already set the pattern and line text...
+                lineMatcher.TrackMatch(result);
+            }
+            else
+            {
+                lineMatcher.TrackLine(line);
+            }
+
+            // Emit any queued up objects...
+            if (lineMatcher.FlushTrackerQueue(LineMatcher.InputStreamMoniker))
+            {
+                // If we're in quiet mode, go ahead and stop processing
+                // now.
+                if (lineMatcher.Quiet)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        
     }
 }   
