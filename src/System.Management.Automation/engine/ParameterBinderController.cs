@@ -1154,7 +1154,7 @@ namespace System.Management.Automation
             return result;
         }
 
-        private static void AddNewPosition(
+        internal static void AddNewPosition(
             SortedDictionary<int, Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter>> result,
             int positionInParameterSet,
             MergedCompiledCommandParameter parameter,
@@ -1199,7 +1199,7 @@ namespace System.Management.Automation
             }
         }
 
-        private static bool ContainsPositionalParameterInSet(
+        internal static bool ContainsPositionalParameterInSet(
             Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter> positionalCommandParameters,
             MergedCompiledCommandParameter parameter,
             uint parameterSet)
