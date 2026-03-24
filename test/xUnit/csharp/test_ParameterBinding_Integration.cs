@@ -480,4 +480,105 @@ namespace PSTests.Parallel
             }
         }
     }
+
+    public class TypeCoercionIntegrationTests
+    {
+        [Fact]
+        public void String_Coerced_To_Int_Parameter()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param([int]$Value)
+                        $Value
+                    }
+                    Test-Func -Value '42'
+                ");
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Single(results);
+                Assert.Equal(42, results[0].BaseObject);
+            }
+        }
+
+        [Fact]
+        public void Int_Coerced_To_String_Parameter()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param([string]$Value)
+                        $Value
+                    }
+                    Test-Func -Value 99
+                ");
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Single(results);
+                Assert.Equal("99", (string)results[0].BaseObject);
+            }
+        }
+
+        [Fact]
+        public void UnconvertibleValue_WritesError()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param([int]$Value)
+                        $Value
+                    }
+                    Test-Func -Value 'not-a-number'
+                ");
+                ps.Invoke();
+                Assert.NotEmpty(ps.Streams.Error);
+            }
+        }
+
+        [Fact]
+        public void Single_Value_Coerced_To_Array_Parameter()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param([string[]]$Values)
+                        $Values.Count
+                    }
+                    Test-Func -Values 'hello'
+                ");
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Single(results);
+                Assert.Equal(1, results[0].BaseObject);
+            }
+        }
+
+        [Fact]
+        public void Enum_String_Coerced_To_Enum_Parameter()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param([System.IO.FileMode]$Mode)
+                        [int]$Mode
+                    }
+                    Test-Func -Mode 'Open'
+                ");
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Single(results);
+                Assert.Equal((int)System.IO.FileMode.Open, results[0].BaseObject);
+            }
+        }
+    }
 }
