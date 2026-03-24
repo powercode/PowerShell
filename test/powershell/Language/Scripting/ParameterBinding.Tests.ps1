@@ -897,4 +897,79 @@ Describe "Tests for parameter binding" -Tags "CI" {
             $result.Rest | Should -HaveCount 2
         }
     }
+
+    Context 'Argument reparsing edge cases' {
+        BeforeAll {
+            function Test-Reparse {
+                [CmdletBinding()]
+                param(
+                    [string] $Name,
+                    [switch] $Verbose2,
+                    [bool]   $Flag,
+                    [string] $Other
+                )
+                @{
+                    Name    = $Name
+                    Verbose2 = $Verbose2.IsPresent
+                    Flag    = $Flag
+                    Other   = $Other
+                }
+            }
+        }
+
+        It 'Switch parameter with no argument defaults to True' {
+            $result = Test-Reparse -Verbose2
+            $result.Verbose2 | Should -BeTrue
+        }
+
+        It 'Switch parameter with explicit colon-False is False' {
+            $result = Test-Reparse -Verbose2:$false
+            $result.Verbose2 | Should -BeFalse
+        }
+
+        It 'Bool parameter with colon-true syntax is True' {
+            $result = Test-Reparse -Flag:$true
+            $result.Flag | Should -BeTrue
+        }
+
+        It 'Bool parameter with no argument throws MissingArgument' {
+            { Test-Reparse -Flag } | Should -Throw -ErrorId 'MissingArgument,Test-Reparse'
+        }
+
+        It 'Bool parameter with explicit colon-False is False' {
+            $result = Test-Reparse -Flag:$false
+            $result.Flag | Should -BeFalse
+        }
+
+        It 'Named string parameter followed by value binds correctly' {
+            $result = Test-Reparse -Name 'hello'
+            $result.Name | Should -BeExactly 'hello'
+        }
+
+        It 'Named string parameter with colon syntax binds correctly' {
+            $result = Test-Reparse -Name:'hello'
+            $result.Name | Should -BeExactly 'hello'
+        }
+
+        It 'Named string parameter with no value and no following arg throws MissingArgument' {
+            { Test-Reparse -Name } | Should -Throw -ErrorId 'MissingArgument,Test-Reparse'
+        }
+
+        It 'Named string parameter followed by another named parameter throws MissingArgument' {
+            { Test-Reparse -Name -Other } | Should -Throw -ErrorId 'MissingArgument,Test-Reparse'
+        }
+
+        It 'Multiple named parameters each with values bind independently' {
+            $result = Test-Reparse -Name 'alpha' -Other 'beta'
+            $result.Name  | Should -BeExactly 'alpha'
+            $result.Other | Should -BeExactly 'beta'
+        }
+
+        It 'Named + switch interspersed all bind correctly' {
+            $result = Test-Reparse -Name 'foo' -Verbose2 -Other 'bar'
+            $result.Name    | Should -BeExactly 'foo'
+            $result.Verbose2 | Should -BeTrue
+            $result.Other   | Should -BeExactly 'bar'
+        }
+    }
 }
