@@ -288,7 +288,7 @@ namespace System.Management.Automation
             }
         }
 
-        private static bool IsSwitchAndSetValue(
+        internal static bool IsSwitchAndSetValue(
             string argumentName,
             CommandParameterInternal argument,
             CompiledCommandParameter matchingParameter)
