@@ -741,4 +741,160 @@ Describe "Tests for parameter binding" -Tags "CI" {
             { Test-NamedMatchPrefix -Path 'a' -Path 'b' } | Should -Throw -ErrorId 'ParameterAlreadyBound,Test-NamedMatchPrefix'
         }
     }
+
+    Context 'Positional parameter binding edge cases' {
+        It 'Positional parameter in one set but not another — positional binding selects the set with a position' {
+            function Test-PositionalOneSet {
+                [CmdletBinding(DefaultParameterSetName = 'SetA')]
+                param(
+                    [Parameter(ParameterSetName = 'SetA', Position = 0)]
+                    [Parameter(ParameterSetName = 'SetB')]
+                    [string] $Alpha,
+
+                    [Parameter(ParameterSetName = 'SetB', Mandatory = $true)]
+                    [string] $Discriminator
+                )
+                @{ ParameterSet = $PSCmdlet.ParameterSetName; Alpha = $Alpha }
+            }
+
+            $result = Test-PositionalOneSet 'hello'
+            $result.ParameterSet | Should -BeExactly 'SetA'
+            $result.Alpha | Should -BeExactly 'hello'
+        }
+
+        It 'Position gaps (0, 2, 5) — arguments fill positions in ascending position order' {
+            function Test-PositionGaps {
+                [CmdletBinding()]
+                param(
+                    [Parameter(Position = 0)] [string] $A,
+                    [Parameter(Position = 2)] [string] $B,
+                    [Parameter(Position = 5)] [string] $C
+                )
+                @{ A = $A; B = $B; C = $C }
+            }
+
+            $result = Test-PositionGaps 'alpha' 'bravo' 'charlie'
+            $result.A | Should -BeExactly 'alpha'
+            $result.B | Should -BeExactly 'bravo'
+            $result.C | Should -BeExactly 'charlie'
+        }
+
+        It 'All-sets positional parameter (no ParameterSetName) works with any parameter set' {
+            function Test-AllSetsPositional {
+                [CmdletBinding(DefaultParameterSetName = 'SetA')]
+                param(
+                    [Parameter(Position = 0)]
+                    [string] $Common,
+
+                    [Parameter(ParameterSetName = 'SetA')]
+                    [switch] $UseA,
+
+                    [Parameter(ParameterSetName = 'SetB')]
+                    [switch] $UseB
+                )
+                @{ ParameterSet = $PSCmdlet.ParameterSetName; Common = $Common }
+            }
+
+            $resultA = Test-AllSetsPositional 'hello' -UseA
+            $resultA.Common | Should -BeExactly 'hello'
+            $resultA.ParameterSet | Should -BeExactly 'SetA'
+
+            $resultB = Test-AllSetsPositional 'world' -UseB
+            $resultB.Common | Should -BeExactly 'world'
+            $resultB.ParameterSet | Should -BeExactly 'SetB'
+        }
+
+        It 'Named parameter binding followed by positional — positional fills remaining unbound slot' {
+            function Test-NamedThenPositional {
+                [CmdletBinding()]
+                param(
+                    [Parameter(Position = 0)] [string] $First,
+                    [Parameter(Position = 1)] [string] $Second
+                )
+                @{ First = $First; Second = $Second }
+            }
+
+            $result = Test-NamedThenPositional -Second 'two' 'one'
+            $result.First | Should -BeExactly 'one'
+            $result.Second | Should -BeExactly 'two'
+        }
+
+        It 'Default parameter set is preferred when two sets have a parameter at the same position' {
+            function Test-DefaultSetPreference {
+                [CmdletBinding(DefaultParameterSetName = 'Alpha')]
+                param(
+                    [Parameter(ParameterSetName = 'Alpha', Position = 0)]
+                    [string] $AlphaValue,
+
+                    [Parameter(ParameterSetName = 'Beta', Position = 0)]
+                    [string] $BetaValue
+                )
+                @{ ParameterSet = $PSCmdlet.ParameterSetName; AlphaValue = $AlphaValue; BetaValue = $BetaValue }
+            }
+
+            $result = Test-DefaultSetPreference 'test'
+            $result.ParameterSet | Should -BeExactly 'Alpha'
+            $result.AlphaValue | Should -BeExactly 'test'
+        }
+
+        It 'Named parameter selects set, then positional binds within that set' {
+            function Test-SetThenPositional {
+                [CmdletBinding()]
+                param(
+                    [Parameter(ParameterSetName = 'SetA', Position = 0)]
+                    [string] $Alpha,
+
+                    [Parameter(ParameterSetName = 'SetA')]
+                    [switch] $UseA,
+
+                    [Parameter(ParameterSetName = 'SetB', Position = 0)]
+                    [string] $Beta,
+
+                    [Parameter(ParameterSetName = 'SetB')]
+                    [switch] $UseB
+                )
+                @{ ParameterSet = $PSCmdlet.ParameterSetName; Alpha = $Alpha; Beta = $Beta }
+            }
+
+            $resultA = Test-SetThenPositional -UseA 'hello'
+            $resultA.ParameterSet | Should -BeExactly 'SetA'
+            $resultA.Alpha | Should -BeExactly 'hello'
+
+            $resultB = Test-SetThenPositional -UseB 'world'
+            $resultB.ParameterSet | Should -BeExactly 'SetB'
+            $resultB.Beta | Should -BeExactly 'world'
+        }
+
+        It 'ValueFromRemainingArguments does not steal from positional binding' {
+            function Test-VRAOrder {
+                [CmdletBinding()]
+                param(
+                    [Parameter(Position = 0)] [string] $Named,
+                    [Parameter(ValueFromRemainingArguments = $true)] [string[]] $Rest
+                )
+                @{ Named = $Named; Rest = $Rest }
+            }
+
+            $result = Test-VRAOrder 'first' 'extra1' 'extra2'
+            $result.Named | Should -BeExactly 'first'
+            $result.Rest | Should -HaveCount 2
+            $result.Rest[0] | Should -BeExactly 'extra1'
+            $result.Rest[1] | Should -BeExactly 'extra2'
+        }
+
+        It 'Positional argument beyond number of positional parameters binds to ValueFromRemainingArguments' {
+            function Test-PositionalOverflow {
+                [CmdletBinding()]
+                param(
+                    [Parameter(Position = 0)] [string] $First,
+                    [Parameter(ValueFromRemainingArguments = $true)] [string[]] $Rest
+                )
+                @{ First = $First; Rest = $Rest }
+            }
+
+            $result = Test-PositionalOverflow 'pos0' 'overflow1' 'overflow2'
+            $result.First | Should -BeExactly 'pos0'
+            $result.Rest | Should -HaveCount 2
+        }
+    }
 }
