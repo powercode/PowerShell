@@ -1083,4 +1083,127 @@ Describe "Tests for parameter binding" -Tags "CI" {
             $result | Should -BeOfType [scriptblock]
         }
     }
+
+    Context 'Parameter validation attribute edge cases' {
+        It '[ValidateNotNull] rejects null' {
+            function Test-VNN {
+                [CmdletBinding()]
+                # Use [object] type to allow null — [string] converts $null to empty string
+                param([ValidateNotNull()] [object] $Value)
+                $Value
+            }
+            { Test-VNN -Value $null } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VNN'
+        }
+
+        It '[ValidateNotNullOrEmpty] rejects empty string' {
+            function Test-VNNOE {
+                [CmdletBinding()]
+                param([ValidateNotNullOrEmpty()] [string] $Value)
+                $Value
+            }
+            { Test-VNNOE -Value '' } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VNNOE'
+        }
+
+        It '[ValidateNotNullOrEmpty] accepts non-empty string' {
+            function Test-VNNOEPass {
+                [CmdletBinding()]
+                param([ValidateNotNullOrEmpty()] [string] $Value)
+                $Value
+            }
+            Test-VNNOEPass -Value 'hello' | Should -BeExactly 'hello'
+        }
+
+        It '[ValidateRange] rejects out-of-range value' {
+            function Test-VRange {
+                [CmdletBinding()]
+                param([ValidateRange(1, 10)] [int] $Value)
+                $Value
+            }
+            { Test-VRange -Value 0  } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VRange'
+            { Test-VRange -Value 11 } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VRange'
+        }
+
+        It '[ValidateRange] accepts in-range value' {
+            function Test-VRangePass {
+                [CmdletBinding()]
+                param([ValidateRange(1, 10)] [int] $Value)
+                $Value
+            }
+            Test-VRangePass -Value 5 | Should -Be 5
+        }
+
+        It '[ValidateSet] rejects value not in set' {
+            function Test-VSet {
+                [CmdletBinding()]
+                param([ValidateSet('Red', 'Green', 'Blue')] [string] $Color)
+                $Color
+            }
+            { Test-VSet -Color 'Purple' } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VSet'
+        }
+
+        It '[ValidateSet] case-insensitive match succeeds and preserves input case' {
+            function Test-VSetCase {
+                [CmdletBinding()]
+                param([ValidateSet('Red', 'Green', 'Blue')] [string] $Color)
+                $Color
+            }
+            # ValidateSet matches case-insensitively but returns the original input value
+            Test-VSetCase -Color 'red' | Should -BeExactly 'red'
+        }
+
+        It '[ValidatePattern] rejects non-matching string' {
+            function Test-VPat {
+                [CmdletBinding()]
+                param([ValidatePattern('^\d+$')] [string] $Value)
+                $Value
+            }
+            { Test-VPat -Value 'abc' } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VPat'
+        }
+
+        It '[ValidatePattern] accepts matching string' {
+            function Test-VPatPass {
+                [CmdletBinding()]
+                param([ValidatePattern('^\d+$')] [string] $Value)
+                $Value
+            }
+            Test-VPatPass -Value '123' | Should -BeExactly '123'
+        }
+
+        It '[ValidateLength] rejects string outside length bounds' {
+            function Test-VLen {
+                [CmdletBinding()]
+                param([ValidateLength(2, 5)] [string] $Value)
+                $Value
+            }
+            { Test-VLen -Value 'a'      } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VLen'
+            { Test-VLen -Value 'toolong' } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VLen'
+        }
+
+        It '[ValidateScript] rejects when script returns falsy' {
+            function Test-VScript {
+                [CmdletBinding()]
+                param([ValidateScript({ $_ -gt 0 })] [int] $Value)
+                $Value
+            }
+            { Test-VScript -Value -1 } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VScript'
+        }
+
+        It '[ValidateScript] accepts when script returns truthy' {
+            function Test-VScriptPass {
+                [CmdletBinding()]
+                param([ValidateScript({ $_ -gt 0 })] [int] $Value)
+                $Value
+            }
+            Test-VScriptPass -Value 5 | Should -Be 5
+        }
+
+        It '[ValidateCount] rejects array with wrong element count' {
+            function Test-VCount {
+                [CmdletBinding()]
+                param([ValidateCount(2, 4)] [string[]] $Values)
+                $Values
+            }
+            { Test-VCount -Values @('a') } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VCount'
+        }
+    }
 }
