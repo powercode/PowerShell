@@ -646,4 +646,99 @@ Describe "Tests for parameter binding" -Tags "CI" {
             $result.Param3 | Should -BeExactly 'Z'
         }
     }
+
+    Context 'Named parameter matching edge cases' {
+        BeforeAll {
+            function Test-NamedMatchExact {
+                [CmdletBinding()]
+                param(
+                    [string] $Path,
+                    [string] $PathInfo
+                )
+                @{ Path = $Path; PathInfo = $PathInfo }
+            }
+
+            function Test-NamedMatchPrefix {
+                [CmdletBinding()]
+                param(
+                    [string] $Path
+                )
+                $Path
+            }
+
+            function Test-NamedMatchAmbiguous {
+                [CmdletBinding()]
+                param(
+                    [string] $Path,
+                    [string] $Process
+                )
+                @{ Path = $Path; Process = $Process }
+            }
+
+            function Test-NamedMatchAlias {
+                [CmdletBinding()]
+                param(
+                    [Alias('CN')]
+                    [string] $ComputerName
+                )
+                $ComputerName
+            }
+
+            function Test-NamedMatchAliasVsPrefix {
+                [CmdletBinding()]
+                param(
+                    [Alias('CN')]
+                    [string] $ComputerName,
+                    [string] $Content
+                )
+                @{ ComputerName = $ComputerName; Content = $Content }
+            }
+        }
+
+        It 'Exact match takes precedence over prefix match when both exist' {
+            $result = Test-NamedMatchExact -Path 'p1' -PathInfo 'p2'
+            $result.Path | Should -BeExactly 'p1'
+            $result.PathInfo | Should -BeExactly 'p2'
+        }
+
+        It 'Prefix match works with minimum unique characters' {
+            $result = Test-NamedMatchPrefix -Pa 'hello'
+            $result | Should -BeExactly 'hello'
+        }
+
+        It 'Ambiguous prefix throws AmbiguousParameter error' {
+            { Test-NamedMatchAmbiguous -P 'val' } | Should -Throw -ErrorId 'AmbiguousParameter,Test-NamedMatchAmbiguous'
+        }
+
+        It 'Alias match works' {
+            $result = Test-NamedMatchAlias -CN 'server1'
+            $result | Should -BeExactly 'server1'
+        }
+
+        It 'Alias exact match takes precedence over parameter prefix match' {
+            # -CN is an exact alias match; -Co would be an ambiguous prefix if both ComputerName and Content are present
+            $result = Test-NamedMatchAliasVsPrefix -CN 'server1' -Content 'data'
+            $result.ComputerName | Should -BeExactly 'server1'
+            $result.Content | Should -BeExactly 'data'
+        }
+
+        It 'Case-insensitive matching works' {
+            $result = Test-NamedMatchPrefix -path 'hello'
+            $result | Should -BeExactly 'hello'
+        }
+
+        It 'Case-insensitive prefix match works' {
+            # -PA (uppercase) also prefix-matches Path
+            $result = Test-NamedMatchPrefix -PA 'hello'
+            $result | Should -BeExactly 'hello'
+        }
+
+        It 'Parameter not found throws NamedParameterNotFound error' {
+            { Test-NamedMatchPrefix -NonExistent 'val' } | Should -Throw -ErrorId 'NamedParameterNotFound,Test-NamedMatchPrefix'
+        }
+
+        It 'Parameter already bound throws ParameterAlreadyBound error' {
+            { Test-NamedMatchPrefix -Path 'a' -Path 'b' } | Should -Throw -ErrorId 'ParameterAlreadyBound,Test-NamedMatchPrefix'
+        }
+    }
 }
