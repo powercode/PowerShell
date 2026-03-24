@@ -972,4 +972,115 @@ Describe "Tests for parameter binding" -Tags "CI" {
             $result.Other   | Should -BeExactly 'bar'
         }
     }
+
+    Context 'Type coercion edge cases during parameter binding' {
+        It 'String value coerced to [int] parameter' {
+            function Test-CoerceInt {
+                [CmdletBinding()]
+                param([int] $Value)
+                $Value
+            }
+            $result = Test-CoerceInt -Value '42'
+            $result | Should -Be 42
+            $result | Should -BeOfType [int]
+        }
+
+        It 'Int value coerced to [string] parameter' {
+            function Test-CoerceStr {
+                [CmdletBinding()]
+                param([string] $Value)
+                $Value
+            }
+            $result = Test-CoerceStr -Value 99
+            $result | Should -BeExactly '99'
+            $result | Should -BeOfType [string]
+        }
+
+        It 'Single value coerced to [string[]] parameter becomes single-element array' {
+            function Test-CoerceArray {
+                [CmdletBinding()]
+                param([string[]] $Values)
+                $Values
+            }
+            # PowerShell unrolls single-element arrays on function return;
+            # wrap in @() to verify only one element was bound.
+            $result = @(Test-CoerceArray -Values 'hello')
+            $result | Should -HaveCount 1
+            $result[0] | Should -BeExactly 'hello'
+        }
+
+        It 'Array value bound to [string[]] parameter keeps all elements' {
+            function Test-CoerceArrayMulti {
+                [CmdletBinding()]
+                param([string[]] $Values)
+                $Values
+            }
+            $result = Test-CoerceArrayMulti -Values @('a', 'b', 'c')
+            $result | Should -HaveCount 3
+        }
+
+        It 'String coerced to [System.Uri] parameter' {
+            function Test-CoerceUri {
+                [CmdletBinding()]
+                param([System.Uri] $Uri)
+                $Uri.AbsoluteUri
+            }
+            $result = Test-CoerceUri -Uri 'https://example.com'
+            $result | Should -Match 'example\.com'
+        }
+
+        It 'String coerced to [System.Version] parameter' {
+            function Test-CoerceVersion {
+                [CmdletBinding()]
+                param([System.Version] $Ver)
+                $Ver.Major
+            }
+            $result = Test-CoerceVersion -Ver '3.14.0'
+            $result | Should -Be 3
+        }
+
+        It '$null coerced to [int] parameter becomes 0 (no exception)' {
+            function Test-NullInt {
+                [CmdletBinding()]
+                param([int] $Value = 0)
+                $Value
+            }
+            # $null is converted to 0 for [int] parameters in PowerShell.
+            $result = Test-NullInt -Value $null
+            $result | Should -Be 0
+        }
+
+        It 'Unconvertible string throws ParameterArgumentTransformationError for [int]' {
+            function Test-BadInt {
+                [CmdletBinding()]
+                param([int] $Value)
+                $Value
+            }
+            { Test-BadInt -Value 'not-a-number' } | Should -Throw -ErrorId 'ParameterArgumentTransformationError,Test-BadInt'
+        }
+
+        It 'Enum string coerced to attribute param enum (PSCmdlet ParameterSet)' {
+            function Test-CoerceEnum {
+                [CmdletBinding()]
+                param(
+                    [Parameter()]
+                    [System.IO.FileMode] $Mode
+                )
+                $Mode
+            }
+            $result = Test-CoerceEnum -Mode 'Open'
+            $result | Should -Be ([System.IO.FileMode]::Open)
+        }
+
+        It 'ScriptBlock value bound to [ScriptBlock] parameter without coercion' {
+            function Test-SBParam {
+                [CmdletBinding()]
+                param([scriptblock] $Filter)
+                $Filter
+            }
+            $sb = { $_ -gt 0 }
+            $result = Test-SBParam -Filter $sb
+            $result | Should -BeOfType [scriptblock]
+        }
+    }
 }
