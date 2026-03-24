@@ -581,4 +581,141 @@ namespace PSTests.Parallel
             }
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Validation integration tests — validation attributes fire through full
+    // PowerShell parameter binding pipeline.
+    // -----------------------------------------------------------------------
+    public class ValidationIntegrationTests
+    {
+        [Fact]
+        public void ValidateRange_AcceptsValueInRange()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param(
+                            [ValidateRange(1, 10)]
+                            [int]$Value
+                        )
+                        $Value
+                    }
+                    Test-Func -Value 5
+                ");
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Single(results);
+                Assert.Equal(5, results[0].BaseObject);
+            }
+        }
+
+        [Fact]
+        public void ValidateRange_RejectsValueOutOfRange()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param(
+                            [ValidateRange(1, 10)]
+                            [int]$Value
+                        )
+                        $Value
+                    }
+                    Test-Func -Value 99
+                ");
+                ps.Invoke();
+                Assert.NotEmpty(ps.Streams.Error);
+            }
+        }
+
+        [Fact]
+        public void ValidateSet_AcceptsValueInSet()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param(
+                            [ValidateSet('Red', 'Green', 'Blue')]
+                            [string]$Color
+                        )
+                        $Color
+                    }
+                    Test-Func -Color 'Green'
+                ");
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Single(results);
+                Assert.Equal("Green", (string)results[0].BaseObject);
+            }
+        }
+
+        [Fact]
+        public void ValidateSet_RejectsValueNotInSet()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param(
+                            [ValidateSet('Red', 'Green', 'Blue')]
+                            [string]$Color
+                        )
+                        $Color
+                    }
+                    Test-Func -Color 'Yellow'
+                ");
+                ps.Invoke();
+                Assert.NotEmpty(ps.Streams.Error);
+            }
+        }
+
+        [Fact]
+        public void ValidatePattern_RejectsNonMatchingString()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param(
+                            [ValidatePattern('^\d+$')]
+                            [string]$Value
+                        )
+                        $Value
+                    }
+                    Test-Func -Value 'abc'
+                ");
+                ps.Invoke();
+                Assert.NotEmpty(ps.Streams.Error);
+            }
+        }
+
+        [Fact]
+        public void ValidateNotNullOrEmpty_RejectsEmptyString()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param(
+                            [ValidateNotNullOrEmpty()]
+                            [string]$Value
+                        )
+                        $Value
+                    }
+                    Test-Func -Value ''
+                ");
+                ps.Invoke();
+                Assert.NotEmpty(ps.Streams.Error);
+            }
+        }
+    }
 }
