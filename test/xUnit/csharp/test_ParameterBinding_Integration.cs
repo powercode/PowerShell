@@ -361,4 +361,123 @@ namespace PSTests.Parallel
             }
         }
     }
+
+    public class ArgumentReparsingIntegrationTests
+    {
+        [Fact]
+        public void Switch_NoValue_DefaultsToPresent()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param([switch]$Enabled)
+                        $Enabled.IsPresent
+                    }
+                    Test-Func -Enabled
+                ");
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Single(results);
+                Assert.Equal(true, results[0].BaseObject);
+            }
+        }
+
+        [Fact]
+        public void Switch_ExplicitFalse_IsNotPresent()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param([switch]$Enabled)
+                        $Enabled.IsPresent
+                    }
+                    Test-Func -Enabled:$false
+                ");
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Single(results);
+                Assert.Equal(false, results[0].BaseObject);
+            }
+        }
+
+        [Fact]
+        public void NamedParam_WithValue_Binds()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param([string]$Name, [switch]$Verbose2, [string]$Other)
+                        ""$Name|$Other|$($Verbose2.IsPresent)""
+                    }
+                    Test-Func -Name 'alpha' -Verbose2 -Other 'beta'
+                ");
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Single(results);
+                Assert.Equal("alpha|beta|True", (string)results[0].BaseObject);
+            }
+        }
+
+        [Fact]
+        public void NamedParam_MissingValue_WritesError()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param([string]$Name)
+                        $Name
+                    }
+                    Test-Func -Name
+                ");
+                ps.Invoke();
+                Assert.NotEmpty(ps.Streams.Error);
+            }
+        }
+
+        [Fact]
+        public void NamedParam_FollowedByAnotherParam_WritesError()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param([string]$Name, [string]$Other)
+                        $Name
+                    }
+                    Test-Func -Name -Other
+                ");
+                ps.Invoke();
+                Assert.NotEmpty(ps.Streams.Error);
+            }
+        }
+
+        [Fact]
+        public void NamedParam_ColonSyntax_Binds()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Func {
+                        [CmdletBinding()]
+                        param([string]$Name)
+                        $Name
+                    }
+                    Test-Func -Name:'hello'
+                ");
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Single(results);
+                Assert.Equal("hello", (string)results[0].BaseObject);
+            }
+        }
+    }
 }
