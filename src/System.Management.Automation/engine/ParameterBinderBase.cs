@@ -1455,437 +1455,423 @@ namespace System.Management.Automation
             object result = null;
             coercionRequired = false;
 
-            do // false loop
+            bindingTracer.WriteLine(
+                "Binding collection parameter {0}: argument type [{1}], parameter type [{2}], collection type {3}, element type [{4}], {5}",
+                parameterName,
+                (currentValue == null) ? "null" : currentValue.GetType().Name,
+                toType,
+                collectionTypeInformation.ParameterCollectionType,
+                collectionTypeInformation.ElementType,
+                coerceElementTypeIfNeeded ? "coerceElementType" : "no coerceElementType");
+
+            if (currentValue == null)
             {
+                return result;
+            }
+
+            int numberOfElements = 1;
+            Type collectionElementType = collectionTypeInformation.ElementType;
+
+            // If the current value is an IList, get the count of the elements
+            // Or if it is an PSObject which wraps an IList
+
+            IList currentValueAsIList = GetIList(currentValue);
+
+            if (currentValueAsIList != null)
+            {
+                numberOfElements = currentValueAsIList.Count;
+
+                s_tracer.WriteLine("current value is an IList with {0} elements", numberOfElements);
                 bindingTracer.WriteLine(
-                    "Binding collection parameter {0}: argument type [{1}], parameter type [{2}], collection type {3}, element type [{4}], {5}",
-                    parameterName,
-                    (currentValue == null) ? "null" : currentValue.GetType().Name,
-                    toType,
-                    collectionTypeInformation.ParameterCollectionType,
-                    collectionTypeInformation.ElementType,
-                    coerceElementTypeIfNeeded ? "coerceElementType" : "no coerceElementType");
+                    "Arg is IList with {0} elements",
+                    numberOfElements);
+            }
 
-                if (currentValue == null)
+            object resultCollection = null;
+            IList resultAsIList = null;
+            MethodInfo addMethod = null;
+
+            // We must special case System.Array to be like an object array since it is an
+            // abstract base class and cannot be created in the IList path below.
+            bool isSystemDotArray = (toType == typeof(System.Array));
+
+            if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array ||
+                isSystemDotArray)
+            {
+                if (isSystemDotArray)
                 {
-                    break;
+                    // If System.Array is the type we are encoding to, then
+                    // the element type should be System.Object.
+
+                    collectionElementType = typeof(object);
                 }
 
-                int numberOfElements = 1;
-                Type collectionElementType = collectionTypeInformation.ElementType;
+                bindingTracer.WriteLine(
+                    "Creating array with element type [{0}] and {1} elements",
+                    collectionElementType,
+                    numberOfElements);
 
-                // If the current value is an IList, get the count of the elements
-                // Or if it is an PSObject which wraps an IList
+                // Since the destination is an array we will have to create an array
+                // of the element type with the correct length
 
-                IList currentValueAsIList = GetIList(currentValue);
-
-                if (currentValueAsIList != null)
-                {
-                    numberOfElements = currentValueAsIList.Count;
-
-                    s_tracer.WriteLine("current value is an IList with {0} elements", numberOfElements);
-                    bindingTracer.WriteLine(
-                        "Arg is IList with {0} elements",
-                        numberOfElements);
-                }
-
-                object resultCollection = null;
-                IList resultAsIList = null;
-                MethodInfo addMethod = null;
-
-                // We must special case System.Array to be like an object array since it is an
-                // abstract base class and cannot be created in the IList path below.
-                bool isSystemDotArray = (toType == typeof(System.Array));
-
-                if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array ||
-                    isSystemDotArray)
-                {
-                    if (isSystemDotArray)
-                    {
-                        // If System.Array is the type we are encoding to, then
-                        // the element type should be System.Object.
-
-                        collectionElementType = typeof(object);
-                    }
-
-                    bindingTracer.WriteLine(
-                        "Creating array with element type [{0}] and {1} elements",
+                resultCollection = resultAsIList =
+                    (IList)Array.CreateInstance(
                         collectionElementType,
                         numberOfElements);
+            }
+            else if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList ||
+                     collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric)
+            {
+                bindingTracer.WriteLine(
+                    "Creating collection [{0}]",
+                    toType);
 
-                    // Since the destination is an array we will have to create an array
-                    // of the element type with the correct length
+                // Create an instance of the parameter type
 
-                    resultCollection = resultAsIList =
-                        (IList)Array.CreateInstance(
-                            collectionElementType,
-                            numberOfElements);
-                }
-                else if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList ||
-                         collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric)
+                // NTRAID#Windows Out Of Band Releases-906820-2005/09/01
+                // This code previously used the ctor(int) ctor form.
+                // System.Collections.ObjectModel.Collection<T> does not
+                // support this ctor form.  More generally, there is no
+                // guarantee that the ctor parameter has the semantic
+                // meaning of "likely list size".  Blindly calling the
+                // parameterless ctor is also risky, but seems like a
+                // safer choice.
+
+                bool errorOccurred = false;
+                Exception error = null;
+                try
                 {
-                    bindingTracer.WriteLine(
-                        "Creating collection [{0}]",
-                        toType);
-
-                    // Create an instance of the parameter type
-
-                    // NTRAID#Windows Out Of Band Releases-906820-2005/09/01
-                    // This code previously used the ctor(int) ctor form.
-                    // System.Collections.ObjectModel.Collection<T> does not
-                    // support this ctor form.  More generally, there is no
-                    // guarantee that the ctor parameter has the semantic
-                    // meaning of "likely list size".  Blindly calling the
-                    // parameterless ctor is also risky, but seems like a
-                    // safer choice.
-
-                    bool errorOccurred = false;
-                    Exception error = null;
-                    try
+                    resultCollection =
+                        Activator.CreateInstance(
+                            toType,
+                            0,
+                            null,
+                            Array.Empty<object>(),
+                            System.Globalization.CultureInfo.InvariantCulture);
+                    if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList)
                     {
-                        resultCollection =
-                            Activator.CreateInstance(
-                                toType,
-                                0,
-                                null,
-                                Array.Empty<object>(),
-                                System.Globalization.CultureInfo.InvariantCulture);
-                        if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList)
-                            resultAsIList = (IList)resultCollection;
-                        else
-                        {
-                            Diagnostics.Assert(
-                                collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric,
-                                "invalid collection type"
-                                );
-                            // extract the ICollection<T>::Add(T) method
-                            const BindingFlags bindingFlags = BindingFlags.Public | BindingFlags.Instance;
-                            Type elementType = collectionTypeInformation.ElementType;
-                            Diagnostics.Assert(elementType != null, "null ElementType");
-                            Exception getMethodError = null;
-                            try
-                            {
-                                addMethod = toType.GetMethod("Add", bindingFlags, null, new Type[1] { elementType }, null);
-                            }
-                            catch (AmbiguousMatchException e)
-                            {
-                                bindingTracer.WriteLine("Ambiguous match to Add(T) for type {0}: {1}", toType.FullName, e.Message);
-                                getMethodError = e;
-                            }
-                            catch (ArgumentException e)
-                            {
-                                bindingTracer.WriteLine(
-                                    "ArgumentException matching Add(T) for type {0}: {1}", toType.FullName, e.Message);
-                                getMethodError = e;
-                            }
-
-                            if (addMethod == null)
-                            {
-                                ParameterBindingException bindingException =
-                                    new ParameterBindingException(
-                                        getMethodError,
-                                        ErrorCategory.InvalidArgument,
-                                        this.InvocationInfo,
-                                        GetErrorExtent(argument),
-                                        parameterName,
-                                        toType,
-                                        currentValue.GetType(),
-                                        ParameterBinderStrings.CannotExtractAddMethod,
-                                        "CannotExtractAddMethod",
-                                        (getMethodError == null) ? string.Empty : getMethodError.Message);
-                                throw bindingException;
-                            }
-                        }
+                        resultAsIList = (IList)resultCollection;
                     }
-                    catch (ArgumentException argException)
+                    else
                     {
-                        errorOccurred = true;
-                        error = argException;
-                    }
-                    catch (NotSupportedException notSupported)
-                    {
-                        errorOccurred = true;
-                        error = notSupported;
-                    }
-                    catch (TargetInvocationException targetInvocationException)
-                    {
-                        errorOccurred = true;
-                        error = targetInvocationException;
-                    }
-                    catch (MethodAccessException methodAccessException)
-                    {
-                        errorOccurred = true;
-                        error = methodAccessException;
-                    }
-                    catch (MemberAccessException memberAccessException)
-                    {
-                        errorOccurred = true;
-                        error = memberAccessException;
-                    }
-                    catch (System.Runtime.InteropServices.InvalidComObjectException invalidComObject)
-                    {
-                        errorOccurred = true;
-                        error = invalidComObject;
-                    }
-                    catch (System.Runtime.InteropServices.COMException comException)
-                    {
-                        errorOccurred = true;
-                        error = comException;
-                    }
-                    catch (TypeLoadException typeLoadException)
-                    {
-                        errorOccurred = true;
-                        error = typeLoadException;
-                    }
-
-                    if (errorOccurred)
-                    {
-                        // Throw a ParameterBindingException
-
-                        ParameterBindingException bindingException =
-                            new ParameterBindingException(
-                                error,
-                                ErrorCategory.InvalidArgument,
-                                this.InvocationInfo,
-                                GetErrorExtent(argument),
-                                parameterName,
-                                toType,
-                                currentValue.GetType(),
-                                ParameterBinderStrings.CannotConvertArgument,
-                                "CannotConvertArgument",
-                                "null",
-                                error.Message);
-                        throw bindingException;
-                    }
-                }
-                else
-                {
-                    Diagnostics.Assert(
-                        false,
-                        "This method should not be called for a parameter that is not a collection");
-                    break;
-                }
-
-                // NTRAID#Windows OS Bugs-966440-2004/05/05-JeffJon
-                // This coercion can only go to a collection type.  It cannot take a
-                // collection type and coerce it into a scalar type.
-
-                // Now that the new collection instance has been created, coerce each element type
-                // of the current value to the element type of the property value and add it
-
-                if (currentValueAsIList != null)
-                {
-                    // Since arrays don't support the Add method, we must use indexing
-                    // to set the value.
-                    int arrayIndex = 0;
-
-                    bindingTracer.WriteLine(
-                        "Argument type {0} is IList",
-                        currentValue.GetType());
-
-                    foreach (object valueElement in currentValueAsIList)
-                    {
-                        object currentValueElement = PSObject.Base(valueElement);
-
-                        if (coerceElementTypeIfNeeded)
-                        {
-                            bindingTracer.WriteLine(
-                                "COERCE collection element from type {0} to type {1}",
-                                (valueElement == null) ? "null" : valueElement.GetType().Name,
-                                collectionElementType);
-
-                            // Coerce the element to the appropriate type.
-                            // Note, this may be recursive if the element is a
-                            // collection itself.
-
-                            currentValueElement =
-                                CoerceTypeAsNeeded(
-                                        argument,
-                                        parameterName,
-                                        collectionElementType,
-                                        null,
-                                        valueElement);
-                        }
-                        else if (collectionElementType != null && currentValueElement != null)
-                        {
-                            Type currentValueElementType = currentValueElement.GetType();
-                            Type desiredElementType = collectionElementType;
-
-                            if (currentValueElementType != desiredElementType &&
-                                !currentValueElementType.IsSubclassOf(desiredElementType))
-                            {
-                                bindingTracer.WriteLine(
-                                    "COERCION REQUIRED: Did not attempt to coerce collection element from type {0} to type {1}",
-                                    (valueElement == null) ? "null" : valueElement.GetType().Name,
-                                    collectionElementType);
-
-                                coercionRequired = true;
-                                break;
-                            }
-                        }
-
-                        // Add() will fail with ArgumentException
-                        // for Collection<T> with the wrong type.
+                        Diagnostics.Assert(
+                            collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric,
+                            "invalid collection type"
+                            );
+                        // extract the ICollection<T>::Add(T) method
+                        const BindingFlags bindingFlags = BindingFlags.Public | BindingFlags.Instance;
+                        Type elementType = collectionTypeInformation.ElementType;
+                        Diagnostics.Assert(elementType != null, "null ElementType");
+                        Exception getMethodError = null;
                         try
                         {
-                            if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array ||
-                                isSystemDotArray)
-                            {
-                                bindingTracer.WriteLine(
-                                    "Adding element of type {0} to array position {1}",
-                                    (currentValueElement == null) ? "null" : currentValueElement.GetType().Name,
-                                    arrayIndex);
-                                resultAsIList[arrayIndex++] = currentValueElement;
-                            }
-                            else if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList)
-                            {
-                                bindingTracer.WriteLine(
-                                    "Adding element of type {0} via IList.Add",
-                                    (currentValueElement == null) ? "null" : currentValueElement.GetType().Name);
-                                resultAsIList.Add(currentValueElement);
-                            }
-                            else
-                            {
-                                bindingTracer.WriteLine(
-                                    "Adding element of type {0} via ICollection<T>::Add()",
-                                    (currentValueElement == null) ? "null" : currentValueElement.GetType().Name);
-                                addMethod.Invoke(resultCollection, new object[1] { currentValueElement });
-                            }
+                            addMethod = toType.GetMethod("Add", bindingFlags, null, new Type[1] { elementType }, null);
                         }
-                        catch (Exception error) // OK, we catch all here by design
+                        catch (AmbiguousMatchException e)
                         {
-                            // The inner exception to TargetInvocationException
-                            // (if present) has a better Message
-                            if (error is TargetInvocationException &&
-                                error.InnerException != null)
-                            {
-                                error = error.InnerException;
-                            }
+                            bindingTracer.WriteLine("Ambiguous match to Add(T) for type {0}: {1}", toType.FullName, e.Message);
+                            getMethodError = e;
+                        }
+                        catch (ArgumentException e)
+                        {
+                            bindingTracer.WriteLine(
+                                "ArgumentException matching Add(T) for type {0}: {1}", toType.FullName, e.Message);
+                            getMethodError = e;
+                        }
 
+                        if (addMethod == null)
+                        {
                             ParameterBindingException bindingException =
                                 new ParameterBindingException(
-                                    error,
+                                    getMethodError,
                                     ErrorCategory.InvalidArgument,
                                     this.InvocationInfo,
                                     GetErrorExtent(argument),
                                     parameterName,
                                     toType,
-                                    currentValueElement?.GetType(),
-                                    ParameterBinderStrings.CannotConvertArgument,
-                                    "CannotConvertArgument",
-                                    currentValueElement ?? "null",
-                                    error.Message);
+                                    currentValue.GetType(),
+                                    ParameterBinderStrings.CannotExtractAddMethod,
+                                    "CannotExtractAddMethod",
+                                    (getMethodError == null) ? string.Empty : getMethodError.Message);
                             throw bindingException;
                         }
                     }
                 }
-                else // (currentValueAsIList == null)
+                catch (ArgumentException argException)
                 {
-                    bindingTracer.WriteLine(
-                        "Argument type {0} is not IList, treating this as scalar",
-                        currentValue.GetType().Name);
+                    errorOccurred = true;
+                    error = argException;
+                }
+                catch (NotSupportedException notSupported)
+                {
+                    errorOccurred = true;
+                    error = notSupported;
+                }
+                catch (TargetInvocationException targetInvocationException)
+                {
+                    errorOccurred = true;
+                    error = targetInvocationException;
+                }
+                catch (MethodAccessException methodAccessException)
+                {
+                    errorOccurred = true;
+                    error = methodAccessException;
+                }
+                catch (MemberAccessException memberAccessException)
+                {
+                    errorOccurred = true;
+                    error = memberAccessException;
+                }
+                catch (System.Runtime.InteropServices.InvalidComObjectException invalidComObject)
+                {
+                    errorOccurred = true;
+                    error = invalidComObject;
+                }
+                catch (System.Runtime.InteropServices.COMException comException)
+                {
+                    errorOccurred = true;
+                    error = comException;
+                }
+                catch (TypeLoadException typeLoadException)
+                {
+                    errorOccurred = true;
+                    error = typeLoadException;
+                }
 
-                    if (collectionElementType != null)
+                if (errorOccurred)
+                {
+                    // Throw a ParameterBindingException
+
+                    ParameterBindingException bindingException =
+                        new ParameterBindingException(
+                            error,
+                            ErrorCategory.InvalidArgument,
+                            this.InvocationInfo,
+                            GetErrorExtent(argument),
+                            parameterName,
+                            toType,
+                            currentValue.GetType(),
+                            ParameterBinderStrings.CannotConvertArgument,
+                            "CannotConvertArgument",
+                            "null",
+                            error.Message);
+                    throw bindingException;
+                }
+            }
+            else
+            {
+                Diagnostics.Assert(
+                    false,
+                    "This method should not be called for a parameter that is not a collection");
+                return result;
+            }
+
+            // NTRAID#Windows OS Bugs-966440-2004/05/05-JeffJon
+            // This coercion can only go to a collection type.  It cannot take a
+            // collection type and coerce it into a scalar type.
+
+            // Now that the new collection instance has been created, coerce each element type
+            // of the current value to the element type of the property value and add it
+
+            if (currentValueAsIList != null)
+            {
+                // Since arrays don't support the Add method, we must use indexing
+                // to set the value.
+                int arrayIndex = 0;
+
+                bindingTracer.WriteLine(
+                    "Argument type {0} is IList",
+                    currentValue.GetType());
+
+                foreach (object valueElement in currentValueAsIList)
+                {
+                    object currentValueElement = PSObject.Base(valueElement);
+
+                    if (coerceElementTypeIfNeeded)
                     {
-                        if (coerceElementTypeIfNeeded)
-                        {
-                            bindingTracer.WriteLine(
-                                "Coercing scalar arg value to type {0}",
-                                collectionElementType);
+                        bindingTracer.WriteLine(
+                            "COERCE collection element from type {0} to type {1}",
+                            (valueElement == null) ? "null" : valueElement.GetType().Name,
+                            collectionElementType);
 
-                            // Coerce the scalar type into the collection
+                        // Coerce the element to the appropriate type.
+                        // Note, this may be recursive if the element is a
+                        // collection itself.
 
-                            currentValue =
-                                CoerceTypeAsNeeded(
+                        currentValueElement =
+                            CoerceTypeAsNeeded(
                                     argument,
                                     parameterName,
                                     collectionElementType,
                                     null,
-                                    currentValue);
-                        }
-                        else
+                                    valueElement);
+                    }
+                    else if (collectionElementType != null && currentValueElement != null)
+                    {
+                        Type currentValueElementType = currentValueElement.GetType();
+                        Type desiredElementType = collectionElementType;
+
+                        if (currentValueElementType != desiredElementType &&
+                            !currentValueElementType.IsSubclassOf(desiredElementType))
                         {
-                            Type currentValueElementType = currentValue.GetType();
-                            Type desiredElementType = collectionElementType;
+                            bindingTracer.WriteLine(
+                                "COERCION REQUIRED: Did not attempt to coerce collection element from type {0} to type {1}",
+                                (valueElement == null) ? "null" : valueElement.GetType().Name,
+                                collectionElementType);
 
-                            if (currentValueElementType != desiredElementType &&
-                                !currentValueElementType.IsSubclassOf(desiredElementType))
-                            {
-                                bindingTracer.WriteLine(
-                                    "COERCION REQUIRED: Did not coerce scalar arg value to type {1}",
-                                    collectionElementType);
-
-                                coercionRequired = true;
-                                break;
-                            }
+                            coercionRequired = true;
+                            return result;
                         }
                     }
 
-                    // Add() will fail with ArgumentException
-                    // for Collection<T> with the wrong type.
-                    try
-                    {
-                        if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array ||
-                            isSystemDotArray)
-                        {
-                            bindingTracer.WriteLine(
-                                "Adding scalar element of type {0} to array position {1}",
-                                (currentValue == null) ? "null" : currentValue.GetType().Name,
-                                0);
-                            resultAsIList[0] = currentValue;
-                        }
-                        else if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList)
-                        {
-                            bindingTracer.WriteLine(
-                                "Adding scalar element of type {0} via IList.Add",
-                                (currentValue == null) ? "null" : currentValue.GetType().Name);
-                            resultAsIList.Add(currentValue);
-                        }
-                        else
-                        {
-                            bindingTracer.WriteLine(
-                                "Adding scalar element of type {0} via ICollection<T>::Add()",
-                                (currentValue == null) ? "null" : currentValue.GetType().Name);
-                            addMethod.Invoke(resultCollection, new object[1] { currentValue });
-                        }
-                    }
-                    catch (Exception error) // OK, we catch all here by design
-                    {
-                        // The inner exception to TargetInvocationException
-                        // (if present) has a better Message
-                        if (error is TargetInvocationException &&
-                            error.InnerException != null)
-                        {
-                            error = error.InnerException;
-                        }
+                    AddElementToCollection(
+                        argument,
+                        parameterName,
+                        collectionTypeInformation,
+                        toType,
+                        resultCollection,
+                        resultAsIList,
+                        addMethod,
+                        isSystemDotArray,
+                        currentValueElement,
+                        arrayIndex);
 
-                        ParameterBindingException bindingException =
-                            new ParameterBindingException(
-                                error,
-                                ErrorCategory.InvalidArgument,
-                                this.InvocationInfo,
-                                GetErrorExtent(argument),
-                                parameterName,
-                                toType,
-                                currentValue?.GetType(),
-                                ParameterBinderStrings.CannotConvertArgument,
-                                "CannotConvertArgument",
-                                currentValue ?? "null",
-                                error.Message);
-                        throw bindingException;
+                    if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array || isSystemDotArray)
+                    {
+                        arrayIndex++;
                     }
                 }
+            }
+            else // (currentValueAsIList == null)
+            {
+                bindingTracer.WriteLine(
+                    "Argument type {0} is not IList, treating this as scalar",
+                    currentValue.GetType().Name);
 
-                if (!coercionRequired)
+                if (collectionElementType != null)
                 {
-                    result = resultCollection;
+                    if (coerceElementTypeIfNeeded)
+                    {
+                        bindingTracer.WriteLine(
+                            "Coercing scalar arg value to type {0}",
+                            collectionElementType);
 
-                    // Set the converted result object untrusted if necessary
-                    ExecutionContext.PropagateInputSource(originalValue, result, Context.LanguageMode);
+                        // Coerce the scalar type into the collection
+
+                        currentValue =
+                            CoerceTypeAsNeeded(
+                                argument,
+                                parameterName,
+                                collectionElementType,
+                                null,
+                                currentValue);
+                    }
+                    else
+                    {
+                        Type currentValueElementType = currentValue.GetType();
+                        Type desiredElementType = collectionElementType;
+
+                        if (currentValueElementType != desiredElementType &&
+                            !currentValueElementType.IsSubclassOf(desiredElementType))
+                        {
+                            bindingTracer.WriteLine(
+                                "COERCION REQUIRED: Did not coerce scalar arg value to type {1}",
+                                collectionElementType);
+
+                            coercionRequired = true;
+                            return result;
+                        }
+                    }
                 }
-            } while (false);
+
+                AddElementToCollection(
+                    argument,
+                    parameterName,
+                    collectionTypeInformation,
+                    toType,
+                    resultCollection,
+                    resultAsIList,
+                    addMethod,
+                    isSystemDotArray,
+                    currentValue,
+                    0);
+            }
+
+            if (!coercionRequired)
+            {
+                result = resultCollection;
+
+                // Set the converted result object untrusted if necessary
+                ExecutionContext.PropagateInputSource(originalValue, result, Context.LanguageMode);
+            }
 
             return result;
+        }
+
+        private void AddElementToCollection(
+            CommandParameterInternal argument,
+            string parameterName,
+            ParameterCollectionTypeInformation collectionTypeInformation,
+            Type toType,
+            object resultCollection,
+            IList resultAsIList,
+            MethodInfo addMethod,
+            bool isSystemDotArray,
+            object value,
+            int arrayIndex)
+        {
+            // Add() will fail with ArgumentException for Collection<T> with the wrong type.
+            try
+            {
+                if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array ||
+                    isSystemDotArray)
+                {
+                    bindingTracer.WriteLine(
+                        "Adding element of type {0} to array position {1}",
+                        (value == null) ? "null" : value.GetType().Name,
+                        arrayIndex);
+                    resultAsIList[arrayIndex] = value;
+                }
+                else if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList)
+                {
+                    bindingTracer.WriteLine(
+                        "Adding element of type {0} via IList.Add",
+                        (value == null) ? "null" : value.GetType().Name);
+                    resultAsIList.Add(value);
+                }
+                else
+                {
+                    bindingTracer.WriteLine(
+                        "Adding element of type {0} via ICollection<T>::Add()",
+                        (value == null) ? "null" : value.GetType().Name);
+                    addMethod.Invoke(resultCollection, new object[1] { value });
+                }
+            }
+            catch (Exception error) // OK, we catch all here by design
+            {
+                // The inner exception to TargetInvocationException
+                // (if present) has a better Message
+                if (error is TargetInvocationException &&
+                    error.InnerException != null)
+                {
+                    error = error.InnerException;
+                }
+
+                ParameterBindingException bindingException =
+                    new ParameterBindingException(
+                        error,
+                        ErrorCategory.InvalidArgument,
+                        this.InvocationInfo,
+                        GetErrorExtent(argument),
+                        parameterName,
+                        toType,
+                        value?.GetType(),
+                        ParameterBinderStrings.CannotConvertArgument,
+                        "CannotConvertArgument",
+                        value ?? "null",
+                        error.Message);
+                throw bindingException;
+            }
         }
 
         internal static IList GetIList(object value)
