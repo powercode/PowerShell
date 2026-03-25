@@ -1023,271 +1023,253 @@ namespace System.Management.Automation
             using (bindingTracer.TraceScope(
                 "COERCE arg to [{0}]", toType))
             {
+                object FinalizeResult(object value)
+                {
+                    if (value != null)
+                    {
+                        // Set the converted result object untrusted if necessary
+                        ExecutionContext.PropagateInputSource(originalValue, value, Context.LanguageMode);
+                    }
+
+                    return value;
+                }
+
                 Type argumentType = null;
                 try
                 {
-                    do // false loop
+                    if (IsNullParameterValue(currentValue))
                     {
-                        if (IsNullParameterValue(currentValue))
+                        result = HandleNullParameterForSpecialTypes(argument, parameterName, toType, currentValue);
+                        return FinalizeResult(result);
+                    }
+
+                    // Do the coercion
+                    argumentType = currentValue.GetType();
+
+                    // If the types are identical (or can be cast directly,) then no coercion
+                    // needs to be done
+                    if (toType.IsAssignableFrom(argumentType))
+                    {
+                        bindingTracer.WriteLine(
+                            "Parameter and arg types the same, no coercion is needed.");
+
+                        result = currentValue;
+                        return FinalizeResult(result);
+                    }
+
+                    bindingTracer.WriteLine("Trying to convert argument value from {0} to {1}", argumentType, toType);
+
+                    // Likewise shortcircuit the case were the user has asked for a shell object.
+                    // He always gets a shell object regardless of the actual type of the object.
+                    if (toType == typeof(PSObject))
+                    {
+                        // It may be the case that we're binding the current pipeline object
+                        // as is to a PSObject parameter in which case, we want to make
+                        // sure that we're using the same shell object instead of creating an
+                        // alias object.
+                        if (_command != null &&
+                            currentValue == _command.CurrentPipelineObject.BaseObject)
                         {
-                            result = HandleNullParameterForSpecialTypes(argument, parameterName, toType, currentValue);
-                            break;
+                            currentValue = _command.CurrentPipelineObject;
                         }
 
-                        // Do the coercion
-                        argumentType = currentValue.GetType();
+                        bindingTracer.WriteLine(
+                            "The parameter is of type [{0}] and the argument is an PSObject, so the parameter value is the argument value wrapped into an PSObject.",
+                            toType);
+                        result = LanguagePrimitives.AsPSObjectOrNull(currentValue);
+                        return FinalizeResult(result);
+                    }
 
-                        // If the types are identical (or can be cast directly,) then no coercion
-                        // needs to be done
-                        if (toType.IsAssignableFrom(argumentType))
+                    // NTRAID#Windows OS Bugs-1064175-2004/02/28-JeffJon
+                    // If we have an PSObject with null base and we are trying to
+                    // convert to a string, then we need to use null instead of
+                    // calling LanguagePrimitives.ConvertTo as that will return
+                    // string.Empty.
+
+                    if (toType == typeof(string) &&
+                        argumentType == typeof(PSObject))
+                    {
+                        PSObject currentValueAsPSObject = (PSObject)currentValue;
+
+                        if (currentValueAsPSObject == AutomationNull.Value)
                         {
                             bindingTracer.WriteLine(
-                                "Parameter and arg types the same, no coercion is needed.");
-
-                            result = currentValue;
-                            break;
+                                "CONVERT a null PSObject to a null string.");
+                            result = null;
+                            return FinalizeResult(result);
                         }
+                    }
 
-                        bindingTracer.WriteLine("Trying to convert argument value from {0} to {1}", argumentType, toType);
-
-                        // Likewise shortcircuit the case were the user has asked for a shell object.
-                        // He always gets a shell object regardless of the actual type of the object.
-                        if (toType == typeof(PSObject))
+                    // NTRAID#Windows OS Bugs -<bug id here> - Nana
+                    // If we have a boolean, we have to ensure that it can
+                    // only take parameters of type boolean or numbers with
+                    // 0 indicating false and everything else indicating true
+                    // Anything else passed should be reported as an error
+                    if (toType == typeof(bool) || toType == typeof(SwitchParameter) ||
+                        toType == typeof(bool?))
+                    {
+                        Type boType;
+                        if (argumentType == typeof(PSObject))
                         {
-                            // It may be the case that we're binding the current pipeline object
-                            // as is to a PSObject parameter in which case, we want to make
-                            // sure that we're using the same shell object instead of creating an
-                            // alias object.
-                            if (_command != null &&
-                                currentValue == _command.CurrentPipelineObject.BaseObject)
-                            {
-                                currentValue = _command.CurrentPipelineObject;
-                            }
-
-                            bindingTracer.WriteLine(
-                                "The parameter is of type [{0}] and the argument is an PSObject, so the parameter value is the argument value wrapped into an PSObject.",
-                                toType);
-                            result = LanguagePrimitives.AsPSObjectOrNull(currentValue);
-                            break;
-                        }
-
-                        // NTRAID#Windows OS Bugs-1064175-2004/02/28-JeffJon
-                        // If we have an PSObject with null base and we are trying to
-                        // convert to a string, then we need to use null instead of
-                        // calling LanguagePrimitives.ConvertTo as that will return
-                        // string.Empty.
-
-                        if (toType == typeof(string) &&
-                            argumentType == typeof(PSObject))
-                        {
+                            // Unwrap the PSObject at this point...
                             PSObject currentValueAsPSObject = (PSObject)currentValue;
+                            currentValue = currentValueAsPSObject.BaseObject;
 
-                            if (currentValueAsPSObject == AutomationNull.Value)
+                            if (currentValue is SwitchParameter)
                             {
-                                bindingTracer.WriteLine(
-                                    "CONVERT a null PSObject to a null string.");
-                                result = null;
-                                break;
-                            }
-                        }
-
-                        // NTRAID#Windows OS Bugs -<bug id here> - Nana
-                        // If we have a boolean, we have to ensure that it can
-                        // only take parameters of type boolean or numbers with
-                        // 0 indicating false and everything else indicating true
-                        // Anything else passed should be reported as an error
-
-                        if (toType == typeof(bool) || toType == typeof(SwitchParameter) ||
-                            toType == typeof(bool?))
-                        {
-                            Type boType = null;
-                            if (argumentType == typeof(PSObject))
-                            {
-                                // Unwrap the PSObject at this point...
-                                PSObject currentValueAsPSObject = (PSObject)currentValue;
-                                currentValue = currentValueAsPSObject.BaseObject;
-
-                                if (currentValue is SwitchParameter)
-                                {
-                                    currentValue = ((SwitchParameter)currentValue).IsPresent;
-                                }
-
-                                boType = currentValue.GetType();
-                            }
-                            else
-                            {
-                                boType = argumentType;
+                                currentValue = ((SwitchParameter)currentValue).IsPresent;
                             }
 
-                            if (boType == typeof(bool))
-                            {
-                                if (LanguagePrimitives.IsBooleanType(toType))
-                                    result = ParserOps.BoolToObject((bool)currentValue);
-                                else
-                                    result = new SwitchParameter((bool)currentValue);
-                            }
-                            else if (boType == typeof(int))
-                            {
-                                if ((int)LanguagePrimitives.ConvertTo(currentValue,
-                                            typeof(int), CultureInfo.InvariantCulture) != 0)
-                                {
-                                    if (LanguagePrimitives.IsBooleanType(toType))
-                                        result = ParserOps.BoolToObject(true);
-                                    else
-                                        result = new SwitchParameter(true);
-                                }
-                                else
-                                {
-                                    if (LanguagePrimitives.IsBooleanType(toType))
-                                        result = ParserOps.BoolToObject(false);
-                                    else
-                                        result = new SwitchParameter(false);
-                                }
-                            }
-                            else if (LanguagePrimitives.IsNumeric(boType.GetTypeCode()))
-                            {
-                                double currentValueAsDouble = (double)LanguagePrimitives.ConvertTo(
-                                                                        currentValue, typeof(double), CultureInfo.InvariantCulture);
-
-                                if (currentValueAsDouble != 0)
-                                {
-                                    if (LanguagePrimitives.IsBooleanType(toType))
-                                        result = ParserOps.BoolToObject(true);
-                                    else
-                                        result = new SwitchParameter(true);
-                                }
-                                else
-                                {
-                                    if (LanguagePrimitives.IsBooleanType(toType))
-                                        result = ParserOps.BoolToObject(false);
-                                    else
-                                        result = new SwitchParameter(false);
-                                }
-                            }
-                            else
-                            {
-                                // Invalid types which cannot be associated with a bool
-                                // Since there is a catch block which appropriately
-                                // handles this situation we just throw an exception here
-                                // throw new PSInvalidCastException();
-                                ParameterBindingException pbe =
-                                    new ParameterBindingException(
-                                        ErrorCategory.InvalidArgument,
-                                        this.InvocationInfo,
-                                        GetErrorExtent(argument),
-                                        parameterName,
-                                        toType,
-                                        argumentType,
-                                        ParameterBinderStrings.CannotConvertArgument,
-                                        "CannotConvertArgument",
-                                        boType,
-                                        string.Empty);
-
-                                throw pbe;
-                            }
-
-                            break;
-                        }
-
-                        // NTRAID#Windows OS Bugs-1009284-2004/05/05-JeffJon
-                        // Need to handle other collection types here as well
-
-                        // Before attempting to encode a collection, we check if we can convert the argument directly via
-                        // a restricted set of conversions (as the general conversion mechanism is far too general, it may
-                        // succeed where it shouldn't.  We don't bother checking arrays parameters because they won't have
-                        // conversions we're allowing.
-                        if (collectionTypeInfo.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric
-                            || collectionTypeInfo.ParameterCollectionType == ParameterCollectionType.IList)
-                        {
-                            object currentValueToConvert = PSObject.Base(currentValue);
-                            if (currentValueToConvert != null)
-                            {
-                                ConversionRank rank = LanguagePrimitives.GetConversionRank(currentValueToConvert.GetType(), toType);
-                                if (rank == ConversionRank.Constructor || rank == ConversionRank.ImplicitCast || rank == ConversionRank.ExplicitCast)
-                                {
-                                    // This conversion will fail in the common case, and when it does, we'll use EncodeCollection below.
-                                    if (LanguagePrimitives.TryConvertTo(currentValue, toType, CultureInfo.CurrentCulture, out result))
-                                    {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (collectionTypeInfo.ParameterCollectionType != ParameterCollectionType.NotCollection)
-                        {
-                            bindingTracer.WriteLine(
-                                "ENCODING arg into collection");
-
-                            bool ignored = false;
-                            result =
-                                EncodeCollection(
-                                    argument,
-                                    parameterName,
-                                    collectionTypeInfo,
-                                    toType,
-                                    currentValue,
-                                    (collectionTypeInfo.ElementType != null),
-                                    out ignored);
-
-                            break;
+                            boType = currentValue.GetType();
                         }
                         else
                         {
-                            // Check to see if the current value is a collection. If so, fail because
-                            // we don't want to attempt to bind a collection to a scalar unless
-                            // the parameter type is Object or PSObject or enum.
-
-                            if (GetIList(currentValue) != null &&
-                                toType != typeof(object) &&
-                                toType != typeof(PSObject) &&
-                                toType != typeof(PSListModifier) &&
-                                (!toType.IsGenericType || toType.GetGenericTypeDefinition() != typeof(PSListModifier<>)) &&
-                                (!toType.IsGenericType || toType.GetGenericTypeDefinition() != typeof(FlagsExpression<>)) &&
-                                !toType.IsEnum)
-                            {
-                                throw new NotSupportedException();
-                            }
+                            boType = argumentType;
                         }
 
-                        bindingTracer.WriteLine(
-                            "CONVERT arg type to param type using LanguagePrimitives.ConvertTo");
-
-                        // If we are in constrained language mode and the target command is trusted, which is often
-                        // the case for C# cmdlets, then we allow type conversion to the target parameter type.
-                        //
-                        // However, we don't allow Hashtable-to-Object conversion (PSObject and IDictionary) because
-                        // those can lead to property setters that probably aren't expected. This is enforced by
-                        // setting 'Context.LanguageModeTransitionInParameterBinding' to true before the conversion.
-                        var currentLanguageMode = Context.LanguageMode;
-                        bool changeLanguageModeForTrustedCommand =
-                            currentLanguageMode == PSLanguageMode.ConstrainedLanguage &&
-                            this.Command.CommandInfo.DefiningLanguageMode == PSLanguageMode.FullLanguage;
-                        bool oldLangModeTransitionStatus = Context.LanguageModeTransitionInParameterBinding;
-
-                        try
+                        if (boType == typeof(bool))
                         {
-                            if (changeLanguageModeForTrustedCommand)
-                            {
-                                Context.LanguageMode = PSLanguageMode.FullLanguage;
-                                Context.LanguageModeTransitionInParameterBinding = true;
-                            }
-
-                            result = LanguagePrimitives.ConvertTo(currentValue, toType, CultureInfo.CurrentCulture);
+                            result = LanguagePrimitives.IsBooleanType(toType)
+                                ? ParserOps.BoolToObject((bool)currentValue)
+                                : new SwitchParameter((bool)currentValue);
+                            return FinalizeResult(result);
                         }
-                        finally
+
+                        if (boType == typeof(int))
                         {
-                            if (changeLanguageModeForTrustedCommand)
-                            {
-                                Context.LanguageMode = currentLanguageMode;
-                                Context.LanguageModeTransitionInParameterBinding = oldLangModeTransitionStatus;
-                            }
+                            bool isTrue = (int)LanguagePrimitives.ConvertTo(currentValue, typeof(int), CultureInfo.InvariantCulture) != 0;
+                            result = LanguagePrimitives.IsBooleanType(toType)
+                                ? ParserOps.BoolToObject(isTrue)
+                                : new SwitchParameter(isTrue);
+                            return FinalizeResult(result);
                         }
 
+                        if (LanguagePrimitives.IsNumeric(boType.GetTypeCode()))
+                        {
+                            double currentValueAsDouble = (double)LanguagePrimitives.ConvertTo(
+                                currentValue, typeof(double), CultureInfo.InvariantCulture);
+                            bool isTrue = currentValueAsDouble != 0;
+                            result = LanguagePrimitives.IsBooleanType(toType)
+                                ? ParserOps.BoolToObject(isTrue)
+                                : new SwitchParameter(isTrue);
+                            return FinalizeResult(result);
+                        }
+
+                        // Invalid types which cannot be associated with a bool.
+                        ParameterBindingException pbe =
+                            new ParameterBindingException(
+                                ErrorCategory.InvalidArgument,
+                                this.InvocationInfo,
+                                GetErrorExtent(argument),
+                                parameterName,
+                                toType,
+                                argumentType,
+                                ParameterBinderStrings.CannotConvertArgument,
+                                "CannotConvertArgument",
+                                boType,
+                                string.Empty);
+
+                        throw pbe;
+                    }
+
+                    // NTRAID#Windows OS Bugs-1009284-2004/05/05-JeffJon
+                    // Need to handle other collection types here as well
+
+                    // Before attempting to encode a collection, we check if we can convert the argument directly via
+                    // a restricted set of conversions (as the general conversion mechanism is far too general, it may
+                    // succeed where it shouldn't.  We don't bother checking arrays parameters because they won't have
+                    // conversions we're allowing.
+                    if (collectionTypeInfo.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric
+                        || collectionTypeInfo.ParameterCollectionType == ParameterCollectionType.IList)
+                    {
+                        object currentValueToConvert = PSObject.Base(currentValue);
+                        if (currentValueToConvert != null)
+                        {
+                            ConversionRank rank = LanguagePrimitives.GetConversionRank(currentValueToConvert.GetType(), toType);
+                            if (rank == ConversionRank.Constructor || rank == ConversionRank.ImplicitCast || rank == ConversionRank.ExplicitCast)
+                            {
+                                // This conversion will fail in the common case, and when it does, we'll use EncodeCollection below.
+                                if (LanguagePrimitives.TryConvertTo(currentValue, toType, CultureInfo.CurrentCulture, out result))
+                                {
+                                    return FinalizeResult(result);
+                                }
+                            }
+                        }
+                    }
+
+                    if (collectionTypeInfo.ParameterCollectionType != ParameterCollectionType.NotCollection)
+                    {
                         bindingTracer.WriteLine(
-                            "CONVERT SUCCESSFUL using LanguagePrimitives.ConvertTo: [{0}]",
-                            (result == null) ? "null" : result.ToString());
-                    } while (false);
+                            "ENCODING arg into collection");
+
+                        bool ignored = false;
+                        result =
+                            EncodeCollection(
+                                argument,
+                                parameterName,
+                                collectionTypeInfo,
+                                toType,
+                                currentValue,
+                                (collectionTypeInfo.ElementType != null),
+                                out ignored);
+
+                        return FinalizeResult(result);
+                    }
+
+                    // Check to see if the current value is a collection. If so, fail because
+                    // we don't want to attempt to bind a collection to a scalar unless
+                    // the parameter type is Object or PSObject or enum.
+
+                    if (GetIList(currentValue) != null &&
+                        toType != typeof(object) &&
+                        toType != typeof(PSObject) &&
+                        toType != typeof(PSListModifier) &&
+                        (!toType.IsGenericType || toType.GetGenericTypeDefinition() != typeof(PSListModifier<>)) &&
+                        (!toType.IsGenericType || toType.GetGenericTypeDefinition() != typeof(FlagsExpression<>)) &&
+                        !toType.IsEnum)
+                    {
+                        throw new NotSupportedException();
+                    }
+
+                    bindingTracer.WriteLine(
+                        "CONVERT arg type to param type using LanguagePrimitives.ConvertTo");
+
+                    // If we are in constrained language mode and the target command is trusted, which is often
+                    // the case for C# cmdlets, then we allow type conversion to the target parameter type.
+                    //
+                    // However, we don't allow Hashtable-to-Object conversion (PSObject and IDictionary) because
+                    // those can lead to property setters that probably aren't expected. This is enforced by
+                    // setting 'Context.LanguageModeTransitionInParameterBinding' to true before the conversion.
+                    var currentLanguageMode = Context.LanguageMode;
+                    bool changeLanguageModeForTrustedCommand =
+                        currentLanguageMode == PSLanguageMode.ConstrainedLanguage &&
+                        this.Command.CommandInfo.DefiningLanguageMode == PSLanguageMode.FullLanguage;
+                    bool oldLangModeTransitionStatus = Context.LanguageModeTransitionInParameterBinding;
+
+                    try
+                    {
+                        if (changeLanguageModeForTrustedCommand)
+                        {
+                            Context.LanguageMode = PSLanguageMode.FullLanguage;
+                            Context.LanguageModeTransitionInParameterBinding = true;
+                        }
+
+                        result = LanguagePrimitives.ConvertTo(currentValue, toType, CultureInfo.CurrentCulture);
+                    }
+                    finally
+                    {
+                        if (changeLanguageModeForTrustedCommand)
+                        {
+                            Context.LanguageMode = currentLanguageMode;
+                            Context.LanguageModeTransitionInParameterBinding = oldLangModeTransitionStatus;
+                        }
+                    }
+
+                    bindingTracer.WriteLine(
+                        "CONVERT SUCCESSFUL using LanguagePrimitives.ConvertTo: [{0}]",
+                        (result == null) ? "null" : result.ToString());
+
+                    return FinalizeResult(result);
                 }
                 catch (NotSupportedException notSupported)
                 {
@@ -1336,13 +1318,6 @@ namespace System.Management.Automation
                 }
             }
 
-            if (result != null)
-            {
-                // Set the converted result object untrusted if necessary
-                ExecutionContext.PropagateInputSource(originalValue, result, Context.LanguageMode);
-            }
-
-            return result;
         }
 
         private static bool IsNullParameterValue(object currentValue)
