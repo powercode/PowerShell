@@ -331,10 +331,6 @@ namespace System.Management.Automation
             CompiledCommandParameter parameterMetadata,
             ParameterBindingFlags flags)
         {
-            bool result = false;
-            bool coerceTypeIfNeeded = (flags & ParameterBindingFlags.ShouldCoerceType) != 0;
-            bool isDefaultValue = (flags & ParameterBindingFlags.IsDefaultValue) != 0;
-
             if (parameter == null)
             {
                 throw PSTraceSource.NewArgumentNullException(nameof(parameter));
@@ -356,313 +352,332 @@ namespace System.Management.Automation
 
                 object parameterValue = parameter.ArgumentValue;
 
-                do // false loop
+                parameterValue = ApplyArgumentTransformations(parameter, parameterMetadata, parameterValue, flags);
+
+                bool shouldContinueBinding;
+                parameterValue = ApplyTypeCoercion(parameter, parameterMetadata, parameterValue, flags, out shouldContinueBinding);
+                if (!shouldContinueBinding)
                 {
-                    // Now call any argument transformation attributes that might be present on the parameter
-                    ScriptParameterBinder spb = this as ScriptParameterBinder;
-                    bool usesCmdletBinding = false;
-                    if (spb != null)
-                    {
-                        usesCmdletBinding = spb.Script.UsesCmdletBinding;
-                    }
+                    RecordBindingResult(parameter, parameterValue, result: false);
+                    return false;
+                }
 
-                    // Now do the argument transformation. No transformation is done for the default values in script that meet the following 2 conditions:
-                    //  1. the default value is not specified by the user, but is the powershell default value.
-                    //     e.g. the powershell default value for a class type is null, for the string type is string.empty.
-                    //  2. the powershell default value is null.
-                    // This is to prevent ArgumentTransformationAttributes from making a non-mandatory parameter behave like a mandatory one.
-                    // Example:
-                    //   ## without the fix, 'CredentialAttribute' would make $Credential like a mandatory parameter
-                    //   ## 'PS> test-credential' would prompt for credential input
-                    //   function test-credential {
-                    //       param(
-                    //           [System.Management.Automation.CredentialAttribute()]
-                    //           $Credential
-                    //       )
-                    //       $Credential
-                    //   }
-                    //
-                    foreach (ArgumentTransformationAttribute dma in parameterMetadata.ArgumentTransformationAttributes)
-                    {
-                        using (bindingTracer.TraceScope(
-                            "Executing DATA GENERATION metadata: [{0}]",
-                            dma.GetType()))
-                        {
-                            try
-                            {
-                                ArgumentTypeConverterAttribute argumentTypeConverter = dma as ArgumentTypeConverterAttribute;
+                RunValidationPipeline(parameter, parameterMetadata, parameterValue, flags);
+                WarnIfObsolete(parameterMetadata, flags);
 
-                                if (argumentTypeConverter != null)
-                                {
-                                    if (coerceTypeIfNeeded)
-                                    {
-                                        parameterValue = argumentTypeConverter.Transform(_engine, parameterValue, true, usesCmdletBinding);
-                                    }
-                                }
-                                else
-                                {
-                                    // Only apply argument transformation when the argument is not null, is mandatory, or disallows null as a value.
-                                    //
-                                    // If we are binding default value for an unbound script parameter, this parameter is guaranteed not mandatory
-                                    // in the chosen parameter set. This is because:
-                                    //  1. If we use cmdlet binding for this script (CmdletParameterBinderController is used), then binding
-                                    //     default value to unbound parameters won't happen until after all mandatory parameters from the
-                                    //     chosen parameter set are handled. Therefore, the unbound parameter we are dealing with here won't
-                                    //     be mandatory in the chosen parameter set.
-                                    //  2. If we use script binding (ScriptParameterBinderController is used), then parameters won't have the
-                                    //     ParameterAttribute declared for them, and thus are definitely not mandatory.
-                                    // So we check 'IsParameterMandatory' only if we are not binding default values.
-                                    if ((parameterValue != null) ||
-                                        (!isDefaultValue && (parameterMetadata.IsMandatoryInSomeParameterSet ||
-                                                             parameterMetadata.CannotBeNull ||
-                                                             dma.TransformNullOptionalParameters)))
-                                    {
-                                        parameterValue = dma.TransformInternal(_engine, parameterValue);
-                                    }
-                                }
+                bool result = DispatchBind(parameter, parameterMetadata, parameterValue);
+                RecordBindingResult(parameter, parameterValue, result);
+                return result;
+            }
+        }
 
-                                bindingTracer.WriteLine(
-                                    "result returned from DATA GENERATION: {0}",
-                                    parameterValue);
-                            }
-                            catch (Exception e) // Catch-all OK, 3rd party callout
-                            {
-                                bindingTracer.WriteLine(
-                                    "ERROR: DATA GENERATION: {0}",
-                                    e.Message);
+        /// <summary>
+        /// Apply argument transformation attributes and return the transformed value.
+        /// </summary>
+        private object ApplyArgumentTransformations(
+            CommandParameterInternal parameter,
+            CompiledCommandParameter parameterMetadata,
+            object parameterValue,
+            ParameterBindingFlags flags)
+        {
+            bool coerceTypeIfNeeded = (flags & ParameterBindingFlags.ShouldCoerceType) != 0;
+            bool isDefaultValue = (flags & ParameterBindingFlags.IsDefaultValue) != 0;
 
-                                ParameterBindingException bindingException =
-                                        new ParameterBindingArgumentTransformationException(
-                                            e,
-                                            ErrorCategory.InvalidData,
-                                            this.InvocationInfo,
-                                            GetErrorExtent(parameter),
-                                            parameterMetadata.Name,
-                                            parameterMetadata.Type,
-                                            parameterValue?.GetType(),
-                                            ParameterBinderStrings.ParameterArgumentTransformationError,
-                                            "ParameterArgumentTransformationError",
-                                            e.Message);
-                                throw bindingException;
-                            }
-                        }
-                    }
+            ScriptParameterBinder spb = this as ScriptParameterBinder;
+            bool usesCmdletBinding = spb != null && spb.Script.UsesCmdletBinding;
 
-                    // Only try to coerce the type if asked. If not asked,
-                    // see if the value type matches or is a subclass of
-                    // the parameter type.
-
-                    if (coerceTypeIfNeeded)
-                    {
-                        // Now do the type coercion
-
-                        parameterValue =
-                            CoerceTypeAsNeeded(
-                                parameter,
-                                parameterMetadata.Name,
-                                parameterMetadata.Type,
-                                parameterMetadata.CollectionTypeInformation,
-                                parameterValue);
-                    }
-                    else
-                    {
-                        if (!ShouldContinueUncoercedBind(parameter, parameterMetadata, flags, ref parameterValue))
-                        {
-                            // Don't attempt the bind because the value
-                            // is not of the correct
-                            // type for the parameter.
-                            break;
-                        }
-                    }
-
-                    if ((parameterMetadata.PSTypeName != null) && (parameterValue != null))
-                    {
-                        IEnumerable parameterValueAsEnumerable = LanguagePrimitives.GetEnumerable(parameterValue);
-                        if (parameterValueAsEnumerable != null)
-                        {
-                            foreach (object o in parameterValueAsEnumerable)
-                            {
-                                this.ValidatePSTypeName(parameter, parameterMetadata, !coerceTypeIfNeeded, o);
-                            }
-                        }
-                        else
-                        {
-                            this.ValidatePSTypeName(parameter, parameterMetadata, !coerceTypeIfNeeded, parameterValue);
-                        }
-                    }
-
-                    // Now do the data validation.  No validation is done for default values in script as that is
-                    // one way for people to have a known "bad" value to detect unspecified parameters.
-
-                    if (!isDefaultValue)
-                    {
-                        for (int i = 0; i < parameterMetadata.ValidationAttributes.Length; i++)
-                        {
-                            var validationAttribute = parameterMetadata.ValidationAttributes[i];
-
-                            using (bindingTracer.TraceScope(
-                                "Executing VALIDATION metadata: [{0}]",
-                                validationAttribute.GetType()))
-                            {
-                                try
-                                {
-                                    validationAttribute.InternalValidate(parameterValue, _engine);
-                                }
-                                catch (Exception e) // Catch-all OK, 3rd party callout
-                                {
-                                    bindingTracer.WriteLine(
-                                        "ERROR: VALIDATION FAILED: {0}",
-                                        e.Message);
-
-                                    ParameterBindingValidationException bindingException =
-                                        new ParameterBindingValidationException(
-                                            e,
-                                            ErrorCategory.InvalidData,
-                                            this.InvocationInfo,
-                                            GetErrorExtent(parameter),
-                                            parameterMetadata.Name,
-                                            parameterMetadata.Type,
-                                            parameterValue?.GetType(),
-                                            ParameterBinderStrings.ParameterArgumentValidationError,
-                                            "ParameterArgumentValidationError",
-                                            e.Message);
-                                    throw bindingException;
-                                }
-
-                                s_tracer.WriteLine("Validation attribute on {0} returned {1}.", parameterMetadata.Name, result);
-                            }
-                        }
-
-                        // If the is null, an empty string, or an empty collection,
-                        // check the parameter metadata to ensure that binding can continue
-                        // This method throws an appropriate ParameterBindingException
-                        // if binding cannot continue. If it returns then binding can
-                        // proceed.
-                        if (parameterMetadata.IsMandatoryInSomeParameterSet)
-                        {
-                            ValidateNullOrEmptyArgument(parameter, parameterMetadata, parameterMetadata.Type, parameterValue, true);
-                        }
-                    }
-
-                    // Write out obsolete parameter warning only if
-                    //  1. We are binding parameters for a simple function/script
-                    //  2. We are not binding a default parameter value
-
-                    if (parameterMetadata.ObsoleteAttribute != null &&
-                        (!isDefaultValue) &&
-                        spb != null && !usesCmdletBinding)
-                    {
-                        string obsoleteWarning = string.Format(
-                            CultureInfo.InvariantCulture,
-                            ParameterBinderStrings.UseOfDeprecatedParameterWarning,
-                            parameterMetadata.Name,
-                            parameterMetadata.ObsoleteAttribute.Message);
-
-                        var mshCommandRuntime = this.Command.commandRuntime as MshCommandRuntime;
-
-                        // Write out warning only if we are in the context of MshCommandRuntime.
-                        // This is because
-                        //  1. The overload method WriteWarning(WarningRecord) is only available in MshCommandRuntime;
-                        //  2. We write out warnings for obsolete commands and obsolete cmdlet parameters only when in
-                        //     the context of MshCommandRuntime. So we do it here to keep consistency.
-                        mshCommandRuntime?.WriteWarning(new WarningRecord(FQIDParameterObsolete, obsoleteWarning));
-                    }
-
-                    // Finally bind the argument to the parameter
-
-                    Exception bindError = null;
-
+            // No transformation is done for default values in script when the value is null and optional.
+            foreach (ArgumentTransformationAttribute dma in parameterMetadata.ArgumentTransformationAttributes)
+            {
+                using (bindingTracer.TraceScope(
+                    "Executing DATA GENERATION metadata: [{0}]",
+                    dma.GetType()))
+                {
                     try
                     {
-                        BindParameter(parameter.ParameterName, parameterValue, parameterMetadata);
-                        result = true;
-                    }
-                    catch (SetValueException setValueException)
-                    {
-                        bindError = setValueException;
-                    }
+                        ArgumentTypeConverterAttribute argumentTypeConverter = dma as ArgumentTypeConverterAttribute;
 
-                    if (bindError != null)
+                        if (argumentTypeConverter != null)
+                        {
+                            if (coerceTypeIfNeeded)
+                            {
+                                parameterValue = argumentTypeConverter.Transform(_engine, parameterValue, true, usesCmdletBinding);
+                            }
+                        }
+                        else if ((parameterValue != null) ||
+                                 (!isDefaultValue && (parameterMetadata.IsMandatoryInSomeParameterSet ||
+                                                      parameterMetadata.CannotBeNull ||
+                                                      dma.TransformNullOptionalParameters)))
+                        {
+                            parameterValue = dma.TransformInternal(_engine, parameterValue);
+                        }
+
+                        bindingTracer.WriteLine(
+                            "result returned from DATA GENERATION: {0}",
+                            parameterValue);
+                    }
+                    catch (Exception e) // Catch-all OK, 3rd party callout
                     {
-                        Type specifiedType = parameterValue?.GetType();
+                        bindingTracer.WriteLine(
+                            "ERROR: DATA GENERATION: {0}",
+                            e.Message);
+
                         ParameterBindingException bindingException =
-                            new ParameterBindingException(
-                                bindError,
-                                ErrorCategory.WriteError,
+                            new ParameterBindingArgumentTransformationException(
+                                e,
+                                ErrorCategory.InvalidData,
                                 this.InvocationInfo,
                                 GetErrorExtent(parameter),
                                 parameterMetadata.Name,
                                 parameterMetadata.Type,
-                                specifiedType,
-                                ParameterBinderStrings.ParameterBindingFailed,
-                                "ParameterBindingFailed",
-                                bindError.Message);
-
+                                parameterValue?.GetType(),
+                                ParameterBinderStrings.ParameterArgumentTransformationError,
+                                "ParameterArgumentTransformationError",
+                                e.Message);
                         throw bindingException;
                     }
                 }
-                while (false);
+            }
 
-                bindingTracer.WriteLine(
-                    "BIND arg [{0}] to param [{1}] {2}",
-                    parameterValue,
-                    parameter.ParameterName,
-                    (result) ? "SUCCESSFUL" : "SKIPPED");
+            return parameterValue;
+        }
 
-                if (result)
+        /// <summary>
+        /// Apply type coercion (or compatibility checks for uncoerced binding) and return the value.
+        /// </summary>
+        private object ApplyTypeCoercion(
+            CommandParameterInternal parameter,
+            CompiledCommandParameter parameterMetadata,
+            object parameterValue,
+            ParameterBindingFlags flags,
+            out bool shouldContinueBinding)
+        {
+            bool coerceTypeIfNeeded = (flags & ParameterBindingFlags.ShouldCoerceType) != 0;
+            if (coerceTypeIfNeeded)
+            {
+                shouldContinueBinding = true;
+                return CoerceTypeAsNeeded(
+                    parameter,
+                    parameterMetadata.Name,
+                    parameterMetadata.Type,
+                    parameterMetadata.CollectionTypeInformation,
+                    parameterValue);
+            }
+
+            shouldContinueBinding = ShouldContinueUncoercedBind(parameter, parameterMetadata, flags, ref parameterValue);
+            return parameterValue;
+        }
+
+        /// <summary>
+        /// Run type-name and validation-attribute checks, including mandatory null-or-empty validation.
+        /// </summary>
+        private void RunValidationPipeline(
+            CommandParameterInternal parameter,
+            CompiledCommandParameter parameterMetadata,
+            object parameterValue,
+            ParameterBindingFlags flags)
+        {
+            bool coerceTypeIfNeeded = (flags & ParameterBindingFlags.ShouldCoerceType) != 0;
+            bool isDefaultValue = (flags & ParameterBindingFlags.IsDefaultValue) != 0;
+
+            if ((parameterMetadata.PSTypeName != null) && (parameterValue != null))
+            {
+                IEnumerable parameterValueAsEnumerable = LanguagePrimitives.GetEnumerable(parameterValue);
+                if (parameterValueAsEnumerable != null)
                 {
-                    // Add this name to the set of bound parameters...
-                    if (RecordBoundParameters)
+                    foreach (object o in parameterValueAsEnumerable)
                     {
-                        this.CommandLineParameters.Add(parameter.ParameterName, parameterValue);
-                    }
-
-                    MshCommandRuntime cmdRuntime = this.Command.commandRuntime as MshCommandRuntime;
-                    if ((cmdRuntime != null) &&
-                        (cmdRuntime.LogPipelineExecutionDetail || _isTranscribing) &&
-                        (cmdRuntime.PipelineProcessor != null))
-                    {
-                        string stringToPrint = null;
-                        try
-                        {
-                            // Unroll parameter value
-                            IEnumerable values = LanguagePrimitives.GetEnumerable(parameterValue);
-                            if (values != null)
-                            {
-                                var sb = new Text.StringBuilder(256);
-                                var sep = string.Empty;
-                                foreach (var value in values)
-                                {
-                                    sb.Append(sep);
-                                    sep = ", ";
-                                    sb.Append(value);
-                                    // For better performance, avoid logging too much
-                                    if (sb.Length > 256)
-                                    {
-                                        sb.Append(", ...");
-                                        break;
-                                    }
-                                }
-
-                                stringToPrint = sb.ToString();
-                            }
-                            else if (parameterValue != null)
-                            {
-                                stringToPrint = parameterValue.ToString();
-                            }
-                        }
-                        catch (Exception) // Catch-all OK, 3rd party callout
-                        {
-                        }
-
-                        if (stringToPrint != null)
-                        {
-                            cmdRuntime.PipelineProcessor.LogExecutionParameterBinding(this.InvocationInfo, parameter.ParameterName, stringToPrint);
-                        }
+                        this.ValidatePSTypeName(parameter, parameterMetadata, !coerceTypeIfNeeded, o);
                     }
                 }
+                else
+                {
+                    this.ValidatePSTypeName(parameter, parameterMetadata, !coerceTypeIfNeeded, parameterValue);
+                }
+            }
 
-                return result;
+            // No validation is done for default values in script.
+            if (isDefaultValue)
+            {
+                return;
+            }
+
+            for (int i = 0; i < parameterMetadata.ValidationAttributes.Length; i++)
+            {
+                var validationAttribute = parameterMetadata.ValidationAttributes[i];
+
+                using (bindingTracer.TraceScope(
+                    "Executing VALIDATION metadata: [{0}]",
+                    validationAttribute.GetType()))
+                {
+                    try
+                    {
+                        validationAttribute.InternalValidate(parameterValue, _engine);
+                    }
+                    catch (Exception e) // Catch-all OK, 3rd party callout
+                    {
+                        bindingTracer.WriteLine(
+                            "ERROR: VALIDATION FAILED: {0}",
+                            e.Message);
+
+                        ParameterBindingValidationException bindingException =
+                            new ParameterBindingValidationException(
+                                e,
+                                ErrorCategory.InvalidData,
+                                this.InvocationInfo,
+                                GetErrorExtent(parameter),
+                                parameterMetadata.Name,
+                                parameterMetadata.Type,
+                                parameterValue?.GetType(),
+                                ParameterBinderStrings.ParameterArgumentValidationError,
+                                "ParameterArgumentValidationError",
+                                e.Message);
+                        throw bindingException;
+                    }
+
+                    s_tracer.WriteLine("Validation attribute on {0} returned {1}.", parameterMetadata.Name, false);
+                }
+            }
+
+            // If the value is null, empty string, or empty collection, ensure binding can continue.
+            if (parameterMetadata.IsMandatoryInSomeParameterSet)
+            {
+                ValidateNullOrEmptyArgument(parameter, parameterMetadata, parameterMetadata.Type, parameterValue, true);
+            }
+        }
+
+        /// <summary>
+        /// Emit warning for obsolete parameters when binding simple scripts/functions.
+        /// </summary>
+        private void WarnIfObsolete(
+            CompiledCommandParameter parameterMetadata,
+            ParameterBindingFlags flags)
+        {
+            bool isDefaultValue = (flags & ParameterBindingFlags.IsDefaultValue) != 0;
+            ScriptParameterBinder spb = this as ScriptParameterBinder;
+            bool usesCmdletBinding = spb != null && spb.Script.UsesCmdletBinding;
+
+            if (parameterMetadata.ObsoleteAttribute == null || isDefaultValue || spb == null || usesCmdletBinding)
+            {
+                return;
+            }
+
+            string obsoleteWarning = string.Format(
+                CultureInfo.InvariantCulture,
+                ParameterBinderStrings.UseOfDeprecatedParameterWarning,
+                parameterMetadata.Name,
+                parameterMetadata.ObsoleteAttribute.Message);
+
+            var mshCommandRuntime = this.Command.commandRuntime as MshCommandRuntime;
+
+            // Keep warning behavior aligned with obsolete command/cmdlet parameter warnings.
+            mshCommandRuntime?.WriteWarning(new WarningRecord(FQIDParameterObsolete, obsoleteWarning));
+        }
+
+        /// <summary>
+        /// Bind the transformed value and surface any binding failure as <see cref="ParameterBindingException"/>.
+        /// </summary>
+        private bool DispatchBind(
+            CommandParameterInternal parameter,
+            CompiledCommandParameter parameterMetadata,
+            object parameterValue)
+        {
+            Exception bindError = null;
+
+            try
+            {
+                BindParameter(parameter.ParameterName, parameterValue, parameterMetadata);
+            }
+            catch (SetValueException setValueException)
+            {
+                bindError = setValueException;
+            }
+
+            if (bindError != null)
+            {
+                Type specifiedType = parameterValue?.GetType();
+                ParameterBindingException bindingException =
+                    new ParameterBindingException(
+                        bindError,
+                        ErrorCategory.WriteError,
+                        this.InvocationInfo,
+                        GetErrorExtent(parameter),
+                        parameterMetadata.Name,
+                        parameterMetadata.Type,
+                        specifiedType,
+                        ParameterBinderStrings.ParameterBindingFailed,
+                        "ParameterBindingFailed",
+                        bindError.Message);
+
+                throw bindingException;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Record tracing and runtime logging information for the bind result.
+        /// </summary>
+        private void RecordBindingResult(CommandParameterInternal parameter, object parameterValue, bool result)
+        {
+            bindingTracer.WriteLine(
+                "BIND arg [{0}] to param [{1}] {2}",
+                parameterValue,
+                parameter.ParameterName,
+                result ? "SUCCESSFUL" : "SKIPPED");
+
+            if (!result)
+            {
+                return;
+            }
+
+            if (RecordBoundParameters)
+            {
+                this.CommandLineParameters.Add(parameter.ParameterName, parameterValue);
+            }
+
+            MshCommandRuntime cmdRuntime = this.Command.commandRuntime as MshCommandRuntime;
+            if ((cmdRuntime == null) ||
+                (!cmdRuntime.LogPipelineExecutionDetail && !_isTranscribing) ||
+                (cmdRuntime.PipelineProcessor == null))
+            {
+                return;
+            }
+
+            string stringToPrint = null;
+            try
+            {
+                IEnumerable values = LanguagePrimitives.GetEnumerable(parameterValue);
+                if (values != null)
+                {
+                    var sb = new Text.StringBuilder(256);
+                    var sep = string.Empty;
+                    foreach (var value in values)
+                    {
+                        sb.Append(sep);
+                        sep = ", ";
+                        sb.Append(value);
+                        if (sb.Length > 256)
+                        {
+                            sb.Append(", ...");
+                            break;
+                        }
+                    }
+
+                    stringToPrint = sb.ToString();
+                }
+                else if (parameterValue != null)
+                {
+                    stringToPrint = parameterValue.ToString();
+                }
+            }
+            catch (Exception) // Catch-all OK, 3rd party callout
+            {
+            }
+
+            if (stringToPrint != null)
+            {
+                cmdRuntime.PipelineProcessor.LogExecutionParameterBinding(this.InvocationInfo, parameter.ParameterName, stringToPrint);
             }
         }
 
