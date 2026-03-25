@@ -36,20 +36,20 @@ function Start-Benchmarking
     param(
         [Parameter(ParameterSetName = 'TargetPSVersion')]
         [ValidatePattern(
-            '^7\.(0|1|2)\.\d+(-preview\.\d{1,2})?$',
+            '^7\.\d+\.\d+(-preview\.\d{1,2})?$',
             ErrorMessage = 'The package version is invalid or not supported')]
         [string] $TargetPSVersion,
 
         [Parameter(ParameterSetName = 'TargetFramework')]
-        [ValidateSet('netcoreapp3.1', 'net5.0', 'net6.0')]
-        [string] $TargetFramework = 'net6.0',
+        [ValidateSet('netcoreapp3.1', 'net5.0', 'net6.0', 'net8.0', 'net9.0', 'net10.0', 'net11.0')]
+        [string] $TargetFramework = 'net11.0',
 
         [Parameter(ParameterSetName = 'TargetFramework')]
         [ValidateSet('flat', 'tree')]
         [string] $List,
 
         [Parameter(Mandatory, ParameterSetName = 'Runtimes')]
-        [ValidateSet('netcoreapp3.1', 'net5.0', 'net6.0')]
+        [ValidateSet('netcoreapp3.1', 'net5.0', 'net6.0', 'net8.0', 'net9.0', 'net10.0', 'net11.0')]
         [string[]] $Runtime,
 
         [string[]] $Filter = '*',
@@ -108,7 +108,7 @@ function Start-Benchmarking
                 }
 
                 'TargetFramework' {
-                    $message = if ($TargetFramework -eq 'net6.0') { 'the current PowerShell code base ...' } else { "the corresponding latest version of 'Microsoft.PowerShell.SDK' ..." }
+                    $message = if ($TargetFramework -eq 'net11.0') { 'the current PowerShell code base ...' } else { "the corresponding latest version of 'Microsoft.PowerShell.SDK' ..." }
                     Write-Log -message "Run benchmarks targeting '$TargetFramework' and $message"
 
                     ## Use 'Release' instead of 'release' (note the capital case) because BDN uses 'Release' when building the auto-generated
@@ -123,7 +123,7 @@ function Start-Benchmarking
                     ## Use 'Release' instead of 'release' (note the capital case) because BDN uses 'Release' when building the auto-generated
                     ## project, and MSBuild somehow recognizes 'release' and 'Release' as two different configurations and thus will rebuild
                     ## all dependencies unnecessarily.
-                    dotnet run -c Release -f net6.0 --runtimes $Runtime $runArgs
+                    dotnet run -c Release -f net11.0 --runtimes $Runtime $runArgs
                 }
             }
 

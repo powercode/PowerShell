@@ -12,6 +12,7 @@ using Reporting;
 using BenchmarkDotNet.Loggers;
 using System.Linq;
 using BenchmarkDotNet.Exporters;
+using BenchmarkDotNet.Toolchains.InProcess.NoEmit;
 
 namespace BenchmarkDotNet.Extensions
 {
@@ -34,7 +35,8 @@ namespace BenchmarkDotNet.Extensions
                     .WithIterationTime(TimeInterval.FromMilliseconds(250)) // the default is 0.5s per iteration, which is slightly too much for us
                     .WithMinIterationCount(15)
                     .WithMaxIterationCount(20) // we don't want to run more that 20 iterations
-                    .DontEnforcePowerPlan(); // make sure BDN does not try to enforce High Performance power plan on Windows
+                    .DontEnforcePowerPlan() // make sure BDN does not try to enforce High Performance power plan on Windows
+                    .WithToolchain(InProcessNoEmitToolchain.Instance);
 
                 // See https://github.com/dotnet/roslyn/issues/42393
                 job = job.WithArguments(new Argument[] { new MsBuildArgument("/p:DebugType=portable") });
@@ -42,7 +44,6 @@ namespace BenchmarkDotNet.Extensions
 
             var config = ManualConfig.CreateEmpty()
                 .AddLogger(ConsoleLogger.Default) // log output to console
-                .AddValidator(DefaultConfig.Instance.GetValidators().ToArray()) // copy default validators
                 .AddAnalyser(DefaultConfig.Instance.GetAnalysers().ToArray()) // copy default analysers
                 .AddExporter(MarkdownExporter.GitHub) // export to GitHub markdown
                 .AddColumnProvider(DefaultColumnProviders.Instance) // display default columns (method name, args etc)
@@ -75,7 +76,6 @@ namespace BenchmarkDotNet.Extensions
         private static DisassemblyDiagnoser CreateDisassembler()
             => new DisassemblyDiagnoser(new DisassemblyDiagnoserConfig(
                 maxDepth: 1, // TODO: is depth == 1 enough?
-                formatter: null, // TODO: enable diffable format
                 printSource: false, // we are not interested in getting C#
                 printInstructionAddresses: false, // would make the diffing hard, however could be useful to determine alignment
                 exportGithubMarkdown: false,

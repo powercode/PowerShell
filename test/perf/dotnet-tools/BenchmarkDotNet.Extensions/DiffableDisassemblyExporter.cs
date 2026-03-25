@@ -35,11 +35,6 @@ namespace BenchmarkDotNet.Extensions
                 {
                     if (element.Source() is Asm asm)
                     {
-                        checked
-                        {
-                            totalSizeInBytes += (uint)asm.Instruction.Length;
-                        }
-
                         sb.AppendLine($"       {element.TextRepresentation()}");
                     }
                     else // it's a DisassemblyPrettifier.Label (internal type..)
