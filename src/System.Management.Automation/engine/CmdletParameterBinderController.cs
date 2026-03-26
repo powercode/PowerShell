@@ -11,6 +11,7 @@ using System.Management.Automation.Host;
 using System.Management.Automation.Internal;
 using System.Management.Automation.Language;
 using System.Management.Automation.Runspaces;
+using System.Numerics;
 using System.Text;
 
 namespace System.Management.Automation
@@ -3781,22 +3782,13 @@ namespace System.Management.Automation
         /// </returns>
         private static int ValidParameterSetCount(uint parameterSetFlags)
         {
-            int result = 0;
-
+            // uint.MaxValue means "all parameter sets" and is treated as one valid set.
             if (parameterSetFlags == uint.MaxValue)
             {
-                result = 1;
-            }
-            else
-            {
-                while (parameterSetFlags != 0)
-                {
-                    result += (int)(parameterSetFlags & 0x1);
-                    parameterSetFlags >>= 1;
-                }
+                return 1;
             }
 
-            return result;
+            return BitOperations.PopCount(parameterSetFlags);
         }
 
         #endregion helper_methods
