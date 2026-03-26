@@ -90,6 +90,19 @@ namespace System.Management.Automation
         /// <summary>
         /// Binds the specified command-line parameters to the target.
         /// </summary>
+        /// <remarks>
+        /// The command-line binding orchestration executes these high-level phases in order:
+        ///
+        /// 1. Run non-validating command-line binding (<see cref="BindCommandLineParametersNoValidation(Collection{CommandParameterInternal})"/>).
+        /// 2. Determine whether pipeline input is expected for this invocation.
+        /// 3. Validate and narrow candidate parameter sets for strict execution mode.
+        /// 4. Re-apply default parameter binding for mandatory-check scenarios when a single set is selected.
+        /// 5. If pipeline input is expected and multiple sets remain, filter out sets that cannot take pipeline input.
+        /// 6. Handle unbound mandatory parameters (prompt or throw as appropriate for command visibility and mode).
+        /// 7. Bind remaining unbound script parameters for script binder scenarios.
+        /// 8. If no more pipeline input is expected, verify that a single parameter set is selected.
+        /// 9. Persist pre-pipeline parameter set flags for per-input-object pipeline rebinding.
+        /// </remarks>
         /// <param name="arguments">
         /// Parameters to the command.
         /// </param>
@@ -199,6 +212,25 @@ namespace System.Management.Automation
         /// Binds the unbound arguments to parameters but does not
         /// perform mandatory parameter validation or parameter set validation.
         /// </summary>
+        /// <remarks>
+        /// The non-validating binding pipeline executes these phases in order:
+        ///
+        /// 1. Initialize unbound arguments from command-line tokens.
+        /// 2. Parse $PSDefaultParameterValues for this command.
+        /// 3. Re-pair parameter names with argument values (<see cref="ParameterBinderController.ReparseUnboundArguments"/>).
+        /// 4. Bind named parameters with exact name-to-parameter matching.
+        /// 5. Bind positional parameters with the 4-pass algorithm:
+        ///    a. Default parameter set, no type coercion.
+        ///    b. Other parameter sets, no type coercion.
+        ///    c. Default parameter set, with type coercion.
+        ///    d. Other parameter sets, with type coercion.
+        /// 6. Apply $PSDefaultParameterValues after positional binding.
+        /// 7. Validate that at least one parameter set remains resolvable.
+        /// 8. Handle dynamic parameters and re-run matching with expanded metadata.
+        /// 9. Re-apply $PSDefaultParameterValues after dynamic binding.
+        /// 10. Bind ValueFromRemainingArguments parameters.
+        /// 11. Verify all command-line arguments were consumed.
+        /// </remarks>
         internal void BindCommandLineParametersNoValidation(Collection<CommandParameterInternal> arguments)
         {
             var psCompiledScriptCmdlet = this.Command as PSScriptCmdlet;
