@@ -41,12 +41,16 @@ Get-ChildItem @parameters
 ";
 
         private Runspace runspace;
+        private string benchmarkRootPath;
 
         private ScriptBlock namedBindingScript;
         private ScriptBlock positionalBindingScript;
         private ScriptBlock pipelineBindingScript;
         private ScriptBlock multipleParameterSetBindingScript;
+        private ScriptBlock parameterSetByIdBindingScript;
         private ScriptBlock splattingBindingScript;
+        private ScriptBlock splattingAdvancedFunctionBindingScript;
+        private ScriptBlock directAdvancedFunctionBindingScript;
         private ScriptBlock validationAttributesBindingScript;
         private ScriptBlock pipelineByPropertyNameBindingScript;
 
@@ -57,8 +61,8 @@ Get-ChildItem @parameters
             runspace.Open();
             Runspace.DefaultRunspace = runspace;
 
-            string rootPath = Path.GetPathRoot(Environment.CurrentDirectory) ?? Environment.CurrentDirectory;
-            string escapedRootPath = rootPath.Replace("'", "''");
+            benchmarkRootPath = CreateBenchmarkDirectory();
+            string escapedRootPath = benchmarkRootPath.Replace("'", "''");
 
             namedBindingScript = CreateScriptBlockWithRootPath(NamedBindingScriptTemplate, escapedRootPath);
             positionalBindingScript = CreateScriptBlockWithRootPath(PositionalBindingScriptTemplate, escapedRootPath);
@@ -94,7 +98,90 @@ function Test-ParameterBindingMultiSet {
 
 Test-ParameterBindingMultiSet -Name 'benchmark' -AsString
 ");
+
+            parameterSetByIdBindingScript = ScriptBlock.Create(@"
+function Test-ParameterBindingMultiSet {
+    [CmdletBinding(DefaultParameterSetName='ByName')]
+    param(
+        [Parameter(Mandatory, ParameterSetName='ByName')]
+        [string]$Name,
+
+        [Parameter(Mandatory, ParameterSetName='ById')]
+        [int]$Id,
+
+        [Parameter(ParameterSetName='ByName')]
+        [switch]$AsString,
+
+        [Parameter(ParameterSetName='ById')]
+        [switch]$AsHex
+    )
+
+    if ($PSCmdlet.ParameterSetName -eq 'ByName') {
+        return $Name
+    }
+
+    if ($AsHex) {
+        return ('0x{0:X}' -f $Id)
+    }
+
+    return $Id
+}
+
+Test-ParameterBindingMultiSet -Id 42 -AsHex
+");
             splattingBindingScript = CreateScriptBlockWithRootPath(SplattingBindingScriptTemplate, escapedRootPath);
+
+            splattingAdvancedFunctionBindingScript = ScriptBlock.Create(@"
+function Test-ParameterBindingSplattingTarget {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [int]$Count,
+
+        [switch]$Enabled
+    )
+
+    if ($Enabled) {
+        return ('{0}{1}' -f $Name, $Count)
+    }
+
+    return $Count
+}
+
+$parameters = @{
+    Name = 'item'
+    Count = 12
+    Enabled = $true
+}
+
+Test-ParameterBindingSplattingTarget @parameters
+");
+
+            directAdvancedFunctionBindingScript = ScriptBlock.Create(@"
+function Test-ParameterBindingSplattingTarget {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [int]$Count,
+
+        [switch]$Enabled
+    )
+
+    if ($Enabled) {
+        return ('{0}{1}' -f $Name, $Count)
+    }
+
+    return $Count
+}
+
+Test-ParameterBindingSplattingTarget -Name 'item' -Count 12 -Enabled
+");
 
             validationAttributesBindingScript = ScriptBlock.Create(@"
 function Test-ParameterBindingValidation {
@@ -140,7 +227,10 @@ function Test-ParameterBindingByPropertyName {
             PositionalParameterBinding();
             PipelineParameterBinding();
             AdvancedFunctionMultipleParameterSets();
+            AdvancedFunctionMultipleParameterSetsById();
             SplattingBinding();
+            AdvancedFunctionSplattingBinding();
+            AdvancedFunctionDirectBinding();
             ValidationAttributesBinding();
             PipelineByPropertyNameBinding();
         }
@@ -148,6 +238,31 @@ function Test-ParameterBindingByPropertyName {
         private static ScriptBlock CreateScriptBlockWithRootPath(string scriptTemplate, string escapedRootPath)
         {
             return ScriptBlock.Create(string.Format(scriptTemplate, escapedRootPath));
+        }
+
+        private static string CreateBenchmarkDirectory()
+        {
+            string benchmarkRoot = Path.Combine(Path.GetTempPath(), "pwsh-parameterbinding-benchmark-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(benchmarkRoot);
+
+            for (int i = 0; i < 5; i++)
+            {
+                string level1 = Path.Combine(benchmarkRoot, $"dir{i}");
+                Directory.CreateDirectory(level1);
+
+                for (int j = 0; j < 5; j++)
+                {
+                    string level2 = Path.Combine(level1, $"sub{j}");
+                    Directory.CreateDirectory(level2);
+
+                    for (int k = 0; k < 4; k++)
+                    {
+                        File.WriteAllText(Path.Combine(level2, $"file{k}.txt"), "benchmark");
+                    }
+                }
+            }
+
+            return benchmarkRoot;
         }
 
         [Benchmark]
@@ -163,7 +278,16 @@ function Test-ParameterBindingByPropertyName {
         public Collection<PSObject> AdvancedFunctionMultipleParameterSets() => multipleParameterSetBindingScript.Invoke();
 
         [Benchmark]
+        public Collection<PSObject> AdvancedFunctionMultipleParameterSetsById() => parameterSetByIdBindingScript.Invoke();
+
+        [Benchmark]
         public Collection<PSObject> SplattingBinding() => splattingBindingScript.Invoke();
+
+        [Benchmark]
+        public Collection<PSObject> AdvancedFunctionSplattingBinding() => splattingAdvancedFunctionBindingScript.Invoke();
+
+        [Benchmark]
+        public Collection<PSObject> AdvancedFunctionDirectBinding() => directAdvancedFunctionBindingScript.Invoke();
 
         [Benchmark]
         public Collection<PSObject> ValidationAttributesBinding() => validationAttributesBindingScript.Invoke();
@@ -176,6 +300,11 @@ function Test-ParameterBindingByPropertyName {
         {
             runspace.Dispose();
             Runspace.DefaultRunspace = null;
+
+            if (!string.IsNullOrWhiteSpace(benchmarkRootPath) && Directory.Exists(benchmarkRootPath))
+            {
+                Directory.Delete(benchmarkRootPath, recursive: true);
+            }
         }
     }
 }
