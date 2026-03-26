@@ -1156,16 +1156,9 @@ namespace System.Management.Automation
 
         private static bool IsNullParameterValue(object currentValue)
         {
-            bool result = false;
-
-            if (currentValue == null ||
-                currentValue == AutomationNull.Value ||
-                currentValue == UnboundParameter.Value)
-            {
-                result = true;
-            }
-
-            return result;
+            return currentValue == null ||
+                   currentValue == AutomationNull.Value ||
+                   currentValue == UnboundParameter.Value;
         }
 
         private object HandleNullParameterForSpecialTypes(

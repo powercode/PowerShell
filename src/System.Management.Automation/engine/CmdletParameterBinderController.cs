@@ -2582,8 +2582,6 @@ namespace System.Management.Automation
         /// </returns>
         private bool AtLeastOneUnboundValidParameterSetTakesPipelineInput(uint validParameterSetFlags)
         {
-            bool result = false;
-
             // Loop through all the unbound parameters to see if there are any
             // that take pipeline input for the specified parameter sets.
 
@@ -2591,12 +2589,11 @@ namespace System.Management.Automation
             {
                 if (parameter.Parameter.DoesParameterSetTakePipelineInput(validParameterSetFlags))
                 {
-                    result = true;
-                    break;
+                    return true;
                 }
             }
 
-            return result;
+            return false;
         }
 
         /// <summary>
