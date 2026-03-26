@@ -368,7 +368,7 @@ namespace System.Management.Automation
             string errorId,
             params object[] args)
         {
-            return new ParameterBindingException(
+            return ParameterBindingException.NewParameterBindingException(
                 innerException,
                 errorCategory,
                 this.InvocationInfo,

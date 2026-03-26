@@ -774,6 +774,44 @@ namespace System.Management.Automation
                 "MissingArgument");
         }
 
+        internal static ParameterBindingException NewParameterBindingException(
+            Exception innerException,
+            ErrorCategory errorCategory,
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified,
+            string resourceString,
+            string errorId,
+            params object[] args)
+        {
+            return new ParameterBindingException(
+                innerException,
+                errorCategory,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                resourceString,
+                errorId,
+                args);
+        }
+
+        internal static ParameterBindingException NewElaboratedBindingException(
+            Exception innerException,
+            ParameterBindingException source,
+            string resourceString,
+            params object[] args)
+        {
+            return new ParameterBindingException(
+                innerException,
+                source,
+                resourceString,
+                args);
+        }
+
         #endregion ThrowHelpers
 
         #region Properties

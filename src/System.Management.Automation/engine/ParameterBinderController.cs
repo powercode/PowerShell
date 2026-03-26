@@ -210,18 +210,11 @@ namespace System.Management.Automation
                             // It is an error to have an argument that is a parameter name
                             // but doesn't have a value
 
-                            ParameterBindingException exception =
-                                new ParameterBindingException(
-                                    ErrorCategory.InvalidArgument,
-                                    this.InvocationInfo,
-                                    GetParameterErrorExtent(argument),
-                                    matchingParameter.Parameter.Name,
-                                    matchingParameter.Parameter.Type,
-                                    null,
-                                    ParameterBinderStrings.MissingArgument,
-                                    "MissingArgument");
-
-                            throw exception;
+                            ParameterBindingException.ThrowMissingArgument(
+                                this.InvocationInfo,
+                                GetParameterErrorExtent(argument),
+                                matchingParameter.Parameter.Name,
+                                matchingParameter.Parameter.Type);
                         }
 
                         ++index;
@@ -244,18 +237,11 @@ namespace System.Management.Automation
                     // It is an error to have a argument that is a parameter name
                     // but doesn't have a value
 
-                    ParameterBindingException exception =
-                        new ParameterBindingException(
-                            ErrorCategory.InvalidArgument,
-                            this.InvocationInfo,
-                            GetParameterErrorExtent(argument),
-                            matchingParameter.Parameter.Name,
-                            matchingParameter.Parameter.Type,
-                            null,
-                            ParameterBinderStrings.MissingArgument,
-                            "MissingArgument");
-
-                    throw exception;
+                    ParameterBindingException.ThrowMissingArgument(
+                        this.InvocationInfo,
+                        GetParameterErrorExtent(argument),
+                        matchingParameter.Parameter.Name,
+                        matchingParameter.Parameter.Type);
                 }
             }
 
@@ -447,18 +433,10 @@ namespace System.Management.Automation
 
                 if (BoundParameters.ContainsKey(matchingParameter.Parameter.Name))
                 {
-                    ParameterBindingException bindingException =
-                        new ParameterBindingException(
-                            ErrorCategory.InvalidArgument,
-                            this.InvocationInfo,
-                            GetParameterErrorExtent(argument),
-                            argument.ParameterName,
-                            null,
-                            null,
-                            ParameterBinderStrings.ParameterAlreadyBound,
-                            nameof(ParameterBinderStrings.ParameterAlreadyBound));
-
-                    throw bindingException;
+                    ParameterBindingException.ThrowParameterAlreadyBound(
+                        this.InvocationInfo,
+                        GetParameterErrorExtent(argument),
+                        argument.ParameterName);
                 }
 
                 flags &= ~ParameterBindingFlags.DelayBindScriptBlock;
@@ -630,18 +608,10 @@ namespace System.Management.Automation
 
                     if (BoundParameters.ContainsKey(formalParamName))
                     {
-                        ParameterBindingException bindingException =
-                            new ParameterBindingException(
-                                ErrorCategory.InvalidArgument,
-                                this.InvocationInfo,
-                                GetParameterErrorExtent(argument),
-                                argument.ParameterName,
-                                null,
-                                null,
-                                ParameterBinderStrings.ParameterAlreadyBound,
-                                nameof(ParameterBinderStrings.ParameterAlreadyBound));
-
-                        throw bindingException;
+                        ParameterBindingException.ThrowParameterAlreadyBound(
+                            this.InvocationInfo,
+                            GetParameterErrorExtent(argument),
+                            argument.ParameterName);
                     }
 
                     BindNamedParameter(parameterSets, argument, parameter);
@@ -730,21 +700,10 @@ namespace System.Management.Automation
                     // The parameter set declaration is ambiguous so
                     // throw an exception.
 
-                    ParameterBindingException bindingException =
-                        new ParameterBindingException(
-                            ErrorCategory.InvalidArgument,
-                            this.InvocationInfo,
-                            null,
-                            null,
-                            null,
-                            null,
-                            ParameterBinderStrings.AmbiguousPositionalParameterNoName,
-                            "AmbiguousPositionalParameterNoName");
-
                     // This exception is thrown because the binder found two positional parameters
                     // from the same parameter set with the same position defined. This is not caused
                     // by introducing the default parameter binding.
-                    throw bindingException;
+                    throw ParameterBindingException.NewAmbiguousPositionalParameterNoName(this.InvocationInfo);
                 }
 
                 if (positionalParameterDictionary.Count > 0)
@@ -1051,11 +1010,12 @@ namespace System.Management.Automation
             }
 
             ParameterBindingException newBindingException =
-                new ParameterBindingException(
+                ParameterBindingException.NewElaboratedBindingException(
                     pbex.InnerException,
                     pbex,
                     resourceString,
-                    oldMsg, defaultParamsGetBound);
+                    oldMsg,
+                    defaultParamsGetBound);
 
             throw newBindingException;
         }
