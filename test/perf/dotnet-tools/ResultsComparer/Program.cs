@@ -1,4 +1,4 @@
-﻿// Licensed to the .NET Foundation under one or more agreements.
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
@@ -10,9 +10,12 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Xml;
+using Perfolizer.Mathematics.Common;
 using Perfolizer.Mathematics.Multimodality;
 using Perfolizer.Mathematics.SignificanceTesting;
-using Perfolizer.Mathematics.Thresholds;
+using Perfolizer.Mathematics.SignificanceTesting.MannWhitney;
+using Perfolizer.Metrology;
+using Pragmastat;
 using CommandLine;
 using DataTransferContracts;
 using MarkdownLog;
@@ -47,7 +50,7 @@ namespace ResultsComparer
 
             var notSame = GetNotSameResults(args, testThreshold, noiseThreshold).ToArray();
 
-            if (!notSame.Any())
+            if (notSame.Length == 0)
             {
                 Console.WriteLine($"No differences found between the benchmark results with threshold {testThreshold}.");
                 return;
@@ -55,37 +58,70 @@ namespace ResultsComparer
 
             PrintSummary(notSame);
 
-            PrintTable(notSame, EquivalenceTestConclusion.Slower, args);
-            PrintTable(notSame, EquivalenceTestConclusion.Faster, args);
+            PrintTable(notSame, ComparisonResult.Lesser, args);
+            PrintTable(notSame, ComparisonResult.Greater, args);
 
             ExportToCsv(notSame, args.CsvPath);
             ExportToXml(notSame, args.XmlPath);
         }
 
-        private static IEnumerable<(string id, Benchmark baseResult, Benchmark diffResult, EquivalenceTestConclusion conclusion)> GetNotSameResults(CommandLineOptions args, Threshold testThreshold, Threshold noiseThreshold)
+        private static IEnumerable<(string id, Benchmark baseResult, Benchmark diffResult, ComparisonResult conclusion)> GetNotSameResults(CommandLineOptions args, Threshold testThreshold, Threshold noiseThreshold)
         {
             foreach ((string id, Benchmark baseResult, Benchmark diffResult) in ReadResults(args)
                 .Where(result => result.baseResult.Statistics != null && result.diffResult.Statistics != null)) // failures
             {
-                var baseValues = baseResult.GetOriginalValues();
-                var diffValues = diffResult.GetOriginalValues();
+                if (!TryGetSampleValues(baseResult, out var baseValues) || !TryGetSampleValues(diffResult, out var diffValues))
+                {
+                    continue;
+                }
 
-                var userTresholdResult = StatisticalTestHelper.CalculateTost(MannWhitneyTest.Instance, baseValues, diffValues, testThreshold);
-                if (userTresholdResult.Conclusion == EquivalenceTestConclusion.Same)
+                var equivalenceTest = new SimpleEquivalenceTest(new MannWhitneyTest());
+                var baseSample = new Sample(baseValues);
+                var diffSample = new Sample(diffValues);
+
+                ComparisonResult conclusion;
+                try
+                {
+                    conclusion = equivalenceTest.Perform(baseSample, diffSample, testThreshold, SignificanceLevel.P05);
+                }
+                catch (InvalidOperationException)
+                {
+                    continue;
+                }
+
+                if (conclusion == ComparisonResult.Indistinguishable)
                     continue;
 
-                var noiseResult = StatisticalTestHelper.CalculateTost(MannWhitneyTest.Instance, baseValues, diffValues, noiseThreshold);
-                if (noiseResult.Conclusion == EquivalenceTestConclusion.Same)
+                ComparisonResult noiseConclusion;
+                try
+                {
+                    noiseConclusion = equivalenceTest.Perform(baseSample, diffSample, noiseThreshold, SignificanceLevel.P05);
+                }
+                catch (InvalidOperationException)
+                {
+                    continue;
+                }
+
+                if (noiseConclusion == ComparisonResult.Indistinguishable)
                     continue;
 
-                yield return (id, baseResult, diffResult, userTresholdResult.Conclusion);
+                yield return (id, baseResult, diffResult, conclusion);
             }
         }
 
-        private static void PrintSummary((string id, Benchmark baseResult, Benchmark diffResult, EquivalenceTestConclusion conclusion)[] notSame)
+        private static bool TryGetSampleValues(Benchmark benchmark, out double[] values)
         {
-            var better = notSame.Where(result => result.conclusion == EquivalenceTestConclusion.Faster);
-            var worse = notSame.Where(result => result.conclusion == EquivalenceTestConclusion.Slower);
+            values = benchmark.GetOriginalValues()
+                .Where(v => !double.IsNaN(v) && !double.IsInfinity(v))
+                .ToArray();
+
+            return values.Length > 0;
+        }
+
+        private static void PrintSummary((string id, Benchmark baseResult, Benchmark diffResult, ComparisonResult conclusion)[] notSame)
+        {
+            var better = notSame.Where(result => result.conclusion == ComparisonResult.Greater);
+            var worse = notSame.Where(result => result.conclusion == ComparisonResult.Lesser);
             var betterCount = better.Count();
             var worseCount = worse.Count();
 
@@ -112,7 +148,7 @@ namespace ResultsComparer
             Console.WriteLine();
         }
 
-        private static void PrintTable((string id, Benchmark baseResult, Benchmark diffResult, EquivalenceTestConclusion conclusion)[] notSame, EquivalenceTestConclusion conclusion, CommandLineOptions args)
+        private static void PrintTable((string id, Benchmark baseResult, Benchmark diffResult, ComparisonResult conclusion)[] notSame, ComparisonResult conclusion, CommandLineOptions args)
         {
             var data = notSame
                 .Where(result => result.conclusion == conclusion)
@@ -128,14 +164,14 @@ namespace ResultsComparer
                 })
                 .ToArray();
 
-            if (!data.Any())
+            if (data.Length == 0)
             {
-                Console.WriteLine($"No {conclusion} results for the provided threshold = {args.StatisticalTestThreshold} and noise filter = {args.NoiseThreshold}.");
+                Console.WriteLine($"No {(conclusion == ComparisonResult.Greater ? "Faster" : "Slower")} results for the provided threshold = {args.StatisticalTestThreshold} and noise filter = {args.NoiseThreshold}.");
                 Console.WriteLine();
                 return;
             }
 
-            var table = data.ToMarkdownTable().WithHeaders(conclusion.ToString(), conclusion == EquivalenceTestConclusion.Faster ? "base/diff" : "diff/base", "Base Median (ns)", "Diff Median (ns)", "Modality");
+            var table = data.ToMarkdownTable().WithHeaders(conclusion == ComparisonResult.Greater ? "Faster" : "Slower", conclusion == ComparisonResult.Greater ? "base/diff" : "diff/base", "Base Median (ns)", "Diff Median (ns)", "Modality");
 
             foreach (var line in table.ToMarkdown().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries))
                 Console.WriteLine($"| {line.TrimStart()}|"); // the table starts with \t and does not end with '|' and it looks bad so we fix it
@@ -148,7 +184,7 @@ namespace ResultsComparer
             var baseFiles = GetFilesToParse(args.BasePath);
             var diffFiles = GetFilesToParse(args.DiffPath);
 
-            if (!baseFiles.Any() || !diffFiles.Any())
+            if (baseFiles.Length == 0 || diffFiles.Length == 0)
                 throw new ArgumentException($"Provided paths contained no {FullBdnJsonFileExtension} files.");
 
             var baseResults = baseFiles.Select(ReadFromFile);
@@ -158,7 +194,7 @@ namespace ResultsComparer
 
             var benchmarkIdToDiffResults = diffResults
                 .SelectMany(result => result.Benchmarks)
-                .Where(benchmarkResult => !filters.Any() || filters.Any(filter => filter.IsMatch(benchmarkResult.FullName)))
+                .Where(benchmarkResult => filters.Length == 0 || filters.Any(filter => filter.IsMatch(benchmarkResult.FullName)))
                 .ToDictionary(benchmarkResult => benchmarkResult.FullName, benchmarkResult => benchmarkResult);
 
             return baseResults
@@ -168,7 +204,7 @@ namespace ResultsComparer
                 .Select(baseResult => (baseResult.Key, baseResult.Value, benchmarkIdToDiffResults[baseResult.Key]));
         }
 
-        private static void ExportToCsv((string id, Benchmark baseResult, Benchmark diffResult, EquivalenceTestConclusion conclusion)[] notSame, FileInfo csvPath)
+        private static void ExportToCsv((string id, Benchmark baseResult, Benchmark diffResult, ComparisonResult conclusion)[] notSame, FileInfo csvPath)
         {
             if (csvPath == null)
                 return;
@@ -188,7 +224,7 @@ namespace ResultsComparer
             Console.WriteLine($"CSV results exported to {csvPath.FullName}");
         }
 
-        private static void ExportToXml((string id, Benchmark baseResult, Benchmark diffResult, EquivalenceTestConclusion conclusion)[] notSame, FileInfo xmlPath)
+        private static void ExportToXml((string id, Benchmark baseResult, Benchmark diffResult, ComparisonResult conclusion)[] notSame, FileInfo xmlPath)
         {
             if (xmlPath == null)
             {
@@ -202,7 +238,7 @@ namespace ResultsComparer
             using (XmlWriter writer = XmlWriter.Create(xmlPath.Open(FileMode.OpenOrCreate, FileAccess.Write, FileShare.Write)))
             {
                 writer.WriteStartElement("performance-tests");
-                foreach (var (id, baseResult, diffResult, conclusion) in notSame.Where(x => x.conclusion == EquivalenceTestConclusion.Slower))
+                foreach (var (id, baseResult, diffResult, conclusion) in notSame.Where(x => x.conclusion == ComparisonResult.Lesser))
                 {
                     writer.WriteStartElement("test");
                     writer.WriteAttributeString("name", id);
@@ -216,7 +252,7 @@ namespace ResultsComparer
                     writer.WriteEndElement();
                 }
 
-                foreach (var (id, baseResult, diffResult, conclusion) in notSame.Where(x => x.conclusion == EquivalenceTestConclusion.Faster))
+                foreach (var (id, baseResult, diffResult, conclusion) in notSame.Where(x => x.conclusion == ComparisonResult.Greater))
                 {
                     writer.WriteStartElement("test");
                     writer.WriteAttributeString("name", id);
@@ -263,10 +299,10 @@ namespace ResultsComparer
             return null;
         }
 
-        private static double GetRatio((string id, Benchmark baseResult, Benchmark diffResult, EquivalenceTestConclusion conclusion) item) => GetRatio(item.conclusion, item.baseResult, item.diffResult);
+        private static double GetRatio((string id, Benchmark baseResult, Benchmark diffResult, ComparisonResult conclusion) item) => GetRatio(item.conclusion, item.baseResult, item.diffResult);
 
-        private static double GetRatio(EquivalenceTestConclusion conclusion, Benchmark baseResult, Benchmark diffResult)
-            => conclusion == EquivalenceTestConclusion.Faster
+        private static double GetRatio(ComparisonResult conclusion, Benchmark baseResult, Benchmark diffResult)
+            => conclusion == ComparisonResult.Greater
                 ? baseResult.Statistics.Median / diffResult.Statistics.Median
                 : diffResult.Statistics.Median / baseResult.Statistics.Median;
 
