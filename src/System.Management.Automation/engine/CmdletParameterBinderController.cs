@@ -2512,6 +2512,19 @@ namespace System.Management.Automation
         /// If false, the count of valid parameter sets will be returned but no error
         /// will occur and the default parameter set will not be used.
         /// </param>
+        /// <remarks>
+        /// <para><c>_currentParameterSetFlag</c> acts as a compact state machine:</para>
+        /// <list type="bullet">
+        /// <item><description><c>uint.MaxValue</c> means all parameter sets are still valid.</description></item>
+        /// <item><description>A single-bit value means exactly one parameter set is selected.</description></item>
+        /// <item><description>A multi-bit value means multiple parameter sets are still valid.</description></item>
+        /// </list>
+        /// <para>
+        /// <paramref name="prePipelineInput"/> allows temporary ambiguity to remain when pipeline
+        /// input can still disambiguate among valid sets. <paramref name="setDefault"/> controls
+        /// whether this method commits to the default parameter set when it is among the valid sets.
+        /// </para>
+        /// </remarks>
         /// <returns>
         /// The number of valid parameter sets.
         /// </returns>
@@ -2526,10 +2539,12 @@ namespace System.Management.Automation
 
             if (validParameterSetCount == 0 && _currentParameterSetFlag != uint.MaxValue)
             {
+                // No valid parameter sets remain — binding has contradicted all sets.
                 ThrowAmbiguousParameterSetException(_currentParameterSetFlag, BindableParameters);
             }
             else if (validParameterSetCount > 1)
             {
+                // Multiple sets still valid — try default-set resolution or defer to pipeline input.
                 uint defaultParameterSetFlag = _commandMetadata.DefaultParameterSetFlag;
                 bool hasDefaultSetDefined = defaultParameterSetFlag != 0;
 
@@ -2583,10 +2598,11 @@ namespace System.Management.Automation
             }
             else // validParameterSetCount == 1
             {
+                // Exactly one set is effectively valid — either an explicit single set or the all-set sentinel.
                 // If the valid parameter set is the "all" set, and a default set was defined,
                 // then set the current parameter set to the default set.
 
-                if (_currentParameterSetFlag == uint.MaxValue)
+                if (!HasSingleParameterSetSelected)
                 {
                     // Since this is the "all" set, default the parameter set count to the
                     // number of parameter sets that were defined for the cmdlet or 1 if
@@ -3891,6 +3907,11 @@ namespace System.Management.Automation
         private bool _useDefaultParameterBinding = true;
 
         #endregion DefaultParameterBindingStructures
+
+        private bool HasSingleParameterSetSelected =>
+            _currentParameterSetFlag != 0 &&
+            _currentParameterSetFlag != uint.MaxValue &&
+            (_currentParameterSetFlag & (_currentParameterSetFlag - 1)) == 0;
 
         private uint _parameterSetToBePrioritizedInPipelineBinding = 0;
 
