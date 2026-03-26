@@ -1774,6 +1774,131 @@ namespace System.Management.Automation
         /// consistent across parameter sets or there is no default parameter set then a
         /// ParameterBindingException is thrown with an errorId of AmbiguousParameterSet.
         /// </summary>
+        /// <remarks>
+        /// Pipeline mandatory-parameter resolution intentionally preserves viable sets for later pipeline
+        /// binding when possible instead of aggressively latching onto a single set.
+        ///
+        /// Scenario 1: Valid sets A and B share a common pipelineable mandatory parameter; B also has an
+        /// additional pipelineable mandatory parameter of a different type. Preserve A so pipeline input
+        /// that matches the common parameter type can still bind without forced coercion through B.
+        ///
+        /// Scenario 2: Same as Scenario 1 but with additional sets C and Default that have no extra
+        /// mandatory parameters. Preserve all non-conflicting sets (including Default) to avoid
+        /// premature resolution to B.
+        ///
+        /// Scenario 3: Valid sets A, B, and C each have different mandatory parameter configurations —
+        /// A has a pipelineable mandatory, B has a nonpipelineable mandatory, and C has only a
+        /// pipelineable non-mandatory. Preserve C when latching onto A would force an incompatible
+        /// binding path for the incoming pipeline object type.
+        ///
+        /// Scenario 4: Same as Scenario 3 but with a Default set that has no mandatory parameters.
+        /// Preserve C and Default so subsequent pipeline binding can choose a compatible set.
+        /// </remarks>
+        /// 
+        /// <example>
+        /// <para><strong>Scenario 1</strong> — Sets: A (common pipelineable mandatory), B (common + extra pipelineable mandatory).</para>
+        /// <code>
+        /// function Get-Cmdlet {
+        ///     [CmdletBinding()]
+        ///     param(
+        ///         [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        ///         [System.DateTime] $Date,
+        ///
+        ///         [Parameter(ParameterSetName="computer")]
+        ///         [Parameter(ParameterSetName="session")]
+        ///         $ComputerName,
+        ///
+        ///         [Parameter(ParameterSetName="session", Mandatory=$true, ValueFromPipeline=$true)]
+        ///         [System.TimeSpan] $TimeSpan
+        ///     )
+        ///     process { Write-Output $PSCmdlet.ParameterSetName }
+        /// }
+        /// # Get-Date | Get-Cmdlet → "computer"
+        /// # If mandatory resolution aggressively latches onto set "session" (B), pipeline binding fails.
+        /// # Preserving set "computer" (A) allows pipeline binding to succeed.
+        /// </code>
+        /// </example>
+        /// 
+        /// <example>
+        /// <para><strong>Scenario 2</strong> — Sets: A, B (same as Scenario 1), plus C and Default with no extra mandatory parameters.</para>
+        /// <code>
+        /// function Get-Cmdlet {
+        ///     [CmdletBinding(DefaultParameterSetName="computer")]
+        ///     param(
+        ///         [Parameter(ParameterSetName="new")]
+        ///         $NewName,
+        ///
+        ///         [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        ///         [System.DateTime] $Date,
+        ///
+        ///         [Parameter(ParameterSetName="computer")]
+        ///         [Parameter(ParameterSetName="session")]
+        ///         $ComputerName,
+        ///
+        ///         [Parameter(ParameterSetName="session", Mandatory=$true, ValueFromPipeline=$true)]
+        ///         [System.TimeSpan] $TimeSpan
+        ///     )
+        ///     process { Write-Output $PSCmdlet.ParameterSetName }
+        /// }
+        /// # Get-Date | Get-Cmdlet → "computer"
+        /// # Aggressively resolving to "session" (B) loses viable sets. Preserving A, C, and Default keeps them available.
+        /// </code>
+        /// </example>
+        /// 
+        /// <example>
+        /// <para><strong>Scenario 3</strong> — Sets: A (pipelineable mandatory), B (nonpipelineable mandatory), C (pipelineable non-mandatory only).</para>
+        /// <code>
+        /// function Get-Cmdlet {
+        ///     [CmdletBinding()]
+        ///     param(
+        ///         [Parameter(ParameterSetName="network", Mandatory=$true, ValueFromPipeline=$true)]
+        ///         [TimeSpan] $network,
+        ///
+        ///         [Parameter(ParameterSetName="computer", ValueFromPipelineByPropertyName=$true)]
+        ///         [string[]] $ComputerName,
+        ///
+        ///         [Parameter(ParameterSetName="computer", Mandatory=$true)]
+        ///         [switch] $DisableComputer,
+        ///
+        ///         [Parameter(ParameterSetName="session", ValueFromPipeline=$true)]
+        ///         [DateTime] $Date
+        ///     )
+        ///     process { Write-Output $PSCmdlet.ParameterSetName }
+        /// }
+        /// # Get-Date | Get-Cmdlet → "session"
+        /// # If mandatory resolution latches onto "network" (A), pipeline binding fails.
+        /// # Preserving set "session" (C) allows pipeline binding to succeed.
+        /// </code>
+        /// </example>
+        /// 
+        /// <example>
+        /// <para><strong>Scenario 4</strong> — Same as Scenario 3 plus a Default set with no mandatory parameters.</para>
+        /// <code>
+        /// function Get-Cmdlet {
+        ///     [CmdletBinding(DefaultParameterSetName="server")]
+        ///     param(
+        ///         [Parameter(ParameterSetName="network", Mandatory=$true, ValueFromPipeline=$true)]
+        ///         [TimeSpan] $network,
+        ///
+        ///         [Parameter(ParameterSetName="computer", ValueFromPipelineByPropertyName=$true)]
+        ///         [string[]] $ComputerName,
+        ///
+        ///         [Parameter(ParameterSetName="computer", Mandatory=$true)]
+        ///         [switch] $DisableComputer,
+        ///
+        ///         [Parameter(ParameterSetName="session")]
+        ///         [Parameter(ParameterSetName="server")]
+        ///         [string] $Param,
+        ///
+        ///         [Parameter(ValueFromPipeline=$true)]
+        ///         [DateTime] $Date
+        ///     )
+        ///     process { Write-Output $PSCmdlet.ParameterSetName }
+        /// }
+        /// # Get-Date | Get-Cmdlet → "server"
+        /// # Aggressively resolving to "network" (A) loses viable sets. Preserving C and Default keeps them available.
+        /// </code>
+        /// </example>
         /// <param name="validParameterSetCount">
         /// The number of valid parameter sets.
         /// </param>
@@ -1929,6 +2054,8 @@ namespace System.Management.Automation
                         if (_currentParameterSetFlag == defaultParameterSet)
                             Command.SetParameterSetName(CurrentParameterSetName);
                         else
+                            // Prioritize the default set during pipeline binding to preserve previous behavior
+                            // while still keeping additional viable sets available.
                             _parameterSetToBePrioritizedInPipelineBinding = defaultParameterSet;
                     }
                 }
@@ -2060,177 +2187,8 @@ namespace System.Management.Automation
 
                     if (!latchOnToDefault)
                     {
-                        // When we select a mandatory set to latch on, we should try to preserve other parameter sets that contain no mandatory parameters or contain only common mandatory parameters
-                        // as much as possible, so as to support the binding for the following scenarios:
-                        //
-                        // (1) Scenario 1:
-                        // Valid parameter sets when it comes to the mandatory checking: A, B
-                        // Mandatory parameters in A, B:
-                        // Set      Nonpipelineable-Mandatory-InSet         Pipelineable-Mandatory-InSet       Common-Nonpipelineable-Mandatory       Common-Pipelineable-Mandatory
-                        // A        N/A                                     N/A                                N/A                                    AllParam (of type DateTime)
-                        // B        N/A                                     ParamB (of type TimeSpan)          N/A                                    AllParam (of type DateTime)
-                        //
-                        // Piped-in object: Get-Date
-                        //
-                        // (2) Scenario 2:
-                        // Valid parameter sets when it comes to the mandatory checking: A, B, C, Default
-                        // Mandatory parameters in A, B, C and Default:
-                        // Set      Nonpipelineable-Mandatory-InSet         Pipelineable-Mandatory-InSet       Common-Nonpipelineable-Mandatory       Common-Pipelineable-Mandatory
-                        // A        N/A                                     N/A                                N/A                                    AllParam (of type DateTime)
-                        // B        N/A                                     ParamB (of type TimeSpan)          N/A                                    AllParam (of type DateTime)
-                        // C        N/A                                     N/A                                N/A                                    AllParam (of type DateTime)
-                        // Default  N/A                                     N/A                                N/A                                    AllParam (of type DateTime)
-                        //
-                        // Piped-in object: Get-Date
-                        //
-                        // Before the fix, the mandatory checking will resolve the parameter set to be B in both scenario 1 and 2, which will fail in the subsequent pipeline binding.
-                        // After the fix, the parameter set "A" in the scenario 1 and the set "A", "C", "Default" in the scenario 2 will be preserved, and the subsequent pipeline binding will succeed.
-                        //
-                        // (3) Scenario 3:
-                        // Valid parameter sets when it comes to the mandatory checking: A, B, C
-                        // Mandatory parameters in A, B and C:
-                        // Set      Nonpipelineable-Mandatory-InSet         Pipelineable-Mandatory-InSet       Pipelineable-Nonmandatory-InSet       Common-Nonpipelineable-Mandatory       Common-Pipelineable-Mandatory       Common-Pipelineable-Nonmandatory
-                        // A        N/A                                     ParamA (of type TimeSpan)          N/A                                   N/A                                    N/A                                 N/A
-                        // B        ParamB-1                                N/A                                ParamB-2 (of type string[])           N/A                                    N/A                                 N/A
-                        // C        N/A                                     N/A                                ParamC (of type DateTime)             N/A                                    N/A                                 N/A
-                        //
-                        // (4) Scenario 4:
-                        // Valid parameter sets when it comes to the mandatory checking: A, B, C, Default
-                        // Mandatory parameters in A, B, C and Default:
-                        // Set      Nonpipelineable-Mandatory-InSet         Pipelineable-Mandatory-InSet       Pipelineable-Nonmandatory-InSet       Common-Nonpipelineable-Mandatory       Common-Pipelineable-Mandatory       Common-Pipelineable-Nonmandatory
-                        // A        N/A                                     ParamA (of type TimeSpan)          N/A                                   N/A                                    N/A                                 AllParam (of type DateTime)
-                        // B        ParamB-1                                N/A                                ParamB-2 (of type string[])           N/A                                    N/A                                 AllParam (of type DateTime)
-                        // C        N/A                                     N/A                                N/A                                   N/A                                    N/A                                 AllParam (of type DateTime)
-                        // Default  N/A                                     N/A                                N/A                                   N/A                                    N/A                                 AllParam (of type DateTime)
-                        //
-                        // Piped-in object: Get-Date
-                        //
-                        // Before the fix, the mandatory checking will resolve the parameter set to be A in both scenario 3 and 4, which will fail in the subsequent pipeline binding.
-                        // After the fix, the parameter set "C" in the scenario 1 and the set "C" and "Default" in the scenario 2 will be preserved, and the subsequent pipeline binding will succeed.
-                        //
-                        // Examples:
-                        // (1) Scenario 1
-                        // Function Get-Cmdlet
-                        // {
-                        //       [CmdletBinding()]
-                        //       param(
-                        //          [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
-                        //          [System.DateTime]
-                        //          $Date,
-                        //          [Parameter(ParameterSetName="computer")]
-                        //          [Parameter(ParameterSetName="session")]
-                        //          $ComputerName,
-                        //          [Parameter(ParameterSetName="session", Mandatory=$true, ValueFromPipeline=$true)]
-                        //          [System.TimeSpan]
-                        //          $TimeSpan
-                        //       )
-                        //
-                        //      Process
-                        //      {
-                        //         Write-Output $PsCmdlet.ParameterSetName
-                        //      }
-                        // }
-                        //
-                        // PS:\> Get-Date | Get-Cmdlet
-                        // PS:\> computer
-                        //
-                        // (2) Scenario 2
-                        //
-                        // Function Get-Cmdlet
-                        // {
-                        //       [CmdletBinding(DefaultParameterSetName="computer")]
-                        //       param(
-                        //          [Parameter(ParameterSetName="new")]
-                        //          $NewName,
-                        //          [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
-                        //          [System.DateTime]
-                        //          $Date,
-                        //          [Parameter(ParameterSetName="computer")]
-                        //          [Parameter(ParameterSetName="session")]
-                        //          $ComputerName,
-                        //          [Parameter(ParameterSetName="session", Mandatory=$true, ValueFromPipeline=$true)]
-                        //          [System.TimeSpan]
-                        //          $TimeSpan
-                        //       )
-                        //
-                        //      Process
-                        //      {
-                        //         Write-Output $PsCmdlet.ParameterSetName
-                        //      }
-                        // }
-                        //
-                        // PS:\> Get-Date | Get-Cmdlet
-                        // PS:\> computer
-                        //
-                        // (3) Scenario 3
-                        //
-                        // Function Get-Cmdlet
-                        // {
-                        //        [CmdletBinding()]
-                        //        param(
-                        //           [Parameter(ParameterSetName="network", Mandatory=$true, ValueFromPipeline=$true)]
-                        //           [TimeSpan]
-                        //           $network,
-                        //
-                        //           [Parameter(ParameterSetName="computer", ValueFromPipelineByPropertyName=$true)]
-                        //           [string[]]
-                        //           $ComputerName,
-                        //
-                        //           [Parameter(ParameterSetName="computer", Mandatory=$true)]
-                        //           [switch]
-                        //           $DisableComputer,
-                        //
-                        //           [Parameter(ParameterSetName="session", ValueFromPipeline=$true)]
-                        //           [DateTime]
-                        //           $Date
-                        //        )
-                        //
-                        //        Process
-                        //        {
-                        //           Write-Output $PsCmdlet.ParameterSetName
-                        //        }
-                        // }
-                        //
-                        // PS:\> Get-Date | Get-Cmdlet
-                        // PS:\> session
-                        //
-                        // (4) Scenario 4
-                        //
-                        // Function Get-Cmdlet
-                        // {
-                        //       [CmdletBinding(DefaultParameterSetName="server")]
-                        //       param(
-                        //          [Parameter(ParameterSetName="network", Mandatory=$true, ValueFromPipeline=$true)]
-                        //          [TimeSpan]
-                        //          $network,
-                        //
-                        //          [Parameter(ParameterSetName="computer", ValueFromPipelineByPropertyName=$true)]
-                        //          [string[]]
-                        //          $ComputerName,
-                        //
-                        //          [Parameter(ParameterSetName="computer", Mandatory=$true)]
-                        //          [switch]
-                        //          $DisableComputer,
-                        //
-                        //          [Parameter(ParameterSetName="session")]
-                        //          [Parameter(ParameterSetName="server")]
-                        //          [string]
-                        //          $Param,
-                        //
-                        //          [Parameter(ValueFromPipeline=$true)]
-                        //          [DateTime]
-                        //          $Date
-                        //       )
-
-                        //      Process
-                        //      {
-                        //         Write-Output $PsCmdlet.ParameterSetName
-                        //      }
-                        // }
-                        //
-                        // PS:\> Get-Date | Get-Cmdlet
-                        // PS:\> server
-                        //
+                        // Scenario 1-4: preserve viable parameter sets for subsequent pipeline binding;
+                        // see this method's <remarks> for detailed scenario descriptions.
 
                         uint setThatTakesPipelineInputByValue = 0;
                         uint setThatTakesPipelineInputByPropertyName = 0;
