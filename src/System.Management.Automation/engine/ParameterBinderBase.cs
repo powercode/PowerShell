@@ -365,9 +365,7 @@ namespace System.Management.Automation
                 {
                     try
                     {
-                        ArgumentTypeConverterAttribute argumentTypeConverter = dma as ArgumentTypeConverterAttribute;
-
-                        if (argumentTypeConverter != null)
+                        if (dma is ArgumentTypeConverterAttribute argumentTypeConverter)
                         {
                             if (coerceTypeIfNeeded)
                             {
@@ -682,10 +680,13 @@ namespace System.Management.Automation
             {
                 // Since the parameter is of type string, verify that either the argument
                 // is not null and not empty or that the parameter can accept null or empty.
-                string stringParamValue = parameterValue as string;
-                Diagnostics.Assert(
-                    stringParamValue != null,
-                    "Type coercion should have already converted the argument value to a string");
+                if (parameterValue is not string stringParamValue)
+                {
+                    Diagnostics.Assert(
+                        false,
+                        "Type coercion should have already converted the argument value to a string");
+                    return;
+                }
 
                 if (stringParamValue.Length == 0 && !parameterMetadata.AllowsEmptyStringArgument)
                 {
@@ -808,8 +809,7 @@ namespace System.Management.Automation
                 return true;
             }
 
-            var psobj = parameterValue as PSObject;
-            if (psobj != null && !psobj.ImmediateBaseObjectIsEmpty)
+            if (parameterValue is PSObject psobj && !psobj.ImmediateBaseObjectIsEmpty)
             {
                 // See if the base object is of the same type or
                 // as subclass of the parameter
@@ -1471,13 +1471,10 @@ namespace System.Management.Automation
                 return result;
             }
 
-            if (!coercionRequired)
-            {
-                result = createdCollection.collection;
+            result = createdCollection.collection;
 
-                // Set the converted result object untrusted if necessary
-                ExecutionContext.PropagateInputSource(originalValue, result, Context.LanguageMode);
-            }
+            // Set the converted result object untrusted if necessary
+            ExecutionContext.PropagateInputSource(originalValue, result, Context.LanguageMode);
 
             return result;
         }
@@ -1599,45 +1596,18 @@ namespace System.Management.Automation
                         }
                     }
                 }
-                catch (ArgumentException argException)
+                catch (Exception e) when (
+                    e is ArgumentException
+                    or NotSupportedException
+                    or TargetInvocationException
+                    or MethodAccessException
+                    or MemberAccessException
+                    or System.Runtime.InteropServices.InvalidComObjectException
+                    or System.Runtime.InteropServices.COMException
+                    or TypeLoadException)
                 {
                     errorOccurred = true;
-                    error = argException;
-                }
-                catch (NotSupportedException notSupported)
-                {
-                    errorOccurred = true;
-                    error = notSupported;
-                }
-                catch (TargetInvocationException targetInvocationException)
-                {
-                    errorOccurred = true;
-                    error = targetInvocationException;
-                }
-                catch (MethodAccessException methodAccessException)
-                {
-                    errorOccurred = true;
-                    error = methodAccessException;
-                }
-                catch (MemberAccessException memberAccessException)
-                {
-                    errorOccurred = true;
-                    error = memberAccessException;
-                }
-                catch (System.Runtime.InteropServices.InvalidComObjectException invalidComObject)
-                {
-                    errorOccurred = true;
-                    error = invalidComObject;
-                }
-                catch (System.Runtime.InteropServices.COMException comException)
-                {
-                    errorOccurred = true;
-                    error = comException;
-                }
-                catch (TypeLoadException typeLoadException)
-                {
-                    errorOccurred = true;
-                    error = typeLoadException;
+                    error = e;
                 }
 
                 if (errorOccurred)
@@ -1878,16 +1848,17 @@ namespace System.Management.Automation
         internal static IList GetIList(object value)
         {
             var baseObj = PSObject.Base(value);
-            var result = baseObj as IList;
-            if (result != null)
+            if (baseObj is IList result)
             {
                 // Reference comparison to determine if 'value' is a PSObject
                 s_tracer.WriteLine(baseObj == value
                                      ? "argument is IList"
                                      : "argument is PSObject with BaseObject as IList");
+
+                return result;
             }
 
-            return result;
+            return null;
         }
 
         /// <summary>

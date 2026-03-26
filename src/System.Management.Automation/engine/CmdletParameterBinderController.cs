@@ -427,8 +427,7 @@ namespace System.Management.Automation
 
                 try
                 {
-                    ScriptBlock scriptBlockArg = argumentValue as ScriptBlock;
-                    if (scriptBlockArg != null)
+                    if (argumentValue is ScriptBlock scriptBlockArg)
                     {
                         // Get the current binding state, and pass it to the ScriptBlock as the argument
                         // The 'arg' includes HashSet properties 'BoundParameters', 'BoundPositionalParameters',
@@ -1058,55 +1057,22 @@ namespace System.Management.Automation
         /// </returns>
         private static bool IsParameterScriptBlockBindable(MergedCompiledCommandParameter parameter)
         {
-            bool result = false;
+            bool result = IsScriptBlockCompatible(parameter.Parameter.Type);
 
-            Type parameterType = parameter.Parameter.Type;
-
-            do // false loop
+            if (!result)
             {
-                if (parameterType == typeof(object))
+                ParameterCollectionTypeInformation collectionTypeInfo = parameter.Parameter.CollectionTypeInformation;
+                if (collectionTypeInfo.ParameterCollectionType != ParameterCollectionType.NotCollection)
                 {
-                    result = true;
-                    break;
+                    result = IsScriptBlockCompatible(collectionTypeInfo.ElementType);
                 }
-
-                if (parameterType == typeof(ScriptBlock))
-                {
-                    result = true;
-                    break;
-                }
-
-                if (parameterType.IsSubclassOf(typeof(ScriptBlock)))
-                {
-                    result = true;
-                    break;
-                }
-
-                ParameterCollectionTypeInformation parameterCollectionTypeInfo = parameter.Parameter.CollectionTypeInformation;
-                if (parameterCollectionTypeInfo.ParameterCollectionType != ParameterCollectionType.NotCollection)
-                {
-                    if (parameterCollectionTypeInfo.ElementType == typeof(object))
-                    {
-                        result = true;
-                        break;
-                    }
-
-                    if (parameterCollectionTypeInfo.ElementType == typeof(ScriptBlock))
-                    {
-                        result = true;
-                        break;
-                    }
-
-                    if (parameterCollectionTypeInfo.ElementType.IsSubclassOf(typeof(ScriptBlock)))
-                    {
-                        result = true;
-                        break;
-                    }
-                }
-            } while (false);
+            }
 
             s_tracer.WriteLine("IsParameterScriptBlockBindable: result = {0}", result);
             return result;
+
+            static bool IsScriptBlockCompatible(Type type) =>
+                type == typeof(object) || typeof(ScriptBlock).IsAssignableFrom(type);
         }
 
         /// <summary>
@@ -1516,9 +1482,7 @@ namespace System.Management.Automation
                 {
                     s_tracer.WriteLine("The Cmdlet supports the dynamic parameter interface");
 
-                    IDynamicParameters dynamicParameterCmdlet = this.Command as IDynamicParameters;
-
-                    if (dynamicParameterCmdlet != null)
+                    if (this.Command is IDynamicParameters dynamicParameterCmdlet)
                     {
                         if (_dynamicParameterBinder == null)
                         {
@@ -1559,8 +1523,7 @@ namespace System.Management.Automation
 
                                 InternalParameterMetadata dynamicParameterMetadata;
 
-                                RuntimeDefinedParameterDictionary runtimeParamDictionary = dynamicParamBindableObject as RuntimeDefinedParameterDictionary;
-                                if (runtimeParamDictionary != null)
+                                if (dynamicParamBindableObject is RuntimeDefinedParameterDictionary runtimeParamDictionary)
                                 {
                                     // Generate the type metadata for the runtime-defined parameters
                                     dynamicParameterMetadata =
@@ -4119,8 +4082,7 @@ namespace System.Management.Automation
 
             foreach (DictionaryEntry entry in dictionary)
             {
-                var entryKey = entry.Key as string;
-                if (entryKey != null)
+                if (entry.Key is string entryKey)
                 {
                     string key = entryKey.Trim();
                     string cmdletName = null;
