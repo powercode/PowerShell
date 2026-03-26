@@ -1034,49 +1034,7 @@ namespace System.Management.Automation
         /// </returns>
         private bool RestoreParameter(CommandParameterInternal argumentToBind, MergedCompiledCommandParameter parameter)
         {
-            switch (parameter.BinderAssociation)
-            {
-                case ParameterBinderAssociation.DeclaredFormalParameters:
-                    DefaultParameterBinder.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
-                    break;
-
-                case ParameterBinderAssociation.CommonParameters:
-                    CommonParametersBinder.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
-                    break;
-
-                case ParameterBinderAssociation.ShouldProcessParameters:
-                    Diagnostics.Assert(
-                        _commandMetadata.SupportsShouldProcess,
-                        "The metadata for the ShouldProcessParameters should only be available if the command supports ShouldProcess");
-
-                    ShouldProcessParametersBinder.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
-                    break;
-
-                case ParameterBinderAssociation.PagingParameters:
-                    Diagnostics.Assert(
-                        _commandMetadata.SupportsPaging,
-                        "The metadata for the PagingParameters should only be available if the command supports paging");
-
-                    PagingParametersBinder.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
-                    break;
-
-                case ParameterBinderAssociation.TransactionParameters:
-                    Diagnostics.Assert(
-                        _commandMetadata.SupportsTransactions,
-                        "The metadata for the TransactionParameters should only be available if the command supports Transactions");
-
-                    TransactionParametersBinder.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
-                    break;
-
-                case ParameterBinderAssociation.DynamicParameters:
-                    Diagnostics.Assert(
-                        _commandMetadata.ImplementsDynamicParameters,
-                        "The metadata for the dynamic parameters should only be available if the command supports IDynamicParameters");
-
-                    _dynamicParameterBinder?.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
-
-                    break;
-            }
+            GetBinderForParameter(parameter)?.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
 
             return true;
         }
@@ -3775,6 +3733,29 @@ namespace System.Management.Automation
         }
 
         /// <summary>
+        /// Returns the binder instance responsible for the given parameter.
+        /// </summary>
+        /// <param name="parameter">
+        /// The parameter metadata.
+        /// </param>
+        /// <returns>
+        /// The binder that should bind this parameter, or null if no binder applies.
+        /// </returns>
+        private ParameterBinderBase GetBinderForParameter(MergedCompiledCommandParameter parameter)
+        {
+            return parameter.BinderAssociation switch
+            {
+                ParameterBinderAssociation.DeclaredFormalParameters => DefaultParameterBinder,
+                ParameterBinderAssociation.CommonParameters => CommonParametersBinder,
+                ParameterBinderAssociation.ShouldProcessParameters => ShouldProcessParametersBinder,
+                ParameterBinderAssociation.PagingParameters => PagingParametersBinder,
+                ParameterBinderAssociation.TransactionParameters => TransactionParametersBinder,
+                ParameterBinderAssociation.DynamicParameters => _dynamicParameterBinder,
+                _ => null,
+            };
+        }
+
+        /// <summary>
         /// Determines the number of valid parameter sets based on the valid parameter
         /// set flags.
         /// </summary>
@@ -3835,28 +3816,7 @@ namespace System.Management.Automation
 
             try
             {
-                switch (matchingParameter.BinderAssociation)
-                {
-                    case ParameterBinderAssociation.DeclaredFormalParameters:
-                        result = DefaultParameterBinder.GetDefaultParameterValue(name);
-                        break;
-
-                    case ParameterBinderAssociation.CommonParameters:
-                        result = CommonParametersBinder.GetDefaultParameterValue(name);
-                        break;
-
-                    case ParameterBinderAssociation.ShouldProcessParameters:
-                        result = ShouldProcessParametersBinder.GetDefaultParameterValue(name);
-                        break;
-
-                    case ParameterBinderAssociation.DynamicParameters:
-                        if (_dynamicParameterBinder != null)
-                        {
-                            result = _dynamicParameterBinder.GetDefaultParameterValue(name);
-                        }
-
-                        break;
-                }
+                result = GetBinderForParameter(matchingParameter)?.GetDefaultParameterValue(name);
             }
             catch (GetValueException getValueException)
             {
