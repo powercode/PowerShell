@@ -693,6 +693,58 @@ namespace System.Management.Automation
                 psTypeName);
         }
 
+        /// <summary>
+        /// Throws a <see cref="ParameterBindingException"/> or
+        /// <see cref="ParameterBindingArgumentTransformationException"/> for a mismatched PSTypeName.
+        /// When <paramref name="retryOtherBindingAfterFailure"/> is <c>false</c>, a
+        /// <see cref="ParameterBindingArgumentTransformationException"/> is thrown; otherwise a
+        /// <see cref="ParameterBindingException"/> is thrown.
+        /// </summary>
+        [DoesNotReturn]
+        internal static void ThrowMismatchedPSTypeName(
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string commandName,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified,
+            string psTypeName,
+            bool retryOtherBindingAfterFailure)
+        {
+            PSInvalidCastException innerException = new PSInvalidCastException(
+                nameof(ErrorCategory.InvalidArgument),
+                null,
+                ParameterBinderStrings.MismatchedPSTypeName,
+                commandName,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                0,
+                0,
+                psTypeName);
+
+            if (!retryOtherBindingAfterFailure)
+            {
+                throw ParameterBindingArgumentTransformationException.NewMismatchedPSTypeName(
+                    innerException,
+                    invocationInfo,
+                    errorPosition,
+                    parameterName,
+                    parameterType,
+                    typeSpecified,
+                    psTypeName);
+            }
+
+            throw NewMismatchedPSTypeName(
+                innerException,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                psTypeName);
+        }
+
         internal static ParameterBindingException NewParameterNotInParameterSet(
             InvocationInfo invocationInfo,
             string parameterName,
