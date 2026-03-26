@@ -1523,6 +1523,65 @@ namespace System.Management.Automation
                     numberOfElements);
             }
 
+            var createdCollection = CreateTargetCollection(
+                argument,
+                parameterName,
+                collectionTypeInformation,
+                toType,
+                currentValue,
+                numberOfElements,
+                collectionElementType);
+
+            if (createdCollection.collection is null)
+            {
+                return result;
+            }
+
+            collectionElementType = createdCollection.elementType;
+
+            PopulateCollection(
+                argument,
+                parameterName,
+                collectionTypeInformation,
+                toType,
+                currentValue,
+                currentValueAsIList,
+                createdCollection.collection,
+                createdCollection.asIList,
+                createdCollection.addMethod,
+                collectionElementType,
+                coerceElementTypeIfNeeded,
+                createdCollection.isSystemDotArray,
+                ref coercionRequired);
+
+            if (coercionRequired)
+            {
+                return result;
+            }
+
+            if (!coercionRequired)
+            {
+                result = createdCollection.collection;
+
+                // Set the converted result object untrusted if necessary
+                ExecutionContext.PropagateInputSource(originalValue, result, Context.LanguageMode);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Creates a collection instance for the destination parameter type.
+        /// </summary>
+        private (object collection, IList asIList, MethodInfo addMethod, bool isSystemDotArray, Type elementType) CreateTargetCollection(
+            CommandParameterInternal argument,
+            string parameterName,
+            ParameterCollectionTypeInformation collectionTypeInformation,
+            Type toType,
+            object currentValue,
+            int numberOfElements,
+            Type collectionElementType)
+        {
             object resultCollection = null;
             IList resultAsIList = null;
             MethodInfo addMethod = null;
@@ -1699,16 +1758,35 @@ namespace System.Management.Automation
                 Diagnostics.Assert(
                     false,
                     "This method should not be called for a parameter that is not a collection");
-                return result;
             }
 
+            return (resultCollection, resultAsIList, addMethod, isSystemDotArray, collectionElementType);
+        }
+
+        /// <summary>
+        /// Populates the target collection with source values, coercing elements when needed.
+        /// </summary>
+        private void PopulateCollection(
+            CommandParameterInternal argument,
+            string parameterName,
+            ParameterCollectionTypeInformation collectionTypeInformation,
+            Type toType,
+            object currentValue,
+            IList currentValueAsIList,
+            object resultCollection,
+            IList resultAsIList,
+            MethodInfo addMethod,
+            Type collectionElementType,
+            bool coerceElementTypeIfNeeded,
+            bool isSystemDotArray,
+            ref bool coercionRequired)
+        {
             // NTRAID#Windows OS Bugs-966440-2004/05/05-JeffJon
             // This coercion can only go to a collection type.  It cannot take a
             // collection type and coerce it into a scalar type.
 
             // Now that the new collection instance has been created, coerce each element type
-            // of the current value to the element type of the property value and add it
-
+            // of the current value to the element type of the property value and add it.
             if (currentValueAsIList != null)
             {
                 // Since arrays don't support the Add method, we must use indexing
@@ -1736,11 +1814,11 @@ namespace System.Management.Automation
 
                         currentValueElement =
                             CoerceTypeAsNeeded(
-                                    argument,
-                                    parameterName,
-                                    collectionElementType,
-                                    null,
-                                    valueElement);
+                                argument,
+                                parameterName,
+                                collectionElementType,
+                                null,
+                                valueElement);
                     }
                     else if (collectionElementType != null && currentValueElement != null)
                     {
@@ -1756,7 +1834,7 @@ namespace System.Management.Automation
                                 collectionElementType);
 
                             coercionRequired = true;
-                            return result;
+                            return;
                         }
                     }
 
@@ -1777,71 +1855,61 @@ namespace System.Management.Automation
                         arrayIndex++;
                     }
                 }
-            }
-            else // (currentValueAsIList == null)
-            {
-                bindingTracer.WriteLine(
-                    "Argument type {0} is not IList, treating this as scalar",
-                    currentValue.GetType().Name);
 
-                if (collectionElementType != null)
+                return;
+            }
+
+            bindingTracer.WriteLine(
+                "Argument type {0} is not IList, treating this as scalar",
+                currentValue.GetType().Name);
+
+            if (collectionElementType != null)
+            {
+                if (coerceElementTypeIfNeeded)
                 {
-                    if (coerceElementTypeIfNeeded)
+                    bindingTracer.WriteLine(
+                        "Coercing scalar arg value to type {0}",
+                        collectionElementType);
+
+                    // Coerce the scalar type into the collection
+
+                    currentValue =
+                        CoerceTypeAsNeeded(
+                            argument,
+                            parameterName,
+                            collectionElementType,
+                            null,
+                            currentValue);
+                }
+                else
+                {
+                    Type currentValueElementType = currentValue.GetType();
+                    Type desiredElementType = collectionElementType;
+
+                    if (currentValueElementType != desiredElementType &&
+                        !currentValueElementType.IsSubclassOf(desiredElementType))
                     {
                         bindingTracer.WriteLine(
-                            "Coercing scalar arg value to type {0}",
+                            "COERCION REQUIRED: Did not coerce scalar arg value to type {1}",
                             collectionElementType);
 
-                        // Coerce the scalar type into the collection
-
-                        currentValue =
-                            CoerceTypeAsNeeded(
-                                argument,
-                                parameterName,
-                                collectionElementType,
-                                null,
-                                currentValue);
-                    }
-                    else
-                    {
-                        Type currentValueElementType = currentValue.GetType();
-                        Type desiredElementType = collectionElementType;
-
-                        if (currentValueElementType != desiredElementType &&
-                            !currentValueElementType.IsSubclassOf(desiredElementType))
-                        {
-                            bindingTracer.WriteLine(
-                                "COERCION REQUIRED: Did not coerce scalar arg value to type {1}",
-                                collectionElementType);
-
-                            coercionRequired = true;
-                            return result;
-                        }
+                        coercionRequired = true;
+                        return;
                     }
                 }
-
-                AddElementToCollection(
-                    argument,
-                    parameterName,
-                    collectionTypeInformation,
-                    toType,
-                    resultCollection,
-                    resultAsIList,
-                    addMethod,
-                    isSystemDotArray,
-                    currentValue,
-                    0);
             }
 
-            if (!coercionRequired)
-            {
-                result = resultCollection;
-
-                // Set the converted result object untrusted if necessary
-                ExecutionContext.PropagateInputSource(originalValue, result, Context.LanguageMode);
-            }
-
-            return result;
+            AddElementToCollection(
+                argument,
+                parameterName,
+                collectionTypeInformation,
+                toType,
+                resultCollection,
+                resultAsIList,
+                addMethod,
+                isSystemDotArray,
+                currentValue,
+                0);
         }
 
         private void AddElementToCollection(
