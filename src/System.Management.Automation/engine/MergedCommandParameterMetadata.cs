@@ -518,92 +518,46 @@ namespace System.Management.Automation
                 name = name.Substring(1);
             }
 
+            // Fast path for exact matches avoids prefix scans in the common case.
+            if (tryExactMatching)
+            {
+                if (_bindableParameters.TryGetValue(name, out MergedCompiledCommandParameter exactMatch))
+                {
+                    return exactMatch;
+                }
+
+                if (_aliasedParameters.TryGetValue(name, out exactMatch))
+                {
+                    return exactMatch;
+                }
+            }
+
             // First try to match the bindable parameters
 
-            foreach (string parameterName in _bindableParameters.Keys)
+            foreach (KeyValuePair<string, MergedCompiledCommandParameter> entry in _bindableParameters)
             {
-                if (CultureInfo.InvariantCulture.CompareInfo.IsPrefix(parameterName, name, CompareOptions.IgnoreCase))
+                if (CultureInfo.InvariantCulture.CompareInfo.IsPrefix(entry.Key, name, CompareOptions.IgnoreCase))
                 {
-                    // If it is an exact match then only return the exact match
-                    // as the result
-
-                    if (tryExactMatching && string.Equals(parameterName, name, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return _bindableParameters[parameterName];
-                    }
-                    else
-                    {
-                        matchingParameters.Add(_bindableParameters[parameterName]);
-                    }
+                    matchingParameters.Add(entry.Value);
                 }
             }
 
             // Now check the aliases
 
-            foreach (string parameterName in _aliasedParameters.Keys)
+            foreach (KeyValuePair<string, MergedCompiledCommandParameter> entry in _aliasedParameters)
             {
-                if (CultureInfo.InvariantCulture.CompareInfo.IsPrefix(parameterName, name, CompareOptions.IgnoreCase))
+                if (CultureInfo.InvariantCulture.CompareInfo.IsPrefix(entry.Key, name, CompareOptions.IgnoreCase))
                 {
-                    // If it is an exact match then only return the exact match
-                    // as the result
-
-                    if (tryExactMatching && string.Equals(parameterName, name, StringComparison.OrdinalIgnoreCase))
+                    if (!matchingParameters.Contains(entry.Value))
                     {
-                        return _aliasedParameters[parameterName];
-                    }
-                    else
-                    {
-                        if (!matchingParameters.Contains(_aliasedParameters[parameterName]))
-                        {
-                            matchingParameters.Add(_aliasedParameters[parameterName]);
-                        }
+                        matchingParameters.Add(entry.Value);
                     }
                 }
             }
 
             if (matchingParameters.Count > 1)
             {
-                // Prefer parameters in the cmdlet over common parameters
-                Collection<MergedCompiledCommandParameter> filteredParameters =
-                    new Collection<MergedCompiledCommandParameter>();
-
-                foreach (MergedCompiledCommandParameter matchingParameter in matchingParameters)
-                {
-                    if ((matchingParameter.BinderAssociation == ParameterBinderAssociation.DeclaredFormalParameters) ||
-                        (matchingParameter.BinderAssociation == ParameterBinderAssociation.DynamicParameters))
-                    {
-                        filteredParameters.Add(matchingParameter);
-                    }
-                }
-
-                if (tryExactMatching && filteredParameters.Count == 1)
-                {
-                    matchingParameters = filteredParameters;
-                }
-                else
-                {
-                    StringBuilder possibleMatches = new StringBuilder();
-
-                    foreach (MergedCompiledCommandParameter matchingParameter in matchingParameters)
-                    {
-                        possibleMatches.Append(" -");
-                        possibleMatches.Append(matchingParameter.Parameter.Name);
-                    }
-
-                    ParameterBindingException exception =
-                        new ParameterBindingException(
-                            ErrorCategory.InvalidArgument,
-                            invocationInfoFactory(),
-                            null,
-                            name,
-                            null,
-                            null,
-                            ParameterBinderStrings.AmbiguousParameter,
-                            "AmbiguousParameter",
-                            possibleMatches);
-
-                    throw exception;
-                }
+                return DisambiguateMultipleMatches(matchingParameters, name, tryExactMatching, invocationInfoFactory);
             }
             else if (matchingParameters.Count == 0)
             {
@@ -631,6 +585,56 @@ namespace System.Management.Automation
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Resolves ambiguity when multiple parameters match a prefix.
+        /// </summary>
+        private static MergedCompiledCommandParameter DisambiguateMultipleMatches(
+            Collection<MergedCompiledCommandParameter> matchingParameters,
+            string name,
+            bool tryExactMatching,
+            Func<InvocationInfo> invocationInfoFactory)
+        {
+            // Prefer parameters in the cmdlet over common parameters.
+            Collection<MergedCompiledCommandParameter> filteredParameters =
+                new Collection<MergedCompiledCommandParameter>();
+
+            foreach (MergedCompiledCommandParameter matchingParameter in matchingParameters)
+            {
+                if ((matchingParameter.BinderAssociation == ParameterBinderAssociation.DeclaredFormalParameters) ||
+                    (matchingParameter.BinderAssociation == ParameterBinderAssociation.DynamicParameters))
+                {
+                    filteredParameters.Add(matchingParameter);
+                }
+            }
+
+            if (tryExactMatching && filteredParameters.Count == 1)
+            {
+                return filteredParameters[0];
+            }
+
+            StringBuilder possibleMatches = new StringBuilder();
+
+            foreach (MergedCompiledCommandParameter matchingParameter in matchingParameters)
+            {
+                possibleMatches.Append(" -");
+                possibleMatches.Append(matchingParameter.Parameter.Name);
+            }
+
+            ParameterBindingException exception =
+                new ParameterBindingException(
+                    ErrorCategory.InvalidArgument,
+                    invocationInfoFactory(),
+                    null,
+                    name,
+                    null,
+                    null,
+                    ParameterBinderStrings.AmbiguousParameter,
+                    "AmbiguousParameter",
+                    possibleMatches);
+
+            throw exception;
         }
 
         /// <summary>
