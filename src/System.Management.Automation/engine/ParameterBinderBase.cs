@@ -246,43 +246,15 @@ namespace System.Management.Automation
 
             if (!psTypeNamesOfArgumentValue.Contains(psTypeNameRequestedByParameter, StringComparer.OrdinalIgnoreCase))
             {
-                // win8: 228176..The callers know when to ignore and when not to ignore invalid cast exceptions.
-                PSInvalidCastException e = new PSInvalidCastException(nameof(ErrorCategory.InvalidArgument),
-                        null,
-                        ParameterBinderStrings.MismatchedPSTypeName,
-                        (_invocationInfo != null) && (_invocationInfo.MyCommand != null) ? _invocationInfo.MyCommand.Name : string.Empty,
-                        parameterMetadata.Name,
-                        parameterMetadata.Type,
-                        parameterValue.GetType(),
-                        0,
-                        0,
-                        psTypeNameRequestedByParameter);
-
-                ParameterBindingException parameterBindingException;
-                if (!retryOtherBindingAfterFailure)
-                {
-                    parameterBindingException = ParameterBindingArgumentTransformationException.NewMismatchedPSTypeName(
-                        e,
-                        this.InvocationInfo,
-                        GetErrorExtent(parameter),
-                        parameterMetadata.Name,
-                        parameterMetadata.Type,
-                        parameterValue.GetType(),
-                        psTypeNameRequestedByParameter);
-                }
-                else
-                {
-                    parameterBindingException = ParameterBindingException.NewMismatchedPSTypeName(
-                        e,
-                        this.InvocationInfo,
-                        GetErrorExtent(parameter),
-                        parameterMetadata.Name,
-                        parameterMetadata.Type,
-                        parameterValue.GetType(),
-                        psTypeNameRequestedByParameter);
-                }
-
-                throw parameterBindingException;
+                ParameterBindingException.ThrowMismatchedPSTypeName(
+                    this.InvocationInfo,
+                    GetErrorExtent(parameter),
+                    (_invocationInfo != null) && (_invocationInfo.MyCommand != null) ? _invocationInfo.MyCommand.Name : string.Empty,
+                    parameterMetadata.Name,
+                    parameterMetadata.Type,
+                    parameterValue.GetType(),
+                    psTypeNameRequestedByParameter,
+                    retryOtherBindingAfterFailure);
             }
         }
 
