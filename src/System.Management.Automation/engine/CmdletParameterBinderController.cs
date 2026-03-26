@@ -12,6 +12,7 @@ using System.Management.Automation.Internal;
 using System.Management.Automation.Language;
 using System.Management.Automation.Runspaces;
 using System.Numerics;
+using System.Runtime.ExceptionServices;
 using System.Text;
 
 namespace System.Management.Automation
@@ -186,12 +187,7 @@ namespace System.Management.Automation
                 }
                 catch (ParameterBindingException pbex)
                 {
-                    if (!DefaultParameterBindingInUse)
-                    {
-                        throw;
-                    }
-
-                    ThrowElaboratedBindingException(pbex);
+                    ThrowOrElaborateBindingException(pbex);
                 }
             }
 
@@ -940,14 +936,7 @@ namespace System.Management.Automation
                                         parameter.ArgumentValue.GetType(),
                                         e.Message);
 
-                                if (!DefaultParameterBindingInUse)
-                                {
-                                    throw bindingException;
-                                }
-                                else
-                                {
-                                    ThrowElaboratedBindingException(bindingException);
-                                }
+                                ThrowOrElaborateBindingException(bindingException);
                             }
                         }
 
@@ -959,14 +948,7 @@ namespace System.Management.Automation
                     }
                 }
 
-                if (!DefaultParameterBindingInUse)
-                {
-                    throw bindingException;
-                }
-                else
-                {
-                    ThrowElaboratedBindingException(bindingException);
-                }
+                ThrowOrElaborateBindingException(bindingException);
             }
         }
 
@@ -1048,14 +1030,7 @@ namespace System.Management.Automation
                         parameterSetName);
 
                 // Might be caused by default parameter binding
-                if (!DefaultParameterBindingInUse)
-                {
-                    throw bindingException;
-                }
-                else
-                {
-                    ThrowElaboratedBindingException(bindingException);
-                }
+                ThrowOrElaborateBindingException(bindingException);
             }
 
             try
@@ -1065,12 +1040,7 @@ namespace System.Management.Automation
             }
             catch (ParameterBindingException pbex)
             {
-                if (!DefaultParameterBindingInUse)
-                {
-                    throw;
-                }
-
-                ThrowElaboratedBindingException(pbex);
+                ThrowOrElaborateBindingException(pbex);
             }
         }
 
@@ -1453,14 +1423,7 @@ namespace System.Management.Automation
                                 ParameterBindingException.NewAmbiguousParameterSet(this.Command.MyInvocation);
 
                             // Might be caused by the default parameter binding
-                            if (!DefaultParameterBindingInUse)
-                            {
-                                throw bindingException;
-                            }
-                            else
-                            {
-                                ThrowElaboratedBindingException(bindingException);
-                            }
+                            ThrowOrElaborateBindingException(bindingException);
                         }
 
                         varargsParameter = parameter;
@@ -1519,14 +1482,7 @@ namespace System.Management.Automation
                         }
                         catch (ParameterBindingException pbex)
                         {
-                            if (!DefaultParameterBindingInUse)
-                            {
-                                throw;
-                            }
-                            else
-                            {
-                                ThrowElaboratedBindingException(pbex);
-                            }
+                            ThrowOrElaborateBindingException(pbex);
                         }
 
                         UnboundArguments.Clear();
@@ -2657,14 +2613,7 @@ namespace System.Management.Automation
                 currentParameterSet <<= 1;
             }
 
-            if (!DefaultParameterBindingInUse)
-            {
-                throw bindingException;
-            }
-            else
-            {
-                ThrowElaboratedBindingException(bindingException);
-            }
+            ThrowOrElaborateBindingException(bindingException);
         }
 
         /// <summary>
@@ -3388,8 +3337,6 @@ namespace System.Management.Automation
             MergedCompiledCommandParameter parameter,
             ParameterBindingFlags flags)
         {
-            bool bindResult = false;
-
             // Attempt binding the value from the pipeline
             // without type coercion
 
@@ -3399,57 +3346,7 @@ namespace System.Management.Automation
                     "Parameter [{0}] PIPELINE INPUT ValueFromPipeline NO COERCION",
                 parameter.Parameter.Name);
 
-            ParameterBindingException parameterBindingException = null;
-            try
-            {
-                bindResult = BindPipelineParameter(inputToOperateOn, parameter, flags);
-            }
-            catch (ParameterBindingArgumentTransformationException e)
-            {
-                PSInvalidCastException invalidCast;
-                if (e.InnerException is ArgumentTransformationMetadataException)
-                {
-                    invalidCast = e.InnerException.InnerException as PSInvalidCastException;
-                }
-                else
-                {
-                    invalidCast = e.InnerException as PSInvalidCastException;
-                }
-
-                if (invalidCast == null)
-                {
-                    parameterBindingException = e;
-                }
-                // Just ignore and continue;
-                bindResult = false;
-            }
-            catch (ParameterBindingValidationException e)
-            {
-                parameterBindingException = e;
-            }
-            catch (ParameterBindingParameterDefaultValueException e)
-            {
-                parameterBindingException = e;
-            }
-            catch (ParameterBindingException)
-            {
-                // Just ignore and continue;
-                bindResult = false;
-            }
-
-            if (parameterBindingException != null)
-            {
-                if (!DefaultParameterBindingInUse)
-                {
-                    throw parameterBindingException;
-                }
-                else
-                {
-                    ThrowElaboratedBindingException(parameterBindingException);
-                }
-            }
-
-            return bindResult;
+            return BindPipelineParameterWithErrorHandling(inputToOperateOn, parameter, flags, ignoreInvalidCastTransformationError: true);
         }
 
         private bool BindValueFromPipelineByPropertyName(
@@ -3485,47 +3382,77 @@ namespace System.Management.Automation
 
             if (member != null)
             {
-                ParameterBindingException parameterBindingException = null;
-                try
-                {
-                    bindResult =
-                        BindPipelineParameter(
-                            member.Value,
-                            parameter,
-                            flags);
-                }
-                catch (ParameterBindingArgumentTransformationException e)
-                {
-                    parameterBindingException = e;
-                }
-                catch (ParameterBindingValidationException e)
-                {
-                    parameterBindingException = e;
-                }
-                catch (ParameterBindingParameterDefaultValueException e)
-                {
-                    parameterBindingException = e;
-                }
-                catch (ParameterBindingException)
-                {
-                    // Just ignore and continue;
-                    bindResult = false;
-                }
-
-                if (parameterBindingException != null)
-                {
-                    if (!DefaultParameterBindingInUse)
-                    {
-                        throw parameterBindingException;
-                    }
-                    else
-                    {
-                        ThrowElaboratedBindingException(parameterBindingException);
-                    }
-                }
+                bindResult = BindPipelineParameterWithErrorHandling(member.Value, parameter, flags, ignoreInvalidCastTransformationError: false);
             }
 
             return bindResult;
+        }
+
+        private bool BindPipelineParameterWithErrorHandling(
+            object inputValue,
+            MergedCompiledCommandParameter parameter,
+            ParameterBindingFlags flags,
+            bool ignoreInvalidCastTransformationError)
+        {
+            bool bindResult = false;
+            ParameterBindingException parameterBindingException = null;
+
+            try
+            {
+                bindResult = BindPipelineParameter(inputValue, parameter, flags);
+            }
+            catch (ParameterBindingArgumentTransformationException e)
+            {
+                if (ignoreInvalidCastTransformationError)
+                {
+                    PSInvalidCastException invalidCast = e.InnerException is ArgumentTransformationMetadataException
+                        ? e.InnerException.InnerException as PSInvalidCastException
+                        : e.InnerException as PSInvalidCastException;
+
+                    if (invalidCast == null)
+                    {
+                        parameterBindingException = e;
+                    }
+                }
+                else
+                {
+                    parameterBindingException = e;
+                }
+
+                // Just ignore and continue.
+                bindResult = false;
+            }
+            catch (ParameterBindingValidationException e)
+            {
+                parameterBindingException = e;
+            }
+            catch (ParameterBindingParameterDefaultValueException e)
+            {
+                parameterBindingException = e;
+            }
+            catch (ParameterBindingException)
+            {
+                // Just ignore and continue.
+                bindResult = false;
+            }
+
+            if (parameterBindingException != null)
+            {
+                ThrowOrElaborateBindingException(parameterBindingException);
+            }
+
+            return bindResult;
+        }
+
+        [DoesNotReturn]
+        private void ThrowOrElaborateBindingException(ParameterBindingException ex)
+        {
+            if (!DefaultParameterBindingInUse)
+            {
+                ExceptionDispatchInfo.Capture(ex).Throw();
+            }
+
+            ThrowElaboratedBindingException(ex);
         }
 
         /// <summary>
