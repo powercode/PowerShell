@@ -3,6 +3,7 @@
 
 using System.Management.Automation.Internal;
 using System.Management.Automation.Language;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Serialization;
 
 namespace System.Management.Automation
@@ -348,6 +349,433 @@ namespace System.Management.Automation
         #endregion Do Not Use
         #endregion Constructors
 
+        #region ThrowHelpers
+
+        [DoesNotReturn]
+        internal static void ThrowParameterAlreadyBound(
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName)
+        {
+            throw new ParameterBindingException(
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                null,
+                null,
+                ParameterBinderStrings.ParameterAlreadyBound,
+                nameof(ParameterBinderStrings.ParameterAlreadyBound));
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowNamedParameterNotFound(
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type typeSpecified)
+        {
+            throw NewNamedParameterNotFound(invocationInfo, errorPosition, parameterName, typeSpecified);
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowMissingArgument(
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType)
+        {
+            throw new ParameterBindingException(
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                null,
+                ParameterBinderStrings.MissingArgument,
+                "MissingArgument");
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowCannotConvertArgument(
+            Exception innerException,
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified,
+            object argumentValue,
+            string errorMessage)
+        {
+            throw new ParameterBindingException(
+                innerException,
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                ParameterBinderStrings.CannotConvertArgument,
+                "CannotConvertArgument",
+                argumentValue ?? "null",
+                errorMessage);
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowCannotConvertArgumentNoMessage(
+            Exception innerException,
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified,
+            string errorMessage)
+        {
+            throw new ParameterBindingException(
+                innerException,
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                ParameterBinderStrings.CannotConvertArgumentNoMessage,
+                "CannotConvertArgumentNoMessage",
+                errorMessage);
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowMissingMandatoryParameter(
+            InvocationInfo invocationInfo,
+            string missingParameters)
+        {
+            throw new ParameterBindingException(
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                null,
+                missingParameters,
+                null,
+                null,
+                ParameterBinderStrings.MissingMandatoryParameter,
+                "MissingMandatoryParameter");
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowParameterBindingFailed(
+            Exception innerException,
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified,
+            string errorMessage)
+        {
+            throw new ParameterBindingException(
+                innerException,
+                ErrorCategory.WriteError,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                ParameterBinderStrings.ParameterBindingFailed,
+                "ParameterBindingFailed",
+                errorMessage);
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowScriptBlockArgumentNoInput(
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType)
+        {
+            throw new ParameterBindingException(
+                ErrorCategory.MetadataError,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                null,
+                ParameterBinderStrings.ScriptBlockArgumentNoInput,
+                "ScriptBlockArgumentNoInput");
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowScriptBlockArgumentInvocationFailed(
+            Exception innerException,
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified,
+            string errorMessage)
+        {
+            throw new ParameterBindingException(
+                innerException,
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                ParameterBinderStrings.ScriptBlockArgumentInvocationFailed,
+                "ScriptBlockArgumentInvocationFailed",
+                errorMessage);
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowScriptBlockArgumentNoOutput(
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType)
+        {
+            throw new ParameterBindingException(
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                null,
+                ParameterBinderStrings.ScriptBlockArgumentNoOutput,
+                "ScriptBlockArgumentNoOutput");
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowCannotExtractAddMethod(
+            Exception innerException,
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified,
+            string errorMessage)
+        {
+            throw new ParameterBindingException(
+                innerException,
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                ParameterBinderStrings.CannotExtractAddMethod,
+                "CannotExtractAddMethod",
+                errorMessage);
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowAmbiguousParameter(
+            InvocationInfo invocationInfo,
+            string parameterName,
+            string matchingParameters)
+        {
+            throw new ParameterBindingException(
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                null,
+                parameterName,
+                null,
+                null,
+                ParameterBinderStrings.AmbiguousParameter,
+                "AmbiguousParameter",
+                matchingParameters);
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowRuntimeDefinedParameterNameMismatch(
+            InvocationInfo invocationInfo,
+            string parameterName,
+            string key)
+        {
+            throw new ParameterBindingException(
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                null,
+                parameterName,
+                null,
+                null,
+                ParameterBinderStrings.RuntimeDefinedParameterNameMismatch,
+                "RuntimeDefinedParameterNameMismatch",
+                key);
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowMismatchedPSTypeName(
+            Exception innerException,
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified,
+            string psTypeName)
+        {
+            throw new ParameterBindingException(
+                innerException,
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                ParameterBinderStrings.MismatchedPSTypeName,
+                "MismatchedPSTypeName",
+                psTypeName);
+        }
+
+        internal static ParameterBindingException NewNamedParameterNotFound(
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type typeSpecified)
+        {
+            return new ParameterBindingException(
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                null,
+                typeSpecified,
+                ParameterBinderStrings.NamedParameterNotFound,
+                "NamedParameterNotFound");
+        }
+
+        internal static ParameterBindingException NewAmbiguousParameterSet(InvocationInfo invocationInfo)
+        {
+            return new ParameterBindingException(
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                null,
+                null,
+                null,
+                null,
+                ParameterBinderStrings.AmbiguousParameterSet,
+                "AmbiguousParameterSet");
+        }
+
+        internal static ParameterBindingException NewPositionalParameterNotFound(
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string argument,
+            Type typeSpecified)
+        {
+            return new ParameterBindingException(
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                errorPosition,
+                argument,
+                null,
+                typeSpecified,
+                ParameterBinderStrings.PositionalParameterNotFound,
+                "PositionalParameterNotFound");
+        }
+
+        internal static ParameterBindingException NewMismatchedPSTypeName(
+            Exception innerException,
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified,
+            string psTypeName)
+        {
+            return new ParameterBindingException(
+                innerException,
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                ParameterBinderStrings.MismatchedPSTypeName,
+                "MismatchedPSTypeName",
+                psTypeName);
+        }
+
+        internal static ParameterBindingException NewParameterNotInParameterSet(
+            InvocationInfo invocationInfo,
+            string parameterName,
+            string parameterSetName)
+        {
+            return new ParameterBindingException(
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                null,
+                parameterName,
+                null,
+                null,
+                ParameterBinderStrings.ParameterNotInParameterSet,
+                "ParameterNotInParameterSet",
+                parameterSetName);
+        }
+
+        internal static ParameterBindingException NewGetDynamicParametersException(
+            Exception innerException,
+            InvocationInfo invocationInfo,
+            string errorMessage)
+        {
+            return new ParameterBindingException(
+                innerException,
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                null,
+                null,
+                null,
+                null,
+                ParameterBinderStrings.GetDynamicParametersException,
+                "GetDynamicParametersException",
+                errorMessage);
+        }
+
+        internal static ParameterBindingException NewAmbiguousPositionalParameterNoName(InvocationInfo invocationInfo)
+        {
+            return new ParameterBindingException(
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                null,
+                null,
+                null,
+                null,
+                ParameterBinderStrings.AmbiguousPositionalParameterNoName,
+                "AmbiguousPositionalParameterNoName");
+        }
+
+        internal static ParameterBindingException NewParameterAlreadyBound(
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName)
+        {
+            return new ParameterBindingException(
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                null,
+                null,
+                ParameterBinderStrings.ParameterAlreadyBound,
+                nameof(ParameterBinderStrings.ParameterAlreadyBound));
+        }
+
+        internal static ParameterBindingException NewMissingArgument(
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType)
+        {
+            return new ParameterBindingException(
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                null,
+                ParameterBinderStrings.MissingArgument,
+                "MissingArgument");
+        }
+
+        #endregion ThrowHelpers
+
         #region Properties
         /// <summary>
         /// Gets the message for the exception.
@@ -642,6 +1070,88 @@ namespace System.Management.Automation
                 _swallowException = true;
             }
         }
+
+        [DoesNotReturn]
+        internal static void ThrowParameterArgumentValidationError(
+            Exception innerException,
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified,
+            string errorMessage)
+        {
+            throw new ParameterBindingValidationException(
+                innerException,
+                ErrorCategory.InvalidData,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                ParameterBinderStrings.ParameterArgumentValidationError,
+                "ParameterArgumentValidationError",
+                errorMessage);
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowParameterArgumentValidationErrorNullNotAllowed(
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified)
+        {
+            throw new ParameterBindingValidationException(
+                ErrorCategory.InvalidData,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                ParameterBinderStrings.ParameterArgumentValidationErrorNullNotAllowed,
+                "ParameterArgumentValidationErrorNullNotAllowed");
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowParameterArgumentValidationErrorEmptyStringNotAllowed(
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified)
+        {
+            throw new ParameterBindingValidationException(
+                ErrorCategory.InvalidData,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                ParameterBinderStrings.ParameterArgumentValidationErrorEmptyStringNotAllowed,
+                "ParameterArgumentValidationErrorEmptyStringNotAllowed");
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowValidateNullOrEmpty(
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified,
+            string resourceString,
+            string errorId)
+        {
+            throw new ParameterBindingValidationException(
+                ErrorCategory.InvalidData,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                resourceString,
+                errorId);
+        }
         #endregion Preferred constructors
 
         #region serialization
@@ -833,6 +1343,73 @@ namespace System.Management.Automation
                 args)
         {
         }
+
+        [DoesNotReturn]
+        internal static void ThrowParameterArgumentTransformationError(
+            Exception innerException,
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified,
+            string errorMessage)
+        {
+            throw new ParameterBindingArgumentTransformationException(
+                innerException,
+                ErrorCategory.InvalidData,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                ParameterBinderStrings.ParameterArgumentTransformationError,
+                "ParameterArgumentTransformationError",
+                errorMessage);
+        }
+
+        internal static new ParameterBindingArgumentTransformationException NewMismatchedPSTypeName(
+            Exception innerException,
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified,
+            string psTypeName)
+        {
+            return new ParameterBindingArgumentTransformationException(
+                innerException,
+                ErrorCategory.InvalidArgument,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                ParameterBinderStrings.MismatchedPSTypeName,
+                "MismatchedPSTypeName",
+                psTypeName);
+        }
+
+        internal static ParameterBindingArgumentTransformationException NewParameterArgumentTransformationErrorMessageOnly(
+            Exception innerException,
+            InvocationInfo invocationInfo,
+            IScriptExtent errorPosition,
+            string parameterName,
+            Type parameterType,
+            Type typeSpecified,
+            string errorMessage)
+        {
+            return new ParameterBindingArgumentTransformationException(
+                innerException,
+                ErrorCategory.InvalidData,
+                invocationInfo,
+                errorPosition,
+                parameterName,
+                parameterType,
+                typeSpecified,
+                ParameterBinderStrings.ParameterArgumentTransformationErrorMessageOnly,
+                "ParameterArgumentTransformationErrorMessageOnly",
+                errorMessage);
+        }
         #endregion Preferred constructors
         #region serialization
         /// <summary>
@@ -1005,6 +1582,26 @@ namespace System.Management.Automation
                 errorId,
                 args)
         {
+        }
+
+        [DoesNotReturn]
+        internal static void ThrowGetDefaultValueFailed(
+            Exception innerException,
+            InvocationInfo invocationInfo,
+            string parameterName,
+            string errorMessage)
+        {
+            throw new ParameterBindingParameterDefaultValueException(
+                innerException,
+                ErrorCategory.ReadError,
+                invocationInfo,
+                null,
+                parameterName,
+                null,
+                null,
+                "ParameterBinderStrings",
+                "GetDefaultValueFailed",
+                errorMessage);
         }
         #endregion Preferred constructors
 
