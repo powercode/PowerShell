@@ -404,15 +404,7 @@ namespace System.Management.Automation.Language
                 (!onlyOneRemainingParameterSet))
             {
                 ParameterBindingException bindingException =
-                    new ParameterBindingException(
-                        ErrorCategory.InvalidArgument,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        ParameterBinderStrings.AmbiguousParameterSet,
-                        "AmbiguousParameterSet");
+                    ParameterBindingException.NewAmbiguousParameterSet(null);
                 BindingExceptions.Add(commandAst.CommandElements[0].Extent.Text,
                     new StaticBindingError(commandAst.CommandElements[0], bindingException));
             }
@@ -432,15 +424,11 @@ namespace System.Management.Automation.Language
                 foreach (CommandParameterAst parameterNotFound in bindingInfo.ParametersNotFound)
                 {
                     ParameterBindingException bindingException =
-                        new ParameterBindingException(
-                            ErrorCategory.InvalidArgument,
+                        ParameterBindingException.NewNamedParameterNotFound(
                             null,
                             parameterNotFound.ErrorPosition,
                             parameterNotFound.ParameterName,
-                            null,
-                            null,
-                            ParameterBinderStrings.NamedParameterNotFound,
-                            "NamedParameterNotFound");
+                            null);
                     BindingExceptions.Add(parameterNotFound.ParameterName, new StaticBindingError(parameterNotFound, bindingException));
                 }
             }
@@ -463,15 +451,11 @@ namespace System.Management.Automation.Language
                     AstPair argument = unboundArgument as AstPair;
 
                     ParameterBindingException bindingException =
-                        new ParameterBindingException(
-                            ErrorCategory.InvalidArgument,
+                        ParameterBindingException.NewPositionalParameterNotFound(
                             null,
                             argument.Argument.Extent,
                             argument.Argument.Extent.Text,
-                            null,
-                            null,
-                            ParameterBinderStrings.PositionalParameterNotFound,
-                            "PositionalParameterNotFound");
+                            null);
                     BindingExceptions.Add(argument.Argument.Extent.Text, new StaticBindingError(argument.Argument, bindingException));
                 }
             }
@@ -553,15 +537,11 @@ namespace System.Management.Automation.Language
                         {
                             // We have a parameter with no value that isn't a switch parameter, or input parameter
                             ParameterBindingException bindingException =
-                                new ParameterBindingException(
-                                    ErrorCategory.InvalidArgument,
+                                ParameterBindingException.NewMissingArgument(
                                     null,
                                     commandAst.CommandElements[0].Extent,
                                     parameter.Name,
-                                    parameter.Type,
-                                    null,
-                                    ParameterBinderStrings.MissingArgument,
-                                    "MissingArgument");
+                                    parameter.Type);
 
                             BindingExceptions.Add(commandAst.CommandElements[0].Extent.Text,
                                 new StaticBindingError(commandAst.CommandElements[0], bindingException));
@@ -579,15 +559,10 @@ namespace System.Management.Automation.Language
             }
 
             ParameterBindingException bindingException =
-                new ParameterBindingException(
-                    ErrorCategory.InvalidArgument,
+                ParameterBindingException.NewParameterAlreadyBound(
                     null,
                     duplicateParameter.ErrorPosition,
-                    duplicateParameter.ParameterName,
-                    null,
-                    null,
-                    ParameterBinderStrings.ParameterAlreadyBound,
-                    nameof(ParameterBinderStrings.ParameterAlreadyBound));
+                    duplicateParameter.ParameterName);
             // if the duplicated Parameter Name appears more than twice, we will ignore as we already have similar bindingException.
             if (!BindingExceptions.ContainsKey(duplicateParameter.ParameterName))
             {
