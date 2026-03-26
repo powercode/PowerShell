@@ -448,6 +448,62 @@ namespace System.Management.Automation
             bool tryExactMatching,
             InvocationInfo invocationInfo)
         {
+            return GetMatchingParameterCore(
+                name,
+                throwOnParameterNotFound,
+                tryExactMatching,
+                invocationInfoFactory: () => invocationInfo);
+        }
+
+        /// <summary>
+        /// Gets the parameters by matching its name, while deferring <see cref="InvocationInfo"/>
+        /// construction to the error path.
+        /// </summary>
+        /// <param name="name">
+        /// The name of the parameter.
+        /// </param>
+        /// <param name="throwOnParameterNotFound">
+        /// If true and a matching parameter is not found, an exception will be
+        /// throw. If false and a matching parameter is not found, null is returned.
+        /// </param>
+        /// <param name="tryExactMatching">
+        /// If true we do exact matching, otherwise we do not.
+        /// </param>
+        /// <param name="commandInfo">
+        /// The command for which parameter binding is being performed.
+        /// </param>
+        /// <param name="errorExtent">
+        /// The source extent associated with parameter name resolution.
+        /// </param>
+        /// <returns>
+        /// The a collection of the metadata associated with the parameters that
+        /// match the specified name. If no matches were found, an empty collection
+        /// is returned.
+        /// </returns>
+        /// <exception cref="ArgumentException">
+        /// If <paramref name="name"/> is null or empty.
+        /// </exception>
+        internal MergedCompiledCommandParameter GetMatchingParameter(
+            string name,
+            bool throwOnParameterNotFound,
+            bool tryExactMatching,
+            CommandInfo commandInfo,
+            IScriptExtent errorExtent)
+        {
+            // Defer InvocationInfo allocation to the error path so successful binding does not pay for it.
+            return GetMatchingParameterCore(
+                name,
+                throwOnParameterNotFound,
+                tryExactMatching,
+                invocationInfoFactory: () => new InvocationInfo(commandInfo, errorExtent));
+        }
+
+        private MergedCompiledCommandParameter GetMatchingParameterCore(
+            string name,
+            bool throwOnParameterNotFound,
+            bool tryExactMatching,
+            Func<InvocationInfo> invocationInfoFactory)
+        {
             if (string.IsNullOrEmpty(name))
             {
                 throw PSTraceSource.NewArgumentException(nameof(name));
@@ -537,7 +593,7 @@ namespace System.Management.Automation
                     ParameterBindingException exception =
                         new ParameterBindingException(
                             ErrorCategory.InvalidArgument,
-                            invocationInfo,
+                            invocationInfoFactory(),
                             null,
                             name,
                             null,
@@ -556,7 +612,7 @@ namespace System.Management.Automation
                     ParameterBindingException exception =
                         new ParameterBindingException(
                             ErrorCategory.InvalidArgument,
-                            invocationInfo,
+                            invocationInfoFactory(),
                             null,
                             name,
                             null,
