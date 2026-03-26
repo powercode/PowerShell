@@ -139,8 +139,6 @@ namespace System.Management.Automation
             {
                 // Use ValidateParameterSets to get the number of valid parameter
                 // sets.
-
-                // NTRAID#Windows Out Of Band Releases-2005/11/07-923917-JonN
                 validParameterSetCount = ValidateParameterSets(true, false);
             }
 
@@ -279,10 +277,6 @@ namespace System.Management.Automation
 
             // We need to make sure there is at least one valid parameter set. Its
             // OK to allow more than one as long as one of them takes pipeline input.
-
-            // NTRAID#Windows Out Of Band Releases-2006/02/14-928660-JonN
-            // Pipeline input fails to bind to pipeline enabled parameter
-            // second parameter changed from true to false
             ValidateParameterSets(true, false);
 
             // Always get the dynamic parameters as there may be mandatory parameters there
@@ -403,8 +397,6 @@ namespace System.Management.Automation
 
                 s_tracer.WriteLine("BIND DEFAULT after [{0}] result [{1}]", bindingStage, isSuccess);
             }
-
-            return;
         }
 
         /// <summary>
@@ -2418,8 +2410,6 @@ namespace System.Management.Automation
                     validSetIsDefault ||
                     (hasDefaultSetDefined && (_currentParameterSetFlag & defaultParameterSetFlag) != 0))
                 {
-                    // NTRAID#Windows Out Of Band Releases-2006/02/14-928660-JonN
-                    // Set currentParameterSetName regardless of setDefault
                     string currentParameterSetName = BindableParameters.GetParameterSetName(defaultParameterSetFlag);
                     Command.SetParameterSetName(currentParameterSetName);
                     if (setDefault)
@@ -2477,7 +2467,6 @@ namespace System.Management.Automation
                             validParameterSetCount = 1;
                         }
                     }
-                    // NTRAID#Windows Out Of Band Releases-2005/11/07-923917-JonN
                     else if (validParameterSetCount > 1)
                     {
                         int resolvedParameterSetCount = ResolveParameterSetAmbiguityBasedOnMandatoryParameters();
@@ -2880,57 +2869,32 @@ namespace System.Management.Automation
         {
             Diagnostics.Assert(!string.IsNullOrEmpty(parameterName), "parameterName is not set");
             const char hotKeyPrefix = '&';
-            bool built = false;
             StringBuilder label = new StringBuilder(parameterName);
             string usedHotKeysStr = usedHotKeys.ToString();
 
-            for (int i = 0; i < parameterName.Length; i++)
+            // Priority order: uppercase letters, lowercase letters, then non-letters.
+            Func<char, bool>[] predicates = new Func<char, bool>[]
             {
-                // try Upper case
-                if (char.IsUpper(parameterName[i]) && usedHotKeysStr.Contains(parameterName[i]))
-                {
-                    label.Insert(i, hotKeyPrefix);
-                    usedHotKeys.Append(parameterName[i]);
-                    built = true;
-                    break;
-                }
-            }
+                char.IsUpper,
+                char.IsLower,
+                static c => !char.IsLetter(c)
+            };
 
-            if (!built)
+            foreach (Func<char, bool> predicate in predicates)
             {
-                // try Lower case
                 for (int i = 0; i < parameterName.Length; i++)
                 {
-                    if (char.IsLower(parameterName[i]) && usedHotKeysStr.Contains(parameterName[i]))
+                    if (predicate(parameterName[i]) && !usedHotKeysStr.Contains(parameterName[i]))
                     {
                         label.Insert(i, hotKeyPrefix);
                         usedHotKeys.Append(parameterName[i]);
-                        built = true;
-                        break;
+                        return label.ToString();
                     }
                 }
             }
 
-            if (!built)
-            {
-                // try non-letters
-                for (int i = 0; i < parameterName.Length; i++)
-                {
-                    if (!char.IsLetter(parameterName[i]) && usedHotKeysStr.Contains(parameterName[i]))
-                    {
-                        label.Insert(i, hotKeyPrefix);
-                        usedHotKeys.Append(parameterName[i]);
-                        built = true;
-                        break;
-                    }
-                }
-            }
-
-            if (!built)
-            {
-                // use first char
-                label.Insert(0, hotKeyPrefix);
-            }
+            // Fallback when all candidates are already used.
+            label.Insert(0, hotKeyPrefix);
 
             return label.ToString();
         }

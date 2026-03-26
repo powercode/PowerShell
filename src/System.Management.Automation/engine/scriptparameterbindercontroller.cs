@@ -105,8 +105,6 @@ namespace System.Management.Automation
             {
                 this.DefaultParameterBinder.RecordBoundParameters = true;
             }
-
-            return;
         }
 
         /// <summary>
@@ -222,8 +220,6 @@ namespace System.Management.Automation
             DefaultParameterBinder.BindParameter(SpecialVariables.Args, argsArray, parameterMetadata: null);
 
             DollarArgs.AddRange(argsArray);
-
-            return;
         }
 
         internal const string NotePropertyNameForSplattingParametersInArgs = "<CommandParameterName>";
