@@ -53,6 +53,10 @@ namespace System.Management.Automation
     /// Derived classes are used to provide specific binding behavior for different object types,
     /// like Cmdlet, PsuedoParameterCollection, and dynamic parameter objects.
     /// </summary>
+    /// <remarks>
+    /// Use <see cref="InvocationInfo"/> directly for errors attributable to the command invocation
+    /// itself rather than a specific parameter token.
+    /// </remarks>
     [DebuggerDisplay("Command = {command}")]
     internal abstract class ParameterBinderBase
     {
@@ -1889,6 +1893,10 @@ namespace System.Management.Automation
             return result;
         }
 
+        /// <summary>
+        /// Gets the script extent used to position binding errors for a parameter argument.
+        /// Falls back to <see cref="InvocationInfo.ScriptPosition"/> when argument extent is unavailable.
+        /// </summary>
         protected IScriptExtent GetErrorExtent(CommandParameterInternal cpi)
         {
             var result = cpi.ErrorExtent;
@@ -1899,6 +1907,10 @@ namespace System.Management.Automation
             return result;
         }
 
+        /// <summary>
+        /// Gets the script extent for the parameter name token when reporting parameter-name
+        /// resolution errors, with fallback to <see cref="InvocationInfo.ScriptPosition"/>.
+        /// </summary>
         protected IScriptExtent GetParameterErrorExtent(CommandParameterInternal cpi)
         {
             var result = cpi.ParameterExtent;
