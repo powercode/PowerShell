@@ -1021,7 +1021,6 @@ namespace System.Management.Automation
                         return FinalizeResult(result);
                     }
 
-                    // NTRAID#Windows OS Bugs-1064175-2004/02/28-JeffJon
                     // If we have an PSObject with null base and we are trying to
                     // convert to a string, then we need to use null instead of
                     // calling LanguagePrimitives.ConvertTo as that will return
@@ -1041,7 +1040,6 @@ namespace System.Management.Automation
                         }
                     }
 
-                    // NTRAID#Windows OS Bugs -<bug id here> - Nana
                     // If we have a boolean, we have to ensure that it can
                     // only take parameters of type boolean or numbers with
                     // 0 indicating false and everything else indicating true
@@ -1053,7 +1051,6 @@ namespace System.Management.Automation
                         return FinalizeResult(result);
                     }
 
-                    // NTRAID#Windows OS Bugs-1009284-2004/05/05-JeffJon
                     // Need to handle other collection types here as well
 
                     // Before attempting to encode a collection, we check if we can convert the argument directly via
@@ -1532,7 +1529,6 @@ namespace System.Management.Automation
 
                 // Create an instance of the parameter type
 
-                // NTRAID#Windows Out Of Band Releases-906820-2005/09/01
                 // This code previously used the ctor(int) ctor form.
                 // System.Collections.ObjectModel.Collection<T> does not
                 // support this ctor form.  More generally, there is no
@@ -1653,7 +1649,6 @@ namespace System.Management.Automation
             bool isSystemDotArray,
             ref bool coercionRequired)
         {
-            // NTRAID#Windows OS Bugs-966440-2004/05/05-JeffJon
             // This coercion can only go to a collection type.  It cannot take a
             // collection type and coerce it into a scalar type.
 

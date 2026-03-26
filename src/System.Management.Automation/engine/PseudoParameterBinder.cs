@@ -31,7 +31,6 @@ namespace System.Management.Automation
             CommandLineParameters commandLineParameters)
             : base(target, command.MyInvocation, command.Context, command)
         {
-            // NTRAID#Windows Out Of Band Releases-927103-2006/01/25-JonN
             foreach (var pair in target)
             {
                 string key = pair.Key;
