@@ -157,7 +157,8 @@ namespace System.Management.Automation
                         parameterName,
                         false,
                         true,
-                        new InvocationInfo(this.InvocationInfo.MyCommand, argument.ParameterExtent));
+                        this.InvocationInfo.MyCommand,
+                        argument.ParameterExtent);
 
                 if (matchingParameter == null)
                 {
@@ -198,7 +199,8 @@ namespace System.Management.Automation
                                 nextArgument.ParameterName,
                                 false,
                                 true,
-                                new InvocationInfo(this.InvocationInfo.MyCommand, nextArgument.ParameterExtent));
+                                this.InvocationInfo.MyCommand,
+                                nextArgument.ParameterExtent);
 
                         if ((nextMatchingParameter != null) || nextArgument.ParameterAndArgumentSpecified)
                         {
