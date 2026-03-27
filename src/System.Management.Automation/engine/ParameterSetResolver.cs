@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Numerics;
 
@@ -299,6 +300,521 @@ internal sealed class ParameterSetResolver
         }
 
         return BitOperations.PopCount(parameterSetFlags);
+    }
+
+    internal Collection<MergedCompiledCommandParameter> GetMissingMandatoryParameters(
+        int validParameterSetCount,
+        bool isPipelineInputExpected)
+    {
+        Collection<MergedCompiledCommandParameter> result = new Collection<MergedCompiledCommandParameter>();
+
+        uint defaultParameterSet = _commandMetadata.DefaultParameterSetFlag;
+        uint commandMandatorySets = 0;
+
+        Dictionary<uint, ParameterSetPromptingData> promptingData = CollectMandatoryPromptingData(
+            defaultParameterSet,
+            isPipelineInputExpected,
+            result,
+            ref commandMandatorySets,
+            out bool missingAMandatoryParameter,
+            out bool missingAMandatoryParameterInAllSet);
+
+        if (missingAMandatoryParameter && isPipelineInputExpected)
+        {
+            if (commandMandatorySets == 0)
+            {
+                commandMandatorySets = CurrentParameterSetFlag;
+            }
+
+            if (missingAMandatoryParameterInAllSet)
+            {
+                uint availableParameterSetFlags = _bindableParameters.AllParameterSetFlags;
+                if (availableParameterSetFlags == 0)
+                {
+                    availableParameterSetFlags = uint.MaxValue;
+                }
+
+                commandMandatorySets = (CurrentParameterSetFlag & availableParameterSetFlags);
+            }
+
+            if (validParameterSetCount > 1 &&
+                defaultParameterSet != 0 &&
+                (defaultParameterSet & commandMandatorySets) == 0 &&
+                (defaultParameterSet & CurrentParameterSetFlag) != 0)
+            {
+                uint setThatTakesPipelineInput = 0;
+                foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
+                {
+                    if ((promptingSetData.ParameterSet & CurrentParameterSetFlag) != 0 &&
+                        (promptingSetData.ParameterSet & defaultParameterSet) == 0 &&
+                        !promptingSetData.IsAllSet)
+                    {
+                        if (promptingSetData.PipelineableMandatoryParameters.Count > 0)
+                        {
+                            setThatTakesPipelineInput = promptingSetData.ParameterSet;
+                            break;
+                        }
+                    }
+                }
+
+                if (setThatTakesPipelineInput == 0)
+                {
+                    commandMandatorySets = CurrentParameterSetFlag & (~commandMandatorySets);
+                    CurrentParameterSetFlag = commandMandatorySets;
+
+                    if (CurrentParameterSetFlag == defaultParameterSet)
+                    {
+                        _context.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
+                    }
+                    else
+                    {
+                        ParameterSetToBePrioritizedInPipelineBinding = defaultParameterSet;
+                    }
+                }
+            }
+
+            int commandMandatorySetsCount = ValidParameterSetCount(commandMandatorySets);
+            if (commandMandatorySetsCount == 0)
+            {
+                ThrowAmbiguousParameterSetException(CurrentParameterSetFlag);
+            }
+            else if (commandMandatorySetsCount == 1)
+            {
+                CollectNonpipelineableMandatoryParameters(promptingData, commandMandatorySets, result);
+            }
+            else if (ParameterSetToBePrioritizedInPipelineBinding == 0)
+            {
+                if (!TryLatchToDefaultParameterSet(promptingData, commandMandatorySets, defaultParameterSet, result))
+                {
+                    TryLatchToUniquePipelineSet(promptingData, commandMandatorySets, result);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private Dictionary<uint, ParameterSetPromptingData> CollectMandatoryPromptingData(
+        uint defaultParameterSet,
+        bool isPipelineInputExpected,
+        Collection<MergedCompiledCommandParameter> result,
+        ref uint commandMandatorySets,
+        out bool missingAMandatoryParameter,
+        out bool missingAMandatoryParameterInAllSet)
+    {
+        Dictionary<uint, ParameterSetPromptingData> promptingData = new Dictionary<uint, ParameterSetPromptingData>();
+
+        missingAMandatoryParameter = false;
+        missingAMandatoryParameterInAllSet = false;
+
+        foreach (MergedCompiledCommandParameter parameter in _context.UnboundParameters)
+        {
+            if (!parameter.Parameter.IsMandatoryInSomeParameterSet)
+            {
+                continue;
+            }
+
+            var matchingParameterSetMetadata = parameter.Parameter.GetMatchingParameterSetData(CurrentParameterSetFlag);
+
+            uint parameterMandatorySets = 0;
+            bool thisParameterMissing = false;
+
+            foreach (ParameterSetSpecificMetadata parameterSetMetadata in matchingParameterSetMetadata)
+            {
+                uint newMandatoryParameterSetFlag = NewParameterSetPromptingData(promptingData, parameter, parameterSetMetadata, defaultParameterSet, isPipelineInputExpected);
+
+                if (newMandatoryParameterSetFlag == 0)
+                {
+                    continue;
+                }
+
+                missingAMandatoryParameter = true;
+                thisParameterMissing = true;
+
+                if (newMandatoryParameterSetFlag != uint.MaxValue)
+                {
+                    parameterMandatorySets |= (CurrentParameterSetFlag & newMandatoryParameterSetFlag);
+                    commandMandatorySets |= (CurrentParameterSetFlag & parameterMandatorySets);
+                }
+                else
+                {
+                    missingAMandatoryParameterInAllSet = true;
+                }
+            }
+
+            if (!isPipelineInputExpected && thisParameterMissing)
+            {
+                result.Add(parameter);
+            }
+        }
+
+        return promptingData;
+    }
+
+    internal static void CollectNonpipelineableMandatoryParameters(
+        Dictionary<uint, ParameterSetPromptingData> promptingData,
+        uint mandatorySets,
+        Collection<MergedCompiledCommandParameter> result)
+    {
+        foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
+        {
+            if ((promptingSetData.ParameterSet & mandatorySets) == 0 && !promptingSetData.IsAllSet)
+            {
+                continue;
+            }
+
+            foreach (MergedCompiledCommandParameter mandatoryParameter in promptingSetData.NonpipelineableMandatoryParameters.Keys)
+            {
+                result.Add(mandatoryParameter);
+            }
+        }
+    }
+
+    private bool TryLatchToDefaultParameterSet(
+        Dictionary<uint, ParameterSetPromptingData> promptingData,
+        uint commandMandatorySets,
+        uint defaultParameterSet,
+        Collection<MergedCompiledCommandParameter> result)
+    {
+        if (defaultParameterSet == 0 || (commandMandatorySets & defaultParameterSet) == 0)
+        {
+            return false;
+        }
+
+        bool anotherSetTakesPipelineInput = false;
+        foreach (ParameterSetPromptingData paramPromptingData in promptingData.Values)
+        {
+            if (!paramPromptingData.IsAllSet &&
+                !paramPromptingData.IsDefaultSet &&
+                paramPromptingData.PipelineableMandatoryParameters.Count > 0 &&
+                paramPromptingData.NonpipelineableMandatoryParameters.Count == 0)
+            {
+                anotherSetTakesPipelineInput = true;
+                break;
+            }
+        }
+
+        bool anotherSetTakesPipelineInputByPropertyName = false;
+        foreach (ParameterSetPromptingData paramPromptingData in promptingData.Values)
+        {
+            if (!paramPromptingData.IsAllSet &&
+                !paramPromptingData.IsDefaultSet &&
+                paramPromptingData.PipelineableMandatoryByPropertyNameParameters.Count > 0)
+            {
+                anotherSetTakesPipelineInputByPropertyName = true;
+                break;
+            }
+        }
+
+        bool latchOnToDefault = false;
+        if (promptingData.TryGetValue(defaultParameterSet, out ParameterSetPromptingData defaultSetPromptingData))
+        {
+            bool defaultSetTakesPipelineInput = defaultSetPromptingData.PipelineableMandatoryParameters.Count > 0;
+            bool defaultSetTakesPipelineInputByPropertyName = defaultSetPromptingData.PipelineableMandatoryByPropertyNameParameters.Count > 0;
+
+            if (defaultSetTakesPipelineInputByPropertyName && !anotherSetTakesPipelineInputByPropertyName)
+            {
+                latchOnToDefault = true;
+            }
+            else if (defaultSetTakesPipelineInput && !anotherSetTakesPipelineInput)
+            {
+                latchOnToDefault = true;
+            }
+        }
+
+        if (!latchOnToDefault && !anotherSetTakesPipelineInput)
+        {
+            latchOnToDefault = true;
+        }
+
+        if (!latchOnToDefault && promptingData.TryGetValue(uint.MaxValue, out ParameterSetPromptingData allSetPromptingData))
+        {
+            latchOnToDefault = allSetPromptingData.NonpipelineableMandatoryParameters.Count > 0;
+        }
+
+        if (!latchOnToDefault)
+        {
+            return false;
+        }
+
+        CurrentParameterSetFlag = defaultParameterSet;
+        _context.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
+
+        CollectNonpipelineableMandatoryParameters(promptingData, defaultParameterSet, result);
+        return true;
+    }
+
+    private bool TryLatchToUniquePipelineSet(
+        Dictionary<uint, ParameterSetPromptingData> promptingData,
+        uint commandMandatorySets,
+        Collection<MergedCompiledCommandParameter> result)
+    {
+        uint setThatTakesPipelineInputByValue = 0;
+        uint setThatTakesPipelineInputByPropertyName = 0;
+
+        bool foundSetThatTakesPipelineInputByValue = false;
+        bool foundMultipleSetsThatTakesPipelineInputByValue = false;
+        foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
+        {
+            if ((promptingSetData.ParameterSet & commandMandatorySets) != 0 &&
+                !promptingSetData.IsAllSet)
+            {
+                if (promptingSetData.PipelineableMandatoryByValueParameters.Count > 0)
+                {
+                    if (foundSetThatTakesPipelineInputByValue)
+                    {
+                        foundMultipleSetsThatTakesPipelineInputByValue = true;
+                        setThatTakesPipelineInputByValue = 0;
+                        break;
+                    }
+
+                    setThatTakesPipelineInputByValue = promptingSetData.ParameterSet;
+                    foundSetThatTakesPipelineInputByValue = true;
+                }
+            }
+        }
+
+        bool foundSetThatTakesPipelineInputByPropertyName = false;
+        bool foundMultipleSetsThatTakesPipelineInputByPropertyName = false;
+        foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
+        {
+            if ((promptingSetData.ParameterSet & commandMandatorySets) != 0 &&
+                    !promptingSetData.IsAllSet)
+            {
+                if (promptingSetData.PipelineableMandatoryByPropertyNameParameters.Count > 0)
+                {
+                    if (foundSetThatTakesPipelineInputByPropertyName)
+                    {
+                        foundMultipleSetsThatTakesPipelineInputByPropertyName = true;
+                        setThatTakesPipelineInputByPropertyName = 0;
+                        break;
+                    }
+
+                    setThatTakesPipelineInputByPropertyName = promptingSetData.ParameterSet;
+                    foundSetThatTakesPipelineInputByPropertyName = true;
+                }
+            }
+        }
+
+        uint uniqueSetThatTakesPipelineInput = 0;
+        if (foundSetThatTakesPipelineInputByValue && foundSetThatTakesPipelineInputByPropertyName &&
+            (setThatTakesPipelineInputByValue == setThatTakesPipelineInputByPropertyName))
+        {
+            uniqueSetThatTakesPipelineInput = setThatTakesPipelineInputByValue;
+        }
+
+        if (foundSetThatTakesPipelineInputByValue ^ foundSetThatTakesPipelineInputByPropertyName)
+        {
+            uniqueSetThatTakesPipelineInput = foundSetThatTakesPipelineInputByValue ?
+                setThatTakesPipelineInputByValue : setThatTakesPipelineInputByPropertyName;
+        }
+
+        if (uniqueSetThatTakesPipelineInput != 0)
+        {
+            uint otherMandatorySetsToBeIgnored = 0;
+            bool chosenMandatorySetContainsNonpipelineableMandatoryParameters = false;
+
+            foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
+            {
+                if ((promptingSetData.ParameterSet & uniqueSetThatTakesPipelineInput) != 0 ||
+                    promptingSetData.IsAllSet)
+                {
+                    if (!promptingSetData.IsAllSet)
+                    {
+                        chosenMandatorySetContainsNonpipelineableMandatoryParameters =
+                            promptingSetData.NonpipelineableMandatoryParameters.Count > 0;
+                    }
+                }
+                else
+                {
+                    otherMandatorySetsToBeIgnored |= promptingSetData.ParameterSet;
+                }
+            }
+
+            CollectNonpipelineableMandatoryParameters(promptingData, uniqueSetThatTakesPipelineInput, result);
+
+            PreservePotentialParameterSets(uniqueSetThatTakesPipelineInput,
+                                           otherMandatorySetsToBeIgnored,
+                                           chosenMandatorySetContainsNonpipelineableMandatoryParameters);
+
+            return true;
+        }
+
+        bool foundMissingParameters = false;
+        uint setsThatContainNonpipelineableMandatoryParameter = 0;
+        foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
+        {
+            if ((promptingSetData.ParameterSet & commandMandatorySets) != 0 ||
+                 promptingSetData.IsAllSet)
+            {
+                if (promptingSetData.NonpipelineableMandatoryParameters.Count > 0)
+                {
+                    foundMissingParameters = true;
+                    if (!promptingSetData.IsAllSet)
+                    {
+                        setsThatContainNonpipelineableMandatoryParameter |= promptingSetData.ParameterSet;
+                    }
+                }
+            }
+        }
+
+        if (!foundMissingParameters)
+        {
+            return false;
+        }
+
+        if (setThatTakesPipelineInputByValue != 0)
+        {
+            uint otherMandatorySetsToBeIgnored = 0;
+            bool chosenMandatorySetContainsNonpipelineableMandatoryParameters = false;
+
+            foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
+            {
+                if ((promptingSetData.ParameterSet & setThatTakesPipelineInputByValue) != 0 ||
+                    promptingSetData.IsAllSet)
+                {
+                    if (!promptingSetData.IsAllSet)
+                    {
+                        chosenMandatorySetContainsNonpipelineableMandatoryParameters =
+                            promptingSetData.NonpipelineableMandatoryParameters.Count > 0;
+                    }
+                }
+                else
+                {
+                    otherMandatorySetsToBeIgnored |= promptingSetData.ParameterSet;
+                }
+            }
+
+            CollectNonpipelineableMandatoryParameters(promptingData, setThatTakesPipelineInputByValue, result);
+
+            PreservePotentialParameterSets(setThatTakesPipelineInputByValue,
+                                           otherMandatorySetsToBeIgnored,
+                                           chosenMandatorySetContainsNonpipelineableMandatoryParameters);
+            return false;
+        }
+
+        if ((!foundMultipleSetsThatTakesPipelineInputByValue) &&
+           (!foundMultipleSetsThatTakesPipelineInputByPropertyName))
+        {
+            ThrowAmbiguousParameterSetException(CurrentParameterSetFlag);
+        }
+
+        if (setsThatContainNonpipelineableMandatoryParameter != 0)
+        {
+            IgnoreOtherMandatoryParameterSets(setsThatContainNonpipelineableMandatoryParameter);
+            if (CurrentParameterSetFlag == 0)
+            {
+                ThrowAmbiguousParameterSetException(CurrentParameterSetFlag);
+            }
+
+            if (ValidParameterSetCount(CurrentParameterSetFlag) == 1)
+            {
+                _context.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
+            }
+        }
+
+        return false;
+    }
+
+    private void PreservePotentialParameterSets(uint chosenMandatorySet, uint otherMandatorySetsToBeIgnored, bool chosenSetContainsNonpipelineableMandatoryParameters)
+    {
+        if (chosenSetContainsNonpipelineableMandatoryParameters)
+        {
+            CurrentParameterSetFlag = chosenMandatorySet;
+            _context.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
+        }
+        else
+        {
+            IgnoreOtherMandatoryParameterSets(otherMandatorySetsToBeIgnored);
+            _context.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
+
+            if (CurrentParameterSetFlag != chosenMandatorySet)
+            {
+                ParameterSetToBePrioritizedInPipelineBinding = chosenMandatorySet;
+            }
+        }
+    }
+
+    private void IgnoreOtherMandatoryParameterSets(uint otherMandatorySetsToBeIgnored)
+    {
+        if (otherMandatorySetsToBeIgnored == 0)
+        {
+            return;
+        }
+
+        if (CurrentParameterSetFlag == uint.MaxValue)
+        {
+            uint availableParameterSets = _bindableParameters.AllParameterSetFlags;
+            Diagnostics.Assert(availableParameterSets != 0, "At least one parameter set must be declared");
+            CurrentParameterSetFlag = availableParameterSets & (~otherMandatorySetsToBeIgnored);
+        }
+        else
+        {
+            CurrentParameterSetFlag &= (~otherMandatorySetsToBeIgnored);
+        }
+    }
+
+    internal static uint NewParameterSetPromptingData(
+        Dictionary<uint, ParameterSetPromptingData> promptingData,
+        MergedCompiledCommandParameter parameter,
+        ParameterSetSpecificMetadata parameterSetMetadata,
+        uint defaultParameterSet,
+        bool pipelineInputExpected)
+    {
+        uint parameterMandatorySets = 0;
+        uint parameterSetFlag = parameterSetMetadata.ParameterSetFlag;
+        if (parameterSetFlag == 0)
+        {
+            parameterSetFlag = uint.MaxValue;
+        }
+
+        bool isDefaultSet = (defaultParameterSet != 0) && ((defaultParameterSet & parameterSetFlag) != 0);
+
+        bool isMandatory = false;
+        if (parameterSetMetadata.IsMandatory)
+        {
+            parameterMandatorySets |= parameterSetFlag;
+            isMandatory = true;
+        }
+
+        bool isPipelineable = false;
+        if (pipelineInputExpected)
+        {
+            if (parameterSetMetadata.ValueFromPipeline || parameterSetMetadata.ValueFromPipelineByPropertyName)
+            {
+                isPipelineable = true;
+            }
+        }
+
+        if (isMandatory)
+        {
+            if (!promptingData.TryGetValue(parameterSetFlag, out ParameterSetPromptingData promptingDataForSet))
+            {
+                promptingDataForSet = new ParameterSetPromptingData(parameterSetFlag, isDefaultSet);
+                promptingData.Add(parameterSetFlag, promptingDataForSet);
+            }
+
+            if (isPipelineable)
+            {
+                promptingDataForSet.PipelineableMandatoryParameters[parameter] = parameterSetMetadata;
+
+                if (parameterSetMetadata.ValueFromPipeline)
+                {
+                    promptingDataForSet.PipelineableMandatoryByValueParameters[parameter] = parameterSetMetadata;
+                }
+
+                if (parameterSetMetadata.ValueFromPipelineByPropertyName)
+                {
+                    promptingDataForSet.PipelineableMandatoryByPropertyNameParameters[parameter] = parameterSetMetadata;
+                }
+            }
+            else
+            {
+                promptingDataForSet.NonpipelineableMandatoryParameters[parameter] = parameterSetMetadata;
+            }
+        }
+
+        return parameterMandatorySets;
     }
 
     private static readonly IParameterBindingContext s_defaultContext = new DefaultBindingContext();

@@ -2405,7 +2405,7 @@ namespace System.Management.Automation
         {
             bool result = true;
 
-            missingMandatoryParameters = GetMissingMandatoryParameters(validParameterSetCount, isPipelineInputExpected);
+            missingMandatoryParameters = ParameterSetResolver.GetMissingMandatoryParameters(validParameterSetCount, isPipelineInputExpected);
 
             if (missingMandatoryParameters.Count > 0)
             {

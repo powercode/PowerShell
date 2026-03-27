@@ -398,4 +398,121 @@ namespace PSTests.Parallel
         }
     }
 
+    [Trait("Category", "ParameterBinding")]
+    public static class ParameterSetResolverMandatoryAnalysisTests
+    {
+        [Fact]
+        public static void NewParameterSetPromptingData_MandatoryNonPipeline_AddsNonPipelineBucket()
+        {
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(
+                ParameterSetResolverTestFactory.MakeParam("Name", setName: "SetA", mandatory: true));
+            MergedCompiledCommandParameter parameter = metadata.BindableParameters["Name"];
+            ParameterSetSpecificMetadata setMetadata = parameter.Parameter.GetParameterSetData(parameter.Parameter.ParameterSetFlags);
+
+            var promptingData = new Dictionary<uint, ParameterSetPromptingData>();
+            uint mandatorySets = ParameterSetResolver.NewParameterSetPromptingData(
+                promptingData,
+                parameter,
+                setMetadata,
+                defaultParameterSet: 0,
+                pipelineInputExpected: false);
+
+            Assert.Equal(parameter.Parameter.ParameterSetFlags, mandatorySets);
+            Assert.True(promptingData.ContainsKey(parameter.Parameter.ParameterSetFlags));
+            Assert.Single(promptingData[parameter.Parameter.ParameterSetFlags].NonpipelineableMandatoryParameters);
+        }
+
+        [Fact]
+        public static void NewParameterSetPromptingData_MandatoryPipeline_AddsPipelineBucket()
+        {
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(
+                ParameterSetResolverTestFactory.MakeParam("Input", setName: "SetA", mandatory: true, valueFromPipeline: true));
+            MergedCompiledCommandParameter parameter = metadata.BindableParameters["Input"];
+            ParameterSetSpecificMetadata setMetadata = parameter.Parameter.GetParameterSetData(parameter.Parameter.ParameterSetFlags);
+
+            var promptingData = new Dictionary<uint, ParameterSetPromptingData>();
+            _ = ParameterSetResolver.NewParameterSetPromptingData(
+                promptingData,
+                parameter,
+                setMetadata,
+                defaultParameterSet: 0,
+                pipelineInputExpected: true);
+
+            Assert.Single(promptingData[parameter.Parameter.ParameterSetFlags].PipelineableMandatoryParameters);
+            Assert.Single(promptingData[parameter.Parameter.ParameterSetFlags].PipelineableMandatoryByValueParameters);
+        }
+
+        [Fact]
+        public static void CollectNonpipelineableMandatoryParameters_CollectsParametersForSelectedSet()
+        {
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(
+                ParameterSetResolverTestFactory.MakeParam("Name", setName: "SetA", mandatory: true));
+            MergedCompiledCommandParameter parameter = metadata.BindableParameters["Name"];
+            ParameterSetSpecificMetadata setMetadata = parameter.Parameter.GetParameterSetData(parameter.Parameter.ParameterSetFlags);
+
+            var promptingSet = new ParameterSetPromptingData(parameter.Parameter.ParameterSetFlags, isDefaultSet: false);
+            promptingSet.NonpipelineableMandatoryParameters[parameter] = setMetadata;
+            var promptingData = new Dictionary<uint, ParameterSetPromptingData>
+            {
+                [parameter.Parameter.ParameterSetFlags] = promptingSet,
+            };
+
+            var result = new Collection<MergedCompiledCommandParameter>();
+            ParameterSetResolver.CollectNonpipelineableMandatoryParameters(promptingData, parameter.Parameter.ParameterSetFlags, result);
+
+            Assert.Single(result);
+            Assert.Same(parameter, result[0]);
+        }
+
+        [Fact]
+        public static void GetMissingMandatoryParameters_NoPipeline_ReturnsMandatoryParameter()
+        {
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(
+                ParameterSetResolverTestFactory.MakeParam("Name", setName: "SetA", mandatory: true));
+            (ParameterSetResolver resolver, TestBindingContext context) = ParameterSetResolverTestFactory.CreateResolver(metadata);
+
+            MergedCompiledCommandParameter name = metadata.BindableParameters["Name"];
+            context.UnboundParameters = new List<MergedCompiledCommandParameter> { name };
+            resolver.CurrentParameterSetFlag = name.Parameter.ParameterSetFlags;
+
+            Collection<MergedCompiledCommandParameter> missing = resolver.GetMissingMandatoryParameters(validParameterSetCount: 1, isPipelineInputExpected: false);
+
+            Assert.Single(missing);
+            Assert.Same(name, missing[0]);
+        }
+
+        [Fact]
+        public static void GetMissingMandatoryParameters_PipelineSingleSet_ReturnsNonPipelineMandatoryParameter()
+        {
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(
+                ParameterSetResolverTestFactory.MakeParam("Name", setName: "SetA", mandatory: true));
+            (ParameterSetResolver resolver, TestBindingContext context) = ParameterSetResolverTestFactory.CreateResolver(metadata);
+
+            MergedCompiledCommandParameter name = metadata.BindableParameters["Name"];
+            context.UnboundParameters = new List<MergedCompiledCommandParameter> { name };
+            resolver.CurrentParameterSetFlag = name.Parameter.ParameterSetFlags;
+
+            Collection<MergedCompiledCommandParameter> missing = resolver.GetMissingMandatoryParameters(validParameterSetCount: 1, isPipelineInputExpected: true);
+
+            Assert.Single(missing);
+            Assert.Same(name, missing[0]);
+        }
+
+        [Fact]
+        public static void GetMissingMandatoryParameters_NoMandatoryParameters_ReturnsEmpty()
+        {
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(
+                ParameterSetResolverTestFactory.MakeParam("Name", setName: "SetA", mandatory: false));
+            (ParameterSetResolver resolver, TestBindingContext context) = ParameterSetResolverTestFactory.CreateResolver(metadata);
+
+            MergedCompiledCommandParameter name = metadata.BindableParameters["Name"];
+            context.UnboundParameters = new List<MergedCompiledCommandParameter> { name };
+            resolver.CurrentParameterSetFlag = name.Parameter.ParameterSetFlags;
+
+            Collection<MergedCompiledCommandParameter> missing = resolver.GetMissingMandatoryParameters(validParameterSetCount: 1, isPipelineInputExpected: false);
+
+            Assert.Empty(missing);
+        }
+    }
+
 }
