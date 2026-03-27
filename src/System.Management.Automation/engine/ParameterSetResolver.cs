@@ -69,10 +69,7 @@ internal sealed class ParameterSetResolver
     /// <summary>Narrows the current parameter set flag by AND-ing with the given flags.</summary>
     internal void NarrowByParameterSetFlags(uint flags)
     {
-        if (flags != 0)
-        {
-            CurrentParameterSetFlag &= flags;
-        }
+        CurrentParameterSetFlag &= flags;
     }
 
     internal static ParameterSetResolver CreateDefault()

@@ -168,14 +168,14 @@ namespace PSTests.Parallel
         }
 
         [Fact]
-        public static void NarrowByParameterSetFlags_Zero_NoChange()
+        public static void NarrowByParameterSetFlags_Zero_SetsToZero()
         {
             (ParameterSetResolver resolver, _) = ParameterSetResolverTestFactory.CreateResolver();
 
             resolver.CurrentParameterSetFlag = 0x0F;
             resolver.NarrowByParameterSetFlags(0);
 
-            Assert.Equal(0x0Fu, resolver.CurrentParameterSetFlag);
+            Assert.Equal(0u, resolver.CurrentParameterSetFlag);
         }
 
         [Fact]
