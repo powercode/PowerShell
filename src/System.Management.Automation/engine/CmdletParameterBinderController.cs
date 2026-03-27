@@ -22,7 +22,7 @@ namespace System.Management.Automation
     /// parameter binders required to bind parameters to a cmdlet.
     /// </summary>
     [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
-    internal class CmdletParameterBinderController : ParameterBinderController, IParameterBindingContext, IDefaultParameterBindingContext, IMandatoryParameterPrompterContext, IPipelineParameterBindingContext
+    internal class CmdletParameterBinderController : ParameterBinderController, IParameterBindingContext, IDefaultParameterBindingContext, IMandatoryParameterPrompterContext, IPipelineParameterBindingContext, IDelayBindScriptBlockContext
     {
         #region tracer
 
@@ -124,6 +124,7 @@ namespace System.Management.Automation
                 bindingContext: this);
 
             _pipelineParameterBinder = new PipelineParameterBinder(this);
+            _delayBindScriptBlockHandler = new DelayBindScriptBlockHandler(this);
         }
 
         #endregion ctor
@@ -192,7 +193,18 @@ namespace System.Management.Automation
         string IPipelineParameterBindingContext.CommandName => _commandMetadata.Name;
 
         bool IPipelineParameterBindingContext.InvokeAndBindDelayBindScriptBlock(PSObject inputToOperateOn, out bool thereWasSomethingToBind)
-            => InvokeAndBindDelayBindScriptBlock(inputToOperateOn, out thereWasSomethingToBind);
+            => _delayBindScriptBlockHandler.InvokeAndBind(inputToOperateOn, out thereWasSomethingToBind);
+
+        InvocationInfo IDelayBindScriptBlockContext.InvocationInfo => Command.MyInvocation;
+
+        IScriptExtent IDelayBindScriptBlockContext.GetErrorExtent(CommandParameterInternal argument)
+            => GetErrorExtent(argument);
+
+        bool IDelayBindScriptBlockContext.BindToAssociatedBinder(
+            CommandParameterInternal argument,
+            MergedCompiledCommandParameter parameter,
+            ParameterBindingFlags flags)
+            => BindToAssociatedBinder(argument, parameter, flags);
 
         void IPipelineParameterBindingContext.BackupDefaultParameter(MergedCompiledCommandParameter parameter)
             => BackupDefaultParameter(parameter);
@@ -286,7 +298,7 @@ namespace System.Management.Automation
             // we should filter out those parameter sets that cannot take pipeline inputs anymore.
             if (validParameterSetCount > 1 && isPipelineInputExpected)
             {
-                uint filteredValidParameterSetFlags = ParameterSetResolver.FilterParameterSetsTakingNoPipelineInput(_delayBindScriptBlocks.Keys);
+                uint filteredValidParameterSetFlags = ParameterSetResolver.FilterParameterSetsTakingNoPipelineInput(_delayBindScriptBlockHandler.Keys);
                 if (filteredValidParameterSetFlags != ParameterSetResolver.CurrentParameterSetFlag)
                 {
                     ParameterSetResolver.CurrentParameterSetFlag = filteredValidParameterSetFlags;
@@ -663,7 +675,7 @@ namespace System.Management.Automation
                 argument.ArgumentSpecified)
             {
                 object argumentValue = argument.ArgumentValue;
-                if ((argumentValue is ScriptBlock || argumentValue is DelayedScriptBlockArgument) &&
+                if ((argumentValue is ScriptBlock || argumentValue is DelayBindScriptBlockHandler.DelayedScriptBlockArgument) &&
                     !IsParameterScriptBlockBindable(parameter))
                 {
                     // Now check to see if the command expects to have pipeline input.
@@ -686,12 +698,10 @@ namespace System.Management.Automation
 
                     // We need to delay binding of this argument to the parameter
 
-                    DelayedScriptBlockArgument delayedArg = argumentValue as DelayedScriptBlockArgument ??
-                                                            new DelayedScriptBlockArgument { _argument = argument, _parameterBinder = this };
-                    if (!_delayBindScriptBlocks.ContainsKey(parameter))
-                    {
-                        _delayBindScriptBlocks.Add(parameter, delayedArg);
-                    }
+                    DelayBindScriptBlockHandler.DelayedScriptBlockArgument delayedArg =
+                        argumentValue as DelayBindScriptBlockHandler.DelayedScriptBlockArgument
+                        ?? _delayBindScriptBlockHandler.CreateEntry(argument);
+                    _delayBindScriptBlockHandler.TryAdd(parameter, delayedArg);
 
                     // We treat the parameter as bound, but really the
                     // script block gets run for each pipeline object and
@@ -1919,130 +1929,6 @@ namespace System.Management.Automation
             ThrowElaboratedBindingException(ex);
         }
 
-        /// <summary>
-        /// Invokes any delay bind script blocks and binds the resulting value
-        /// to the appropriate parameter.
-        /// </summary>
-        /// <param name="inputToOperateOn">
-        /// The input to the script block.
-        /// </param>
-        /// <param name="thereWasSomethingToBind">
-        /// Returns True if there was a ScriptBlock to invoke and bind, or false if there
-        /// are no ScriptBlocks to invoke.
-        /// </param>
-        /// <returns>
-        /// True if the binding succeeds, or false otherwise.
-        /// </returns>
-        /// <exception cref="ArgumentNullException">
-        /// if <paramref name="inputToOperateOn"/> is null.
-        /// </exception>
-        /// <exception cref="ParameterBindingException">
-        /// If execution of the script block throws an exception or if it doesn't produce
-        /// any output.
-        /// </exception>
-        private bool InvokeAndBindDelayBindScriptBlock(PSObject inputToOperateOn, out bool thereWasSomethingToBind)
-        {
-            thereWasSomethingToBind = false;
-            bool result = true;
-
-            // NOTE: we are not doing backup and restore of default parameter
-            // values here.  It is not needed because each script block will be
-            // invoked and each delay bind parameter bound for each pipeline object.
-            // This is unlike normal pipeline object processing which may bind
-            // different parameters depending on the type of the incoming pipeline
-            // object.
-
-            // Loop through each of the delay bind script blocks and invoke them.
-            // Bind the result to the associated parameter
-
-            foreach (KeyValuePair<MergedCompiledCommandParameter, DelayedScriptBlockArgument> delayedScriptBlock in _delayBindScriptBlocks)
-            {
-                thereWasSomethingToBind = true;
-
-                CommandParameterInternal argument = delayedScriptBlock.Value._argument;
-                MergedCompiledCommandParameter parameter = delayedScriptBlock.Key;
-
-                ScriptBlock script = argument.ArgumentValue as ScriptBlock;
-
-                Diagnostics.Assert(
-                    script != null,
-                    "An argument should only be put in the delayBindScriptBlocks collection if it is a ScriptBlock");
-
-                Collection<PSObject> output = null;
-
-                Exception error = null;
-                using (ParameterBinderBase.bindingTracer.TraceScope(
-                    "Invoking delay-bind ScriptBlock"))
-                {
-                    if (delayedScriptBlock.Value._parameterBinder == this)
-                    {
-                        try
-                        {
-                            output = script.DoInvoke(inputToOperateOn, inputToOperateOn, Array.Empty<object>());
-                            delayedScriptBlock.Value._evaluatedArgument = output;
-                        }
-                        catch (RuntimeException runtimeException)
-                        {
-                            error = runtimeException;
-                        }
-                    }
-                    else
-                    {
-                        output = delayedScriptBlock.Value._evaluatedArgument;
-                    }
-                }
-
-                if (error != null)
-                {
-                    ParameterBindingException.ThrowScriptBlockArgumentInvocationFailed(
-                        error,
-                        this.Command.MyInvocation,
-                        GetErrorExtent(argument),
-                        parameter.Parameter.Name,
-                        null,
-                        null,
-                        error.Message);
-                }
-
-                if (output == null || output.Count == 0)
-                {
-                    ParameterBindingException.ThrowScriptBlockArgumentNoOutput(
-                        this.Command.MyInvocation,
-                        GetErrorExtent(argument),
-                        parameter.Parameter.Name,
-                        null);
-                }
-
-                // Check the output.  If it is only a single value, just pass the single value,
-                // if not, pass in the whole collection.
-
-                object newValue = output;
-                if (output.Count == 1)
-                {
-                    newValue = output[0];
-                }
-
-                // Create a new CommandParameterInternal for the output of the script block.
-                var newArgument = CommandParameterInternal.CreateParameterWithArgument(
-                    argument.ParameterAst, argument.ParameterName, "-" + argument.ParameterName + ":",
-                    argument.ArgumentAst, newValue,
-                    false);
-
-                if (!BindToAssociatedBinder(newArgument, parameter, ParameterBindingFlags.ShouldCoerceType))
-                {
-                    result = false;
-                }
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Returns the binder instance responsible for the given parameter.
-        /// </summary>
-        /// <param name="parameter">
-        /// The parameter metadata.
-        /// </param>
         /// <returns>
         /// The binder that should bind this parameter, or null if no binder applies.
         /// </returns>
@@ -2114,6 +2000,7 @@ namespace System.Management.Automation
         private readonly DefaultParameterValueBinder _defaultParameterValueBinder;
         private readonly MandatoryParameterPrompter _mandatoryParameterPrompter;
         private readonly PipelineParameterBinder _pipelineParameterBinder;
+        private readonly DelayBindScriptBlockHandler _delayBindScriptBlockHandler;
 
         /// <summary>
         /// The cmdlet metadata.
@@ -2153,28 +2040,6 @@ namespace System.Management.Automation
         private readonly ReflectionParameterBinder _shouldProcessParameterBinder;
         private readonly ReflectionParameterBinder _pagingParameterBinder;
         private readonly ReflectionParameterBinder _transactionParameterBinder;
-
-        private sealed class DelayedScriptBlockArgument
-        {
-            // Remember the parameter binder so we know when to invoke the script block
-            // and when to use the evaluated argument.
-            internal CmdletParameterBinderController _parameterBinder;
-            internal CommandParameterInternal _argument;
-            internal Collection<PSObject> _evaluatedArgument;
-
-            public override string ToString()
-            {
-                return _argument.ArgumentValue.ToString();
-            }
-        }
-
-        /// <summary>
-        /// This dictionary is used to contain the arguments that were passed in as ScriptBlocks
-        /// but the parameter isn't a ScriptBlock. So we have to wait to bind the parameter
-        /// until there is a pipeline object available to invoke the ScriptBlock with.
-        /// </summary>
-        private readonly Dictionary<MergedCompiledCommandParameter, DelayedScriptBlockArgument> _delayBindScriptBlocks =
-            new Dictionary<MergedCompiledCommandParameter, DelayedScriptBlockArgument>();
 
         /// <summary>
         /// A collection of the default values of the parameters.
