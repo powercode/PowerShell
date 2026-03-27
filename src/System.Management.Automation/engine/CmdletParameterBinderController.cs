@@ -20,7 +20,7 @@ namespace System.Management.Automation
     /// This is the interface between the CommandProcessor and the various
     /// parameter binders required to bind parameters to a cmdlet.
     /// </summary>
-    internal class CmdletParameterBinderController : ParameterBinderController, IParameterBindingContext
+    internal class CmdletParameterBinderController : ParameterBinderController, IParameterBindingContext, IDefaultParameterBindingContext
     {
         #region tracer
 
@@ -87,6 +87,13 @@ namespace System.Management.Automation
                 commandMetadata: _commandMetadata,
                 bindableParameters: this.BindableParameters,
                 context: this);
+
+            _defaultParameterValueBinder = new DefaultParameterValueBinder(
+                commandMetadata: _commandMetadata,
+                commandRuntime: _commandRuntime,
+                context: cmdlet.Context,
+                bindableParameters: this.BindableParameters,
+                bindingContext: this);
         }
 
         #endregion ctor
@@ -102,6 +109,25 @@ namespace System.Management.Automation
 
         void IParameterBindingContext.ThrowBindingException(ParameterBindingException exception)
             => ThrowOrElaborateBindingException(exception);
+
+        bool IDefaultParameterBindingContext.DispatchBindToSubBinder(
+            uint validParameterSetFlag,
+            CommandParameterInternal argument,
+            MergedCompiledCommandParameter parameter,
+            ParameterBindingFlags flags)
+            => DispatchBindToSubBinder(validParameterSetFlag, argument, parameter, flags);
+
+        Dictionary<string, CommandParameterInternal> IDefaultParameterBindingContext.BoundArguments
+            => BoundArguments;
+
+        Dictionary<string, MergedCompiledCommandParameter> IDefaultParameterBindingContext.BoundParameters
+            => BoundParameters;
+
+        Collection<string> IDefaultParameterBindingContext.BoundDefaultParameters
+            => BoundDefaultParameters;
+
+        HashSet<string> IDefaultParameterBindingContext.CopyBoundPositionalParameters()
+            => DefaultParameterBinder.CommandLineParameters.CopyBoundPositionalParameters();
 
         #region helper_methods
 
@@ -163,7 +189,13 @@ namespace System.Management.Automation
             // parameters
             if (validParameterSetCount == 1 && !DefaultParameterBindingInUse)
             {
-                ApplyDefaultParameterBinding("Mandatory Checking", false);
+                if (_defaultParameterValueBinder.ApplyDefaultParameterBinding(
+                    "Mandatory Checking",
+                    isDynamic: false,
+                    currentParameterSetFlag: ParameterSetResolver.CurrentParameterSetFlag))
+                {
+                    DefaultParameterBindingInUse = true;
+                }
             }
 
             // If there are multiple valid parameter sets and we are expecting pipeline inputs,
@@ -249,10 +281,9 @@ namespace System.Management.Automation
 
             InitUnboundArguments(arguments);
             CommandMetadata cmdletMetadata = _commandMetadata;
-            // Clear the warningSet at the beginning.
-            _warningSet.Clear();
             // Parse $PSDefaultParameterValues to get all valid <parameter, value> pairs
-            _allDefaultParameterValuePairs = this.GetDefaultParameterValuePairs(true);
+            _defaultParameterValueBinder.ResetForNewBinding();
+            _defaultParameterValueBinder.GetDefaultParameterValuePairs(true);
             // Set to false at the beginning
             DefaultParameterBindingInUse = false;
             // Clear the bound default parameters at the beginning
@@ -289,7 +320,13 @@ namespace System.Management.Automation
 
             // Try applying the default parameter binding after POSITIONAL BIND so that the default parameter
             // values can influence the parameter set selection earlier than the default parameter set.
-            ApplyDefaultParameterBinding("POSITIONAL BIND", false);
+            if (_defaultParameterValueBinder.ApplyDefaultParameterBinding(
+                "POSITIONAL BIND",
+                isDynamic: false,
+                currentParameterSetFlag: ParameterSetResolver.CurrentParameterSetFlag))
+            {
+                DefaultParameterBindingInUse = true;
+            }
 
             // We need to make sure there is at least one valid parameter set. Its
             // OK to allow more than one as long as one of them takes pipeline input.
@@ -302,7 +339,13 @@ namespace System.Management.Automation
 
             // Try binding the default parameters again. After dynamic binding, new parameter metadata are
             // included, so it's possible a previously unsuccessful binding will succeed.
-            ApplyDefaultParameterBinding("DYNAMIC BIND", true);
+            if (_defaultParameterValueBinder.ApplyDefaultParameterBinding(
+                "DYNAMIC BIND",
+                isDynamic: true,
+                currentParameterSetFlag: ParameterSetResolver.CurrentParameterSetFlag))
+            {
+                DefaultParameterBindingInUse = true;
+            }
 
             // If this generated an exception (but we didn't have one from the non-dynamic
             // parameters, report on this one.
@@ -315,513 +358,10 @@ namespace System.Management.Automation
             VerifyArgumentsProcessed(reportedBindingException);
         }
 
-        /// <summary>
-        /// Apply the binding for the default parameter defined by the user.
-        /// </summary>
-        /// <param name="bindingStage">
-        /// Dictate which binding stage this default binding happens
-        /// </param>
-        /// <param name="isDynamic">
-        /// Special operation needed if the default binding happens at the dynamic binding stage
-        /// </param>
-        /// <returns></returns>
-        private void ApplyDefaultParameterBinding(string bindingStage, bool isDynamic)
+        internal IDictionary DefaultParameterValues
         {
-            if (!_useDefaultParameterBinding)
-            {
-                return;
-            }
-
-            if (isDynamic)
-            {
-                // Get user defined default parameter value pairs again, so that the
-                // dynamic parameter value pairs could be involved.
-                _allDefaultParameterValuePairs = GetDefaultParameterValuePairs(false);
-            }
-
-            Dictionary<MergedCompiledCommandParameter, object> qualifiedParameterValuePairs = GetQualifiedParameterValuePairs(ParameterSetResolver.CurrentParameterSetFlag, _allDefaultParameterValuePairs);
-            if (qualifiedParameterValuePairs != null)
-            {
-                bool isSuccess = false;
-                using (ParameterBinderBase.bindingTracer.TraceScope(
-                    "BIND DEFAULT <parameter, value> pairs after [{0}] for [{1}]",
-                    bindingStage, _commandMetadata.Name))
-                {
-                    isSuccess = BindDefaultParameters(ParameterSetResolver.CurrentParameterSetFlag, qualifiedParameterValuePairs);
-                    if (isSuccess && !DefaultParameterBindingInUse)
-                    {
-                        DefaultParameterBindingInUse = true;
-                    }
-                }
-
-                s_tracer.WriteLine("BIND DEFAULT after [{0}] result [{1}]", bindingStage, isSuccess);
-            }
-        }
-
-        /// <summary>
-        /// Bind the default parameter value pairs.
-        /// </summary>
-        /// <param name="validParameterSetFlag">ValidParameterSetFlag.</param>
-        /// <param name="defaultParameterValues">Default value pairs.</param>
-        /// <returns>
-        /// true if there is at least one default parameter bound successfully
-        /// false if there is no default parameter bound successfully
-        /// </returns>
-        private bool BindDefaultParameters(uint validParameterSetFlag, Dictionary<MergedCompiledCommandParameter, object> defaultParameterValues)
-        {
-            bool ret = false;
-            foreach (var pair in defaultParameterValues)
-            {
-                MergedCompiledCommandParameter parameter = pair.Key;
-                object argumentValue = pair.Value;
-                string parameterName = parameter.Parameter.Name;
-
-                try
-                {
-                    if (argumentValue is ScriptBlock scriptBlockArg)
-                    {
-                        // Get the current binding state, and pass it to the ScriptBlock as the argument
-                        // The 'arg' includes HashSet properties 'BoundParameters', 'BoundPositionalParameters',
-                        // 'BoundDefaultParameters', and 'LastBindingStage'. So the user can set value
-                        // to a parameter depending on the current binding state.
-                        PSObject arg = WrapBindingState();
-                        Collection<PSObject> results = scriptBlockArg.Invoke(arg);
-                        if (results == null || results.Count == 0)
-                        {
-                            continue;
-                        }
-                        else if (results.Count == 1)
-                        {
-                            argumentValue = results[0];
-                        }
-                        else
-                        {
-                            argumentValue = results;
-                        }
-                    }
-
-                    CommandParameterInternal bindableArgument =
-                        CommandParameterInternal.CreateParameterWithArgument(
-                           /*parameterAst*/null, parameterName, "-" + parameterName + ":",
-                           /*argumentAst*/null, argumentValue, false);
-
-                        bool bindResult =
-                            DispatchBindToSubBinder(
-                                validParameterSetFlag,
-                                bindableArgument,
-                                parameter,
-                                ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock);
-
-                    if (bindResult && !ret)
-                    {
-                        ret = true;
-                    }
-
-                    if (bindResult)
-                    {
-                        BoundDefaultParameters.Add(parameterName);
-                    }
-                }
-                catch (ParameterBindingException ex)
-                {
-                    // We don't want the failures in default binding affect the command line binding,
-                    // so we write out a warning and ignore this binding failure
-                    if (!_warningSet.Contains(_commandMetadata.Name + Separator + parameterName))
-                    {
-                        string message = string.Format(CultureInfo.InvariantCulture,
-                            ParameterBinderStrings.FailToBindDefaultParameter,
-                            LanguagePrimitives.IsNull(argumentValue) ? "null" : argumentValue.ToString(),
-                            parameterName, ex.Message);
-                        _commandRuntime.WriteWarning(message);
-                        _warningSet.Add(_commandMetadata.Name + Separator + parameterName);
-                    }
-
-                    continue;
-                }
-            }
-
-            return ret;
-        }
-
-        /// <summary>
-        /// Wrap up current binding state to provide more information to the user.
-        /// </summary>
-        /// <returns></returns>
-        private PSObject WrapBindingState()
-        {
-            HashSet<string> boundParameterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            HashSet<string> boundPositionalParameterNames =
-                this.DefaultParameterBinder.CommandLineParameters.CopyBoundPositionalParameters();
-            HashSet<string> boundDefaultParameterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (string paramName in BoundParameters.Keys)
-            {
-                boundParameterNames.Add(paramName);
-            }
-
-            foreach (string paramName in BoundDefaultParameters)
-            {
-                boundDefaultParameterNames.Add(paramName);
-            }
-
-            PSObject result = new PSObject();
-            result.Properties.Add(new PSNoteProperty("BoundParameters", boundParameterNames));
-            result.Properties.Add(new PSNoteProperty("BoundPositionalParameters", boundPositionalParameterNames));
-            result.Properties.Add(new PSNoteProperty("BoundDefaultParameters", boundDefaultParameterNames));
-
-            return result;
-        }
-
-        /// <summary>
-        /// Get all qualified default parameter value pairs based on the
-        /// given currentParameterSetFlag.
-        /// </summary>
-        /// <param name="currentParameterSetFlag"></param>
-        /// <param name="availableParameterValuePairs"></param>
-        /// <returns>Null if no qualified pair found.</returns>
-        private Dictionary<MergedCompiledCommandParameter, object> GetQualifiedParameterValuePairs(
-            uint currentParameterSetFlag,
-            Dictionary<MergedCompiledCommandParameter, object> availableParameterValuePairs)
-        {
-            if (availableParameterValuePairs == null)
-            {
-                return null;
-            }
-
-            Dictionary<MergedCompiledCommandParameter, object> result = new Dictionary<MergedCompiledCommandParameter, object>();
-
-            uint possibleParameterFlag = uint.MaxValue;
-            foreach (var pair in availableParameterValuePairs)
-            {
-                MergedCompiledCommandParameter param = pair.Key;
-                if ((param.Parameter.ParameterSetFlags & currentParameterSetFlag) == 0 && !param.Parameter.IsInAllSets)
-                {
-                    continue;
-                }
-
-                if (BoundArguments.ContainsKey(param.Parameter.Name))
-                {
-                    continue;
-                }
-
-                // check if this param's set conflicts with other possible params.
-                if (param.Parameter.ParameterSetFlags != 0)
-                {
-                    possibleParameterFlag &= param.Parameter.ParameterSetFlags;
-                    if (possibleParameterFlag == 0)
-                    {
-                        return null;
-                    }
-                }
-
-                result.Add(param, pair.Value);
-            }
-
-            if (result.Count > 0)
-            {
-                return result;
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Get the aliases of the current cmdlet.
-        /// </summary>
-        /// <returns></returns>
-        private List<string> GetAliasOfCurrentCmdlet()
-        {
-            var results = Context.SessionState.Internal.GetAliasesByCommandName(_commandMetadata.Name).ToList();
-
-            return results.Count > 0 ? results : null;
-        }
-
-        /// <summary>
-        /// Check if the passed-in aliasName matches an alias name in _aliasList.
-        /// </summary>
-        /// <param name="aliasName"></param>
-        /// <returns></returns>
-        private bool MatchAnyAlias(string aliasName)
-        {
-            if (_aliasList == null)
-            {
-                return false;
-            }
-
-            bool result = false;
-            WildcardPattern aliasPattern = WildcardPattern.Get(aliasName, WildcardOptions.IgnoreCase);
-            foreach (string alias in _aliasList)
-            {
-                if (aliasPattern.IsMatch(alias))
-                {
-                    result = true;
-                    break;
-                }
-            }
-
-            return result;
-        }
-
-        internal IDictionary DefaultParameterValues { get; set; }
-        /// <summary>
-        /// Get all available default parameter value pairs.
-        /// </summary>
-        /// <returns>Return the available parameter value pairs. Otherwise return null.</returns>
-        private Dictionary<MergedCompiledCommandParameter, object> GetDefaultParameterValuePairs(bool needToGetAlias)
-        {
-            if (DefaultParameterValues == null)
-            {
-                _useDefaultParameterBinding = false;
-                return null;
-            }
-
-            var availablePairs = new Dictionary<MergedCompiledCommandParameter, object>();
-
-            if (needToGetAlias && DefaultParameterValues.Count > 0)
-            {
-                // Get all aliases of the current cmdlet
-                _aliasList = GetAliasOfCurrentCmdlet();
-            }
-
-            // Set flag to true by default
-            _useDefaultParameterBinding = true;
-
-            string currentCmdletName = _commandMetadata.Name;
-
-            IDictionary<string, MergedCompiledCommandParameter> bindableParameters = BindableParameters.BindableParameters;
-            IDictionary<string, MergedCompiledCommandParameter> bindableAlias = BindableParameters.AliasedParameters;
-
-            // Contains parameters that are set with different values by settings in $PSDefaultParameterValues.
-            // We should ignore those settings and write out a warning
-            var parametersToRemove = new HashSet<MergedCompiledCommandParameter>();
-            var wildcardDefault = new Dictionary<string, object>();
-            // Contains keys that are in bad format. For every bad format key, we should write out a warning message
-            // the first time we encounter it, and remove it from the $PSDefaultParameterValues
-            var keysToRemove = new List<object>();
-
-            foreach (DictionaryEntry entry in DefaultParameterValues)
-            {
-                if (entry.Key is not string key)
-                {
-                    continue;
-                }
-
-                key = key.Trim();
-                string cmdletName = null;
-                string parameterName = null;
-
-                // The key is not in valid format
-                if (!DefaultParameterDictionary.CheckKeyIsValid(key, ref cmdletName, ref parameterName))
-                {
-                    if (key.Equals("Disabled", StringComparison.OrdinalIgnoreCase) &&
-                        LanguagePrimitives.IsTrue(entry.Value))
-                    {
-                        _useDefaultParameterBinding = false;
-                        return null;
-                    }
-                    // Write out a warning message if the key is not 'Disabled'
-                    if (!key.Equals("Disabled", StringComparison.OrdinalIgnoreCase))
-                    {
-                        keysToRemove.Add(entry.Key);
-                    }
-
-                    continue;
-                }
-
-                Diagnostics.Assert(cmdletName != null && parameterName != null, "The cmdletName and parameterName should be set in CheckKeyIsValid");
-
-                if (WildcardPattern.ContainsWildcardCharacters(key))
-                {
-                    wildcardDefault.Add(cmdletName + Separator + parameterName, entry.Value);
-                    continue;
-                }
-
-                // Continue to process this entry only if the specified cmdletName is the name
-                // of the current cmdlet, or is an alias name of the current cmdlet.
-                if (!cmdletName.Equals(currentCmdletName, StringComparison.OrdinalIgnoreCase) && !MatchAnyAlias(cmdletName))
-                {
-                    continue;
-                }
-
-                GetDefaultParameterValuePairsHelper(
-                    cmdletName, parameterName, entry.Value,
-                    bindableParameters, bindableAlias,
-                    availablePairs, parametersToRemove);
-            }
-
-            foreach (KeyValuePair<string, object> wildcard in wildcardDefault)
-            {
-                string key = wildcard.Key;
-
-                string cmdletName = key.Substring(0, key.IndexOf(Separator, StringComparison.OrdinalIgnoreCase));
-                string parameterName = key.Substring(key.IndexOf(Separator, StringComparison.OrdinalIgnoreCase) + Separator.Length);
-
-                WildcardPattern cmdletPattern = WildcardPattern.Get(cmdletName, WildcardOptions.IgnoreCase);
-                // Continue to process this entry only if the cmdletName matches the name of the current
-                // cmdlet, or matches an alias name of the current cmdlet
-                if (!cmdletPattern.IsMatch(currentCmdletName) && !MatchAnyAlias(cmdletName))
-                {
-                    continue;
-                }
-
-                if (!WildcardPattern.ContainsWildcardCharacters(parameterName))
-                {
-                    GetDefaultParameterValuePairsHelper(
-                        cmdletName, parameterName, wildcard.Value,
-                        bindableParameters, bindableAlias,
-                        availablePairs, parametersToRemove);
-
-                    continue;
-                }
-
-                WildcardPattern parameterPattern = MemberMatch.GetNamePattern(parameterName);
-                var matches = new List<MergedCompiledCommandParameter>();
-
-                foreach (KeyValuePair<string, MergedCompiledCommandParameter> entry in bindableParameters)
-                {
-                    if (parameterPattern.IsMatch(entry.Key))
-                    {
-                        matches.Add(entry.Value);
-                    }
-                }
-
-                foreach (KeyValuePair<string, MergedCompiledCommandParameter> entry in bindableAlias)
-                {
-                    if (parameterPattern.IsMatch(entry.Key))
-                    {
-                        matches.Add(entry.Value);
-                    }
-                }
-
-                if (matches.Count > 1)
-                {
-                    // The parameterPattern matches more than one parameters, so we write out a warning message and ignore this setting
-                    if (!_warningSet.Contains(cmdletName + Separator + parameterName))
-                    {
-                        _commandRuntime.WriteWarning(
-                            string.Format(CultureInfo.InvariantCulture, ParameterBinderStrings.MultipleParametersMatched, parameterName));
-                        _warningSet.Add(cmdletName + Separator + parameterName);
-                    }
-
-                    continue;
-                }
-
-                if (matches.Count == 1)
-                {
-                    if (!availablePairs.ContainsKey(matches[0]))
-                    {
-                        availablePairs.Add(matches[0], wildcard.Value);
-                        continue;
-                    }
-
-                    if (!wildcard.Value.Equals(availablePairs[matches[0]]))
-                    {
-                        if (!_warningSet.Contains(cmdletName + Separator + parameterName))
-                        {
-                            _commandRuntime.WriteWarning(
-                                string.Format(CultureInfo.InvariantCulture, ParameterBinderStrings.DifferentValuesAssignedToSingleParameter, parameterName));
-                            _warningSet.Add(cmdletName + Separator + parameterName);
-                        }
-
-                        parametersToRemove.Add(matches[0]);
-                    }
-                }
-            }
-
-            if (keysToRemove.Count > 0)
-            {
-                var keysInError = new StringBuilder();
-                foreach (object badFormatKey in keysToRemove)
-                {
-                    if (DefaultParameterValues.Contains(badFormatKey))
-                        DefaultParameterValues.Remove(badFormatKey);
-
-                    keysInError.Append(badFormatKey.ToString() + ", ");
-                }
-
-                keysInError.Remove(keysInError.Length - 2, 2);
-                var multipleKeys = keysToRemove.Count > 1;
-                string formatString = multipleKeys
-                                            ? ParameterBinderStrings.MultipleKeysInBadFormat
-                                            : ParameterBinderStrings.SingleKeyInBadFormat;
-                _commandRuntime.WriteWarning(
-                    string.Format(CultureInfo.InvariantCulture, formatString, keysInError));
-            }
-
-            foreach (MergedCompiledCommandParameter param in parametersToRemove)
-            {
-                availablePairs.Remove(param);
-            }
-
-            if (availablePairs.Count > 0)
-            {
-                return availablePairs;
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// A helper method for GetDefaultParameterValuePairs.
-        /// </summary>
-        /// <param name="cmdletName"></param>
-        /// <param name="paramName"></param>
-        /// <param name="paramValue"></param>
-        /// <param name="bindableParameters"></param>
-        /// <param name="bindableAlias"></param>
-        /// <param name="result"></param>
-        /// <param name="parametersToRemove"></param>
-        private void GetDefaultParameterValuePairsHelper(
-            string cmdletName, string paramName, object paramValue,
-            IDictionary<string, MergedCompiledCommandParameter> bindableParameters,
-            IDictionary<string, MergedCompiledCommandParameter> bindableAlias,
-            Dictionary<MergedCompiledCommandParameter, object> result,
-            HashSet<MergedCompiledCommandParameter> parametersToRemove)
-        {
-            // No exception should be thrown if we cannot find a match for the 'paramName',
-            // because the 'paramName' could be a dynamic parameter name, and this dynamic parameter
-            // hasn't been introduced at the current stage.
-            bool writeWarning = false;
-            MergedCompiledCommandParameter matchParameter;
-            object resultObject;
-            if (bindableParameters.TryGetValue(paramName, out matchParameter))
-            {
-                if (!result.TryGetValue(matchParameter, out resultObject))
-                {
-                    result.Add(matchParameter, paramValue);
-                    return;
-                }
-
-                if (!paramValue.Equals(resultObject))
-                {
-                    writeWarning = true;
-                    parametersToRemove.Add(matchParameter);
-                }
-            }
-            else
-            {
-                if (bindableAlias.TryGetValue(paramName, out matchParameter))
-                {
-                    if (!result.TryGetValue(matchParameter, out resultObject))
-                    {
-                        result.Add(matchParameter, paramValue);
-                        return;
-                    }
-
-                    if (!paramValue.Equals(resultObject))
-                    {
-                        writeWarning = true;
-                        parametersToRemove.Add(matchParameter);
-                    }
-                }
-            }
-
-            if (writeWarning && !_warningSet.Contains(cmdletName + Separator + paramName))
-            {
-                _commandRuntime.WriteWarning(
-                    string.Format(CultureInfo.InvariantCulture, ParameterBinderStrings.DifferentValuesAssignedToSingleParameter, paramName));
-                _warningSet.Add(cmdletName + Separator + paramName);
-            }
+            get => _defaultParameterValueBinder.DefaultParameterValues;
+            set => _defaultParameterValueBinder.DefaultParameterValues = value;
         }
 
         /// <summary>
@@ -2770,7 +2310,13 @@ namespace System.Management.Automation
 
             if (!DefaultParameterBindingInUse)
             {
-                ApplyDefaultParameterBinding("PIPELINE BIND", false);
+                if (_defaultParameterValueBinder.ApplyDefaultParameterBinding(
+                    "PIPELINE BIND",
+                    isDynamic: false,
+                    currentParameterSetFlag: ParameterSetResolver.CurrentParameterSetFlag))
+                {
+                    DefaultParameterBindingInUse = true;
+                }
             }
 
             return result;
@@ -3236,28 +2782,7 @@ namespace System.Management.Automation
         /// </summary>
         internal Cmdlet Command { get; }
 
-        #region DefaultParameterBindingStructures
-
-        /// <summary>
-        /// The separator used in GetDefaultParameterValuePairs function.
-        /// </summary>
-        private const string Separator = ":::";
-
-        // Hold all aliases of the current cmdlet
-        private List<string> _aliasList;
-        // Method GetDefaultParameterValuePairs() will be invoked twice, one time before the Named Bind,
-        // one time after Dynamic Bind. We don't want the same warning message to be written out twice.
-        // Put the key(in case the key format is invalid), or cmdletName+separator+parameterName(in case
-        // setting resolves to multiple parameters or multiple different values are assigned to the same
-        // parameter) in warningSet when the corresponding warnings are written out, so they won't get
-        // written out the second time GetDefaultParameterValuePairs() is called.
-        private readonly HashSet<string> _warningSet = new HashSet<string>();
-
-        // Hold all user defined default parameter values
-        private Dictionary<MergedCompiledCommandParameter, object> _allDefaultParameterValuePairs;
-        private bool _useDefaultParameterBinding = true;
-
-        #endregion DefaultParameterBindingStructures
+        private readonly DefaultParameterValueBinder _defaultParameterValueBinder;
 
         /// <summary>
         /// The cmdlet metadata.
