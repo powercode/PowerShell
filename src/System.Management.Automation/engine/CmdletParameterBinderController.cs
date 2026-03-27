@@ -1237,7 +1237,7 @@ namespace System.Management.Automation
             {
                 case ParameterBinderAssociation.DeclaredFormalParameters:
                     result =
-                        DefaultParameterBinder.BindParameter(
+                        DefaultParameterBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -1245,7 +1245,7 @@ namespace System.Management.Automation
 
                 case ParameterBinderAssociation.CommonParameters:
                     result =
-                        CommonParametersBinder.BindParameter(
+                        CommonParametersBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -1257,7 +1257,7 @@ namespace System.Management.Automation
                         "The metadata for the ShouldProcessParameters should only be available if the command supports ShouldProcess");
 
                     result =
-                        ShouldProcessParametersBinder.BindParameter(
+                        ShouldProcessParametersBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -1269,7 +1269,7 @@ namespace System.Management.Automation
                         "The metadata for the PagingParameters should only be available if the command supports paging");
 
                     result =
-                        PagingParametersBinder.BindParameter(
+                        PagingParametersBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -1281,7 +1281,7 @@ namespace System.Management.Automation
                         "The metadata for the TransactionsParameters should only be available if the command supports transactions");
 
                     result =
-                        TransactionParametersBinder.BindParameter(
+                        TransactionParametersBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -1295,7 +1295,7 @@ namespace System.Management.Automation
                     if (_dynamicParameterBinder != null)
                     {
                         result =
-                            _dynamicParameterBinder.BindParameter(
+                            _dynamicParameterBinder.CoerceValidateAndBind(
                                 argument,
                                 parameter.Parameter,
                                 flags);

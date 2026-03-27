@@ -296,7 +296,7 @@ namespace System.Management.Automation
         /// or
         /// If the binding to the parameter fails.
         /// </exception>
-        internal virtual bool BindParameter(
+        internal virtual bool CoerceValidateAndBind(
             CommandParameterInternal parameter,
             CompiledCommandParameter parameterMetadata,
             ParameterBindingFlags flags)
