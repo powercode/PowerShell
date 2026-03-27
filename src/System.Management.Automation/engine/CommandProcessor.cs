@@ -563,7 +563,7 @@ namespace System.Management.Automation
                 if (!mandatoryParametersSpecified)
                 {
                     string missingParameters =
-                        CmdletParameterBinderController.BuildMissingParamsString(missingMandatoryParameters);
+                        MandatoryParameterPrompter.BuildMissingParamsString(missingMandatoryParameters);
 
                     // Since the input object did not satisfy all mandatory parameters
                     // for the command, write an ErrorRecord to the error pipe with
