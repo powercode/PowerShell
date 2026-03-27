@@ -503,7 +503,7 @@ namespace System.Management.Automation
             {
                 case ParameterBinderAssociation.DeclaredFormalParameters:
                     result =
-                        this.DefaultParameterBinder.BindParameter(
+                        this.DefaultParameterBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
