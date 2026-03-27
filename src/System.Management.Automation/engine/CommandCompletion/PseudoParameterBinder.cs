@@ -1010,7 +1010,7 @@ namespace System.Management.Automation.Language
                     (_currentParameterSetFlag & (_currentParameterSetFlag - 1)) == 0;
                 if ((bindingType != BindingType.ParameterCompletion) && parameterSetSpecified && (!onlyOneRemainingParameterSet))
                 {
-                    CmdletParameterBinderController.ResolveParameterSetAmbiguityBasedOnMandatoryParameters(
+                    ParameterSetResolver.ResolveParameterSetAmbiguityBasedOnMandatoryParameters(
                         _boundParameters,
                         _unboundParameters,
                         null,

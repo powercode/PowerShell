@@ -11,7 +11,6 @@ using System.Management.Automation.Host;
 using System.Management.Automation.Internal;
 using System.Management.Automation.Language;
 using System.Management.Automation.Runspaces;
-using System.Numerics;
 using System.Runtime.ExceptionServices;
 using System.Text;
 
@@ -150,13 +149,13 @@ namespace System.Management.Automation
                 // parameter set and that all the mandatory
                 // parameters for the working parameter set are specified, or prompt
 
-                validParameterSetCount = ValidateParameterSets(false, true);
+                validParameterSetCount = ParameterSetResolver.ValidateParameterSets(false, true, AtLeastOneUnboundValidParameterSetTakesPipelineInput);
             }
             else
             {
                 // Use ValidateParameterSets to get the number of valid parameter
                 // sets.
-                validParameterSetCount = ValidateParameterSets(true, false);
+                validParameterSetCount = ParameterSetResolver.ValidateParameterSets(true, false, AtLeastOneUnboundValidParameterSetTakesPipelineInput);
             }
 
             // If the parameter set is determined and the default parameters are not used
@@ -176,7 +175,7 @@ namespace System.Management.Automation
                 {
                     ParameterSetResolver.CurrentParameterSetFlag = filteredValidParameterSetFlags;
                     // The valid parameter set flag is narrowed down, we get the new validParameterSetCount
-                    validParameterSetCount = ValidateParameterSets(true, false);
+                    validParameterSetCount = ParameterSetResolver.ValidateParameterSets(true, false, AtLeastOneUnboundValidParameterSetTakesPipelineInput);
                 }
             }
 
@@ -211,7 +210,7 @@ namespace System.Management.Automation
 
             if (!isPipelineInputExpected)
             {
-                VerifyParameterSetSelected();
+                ParameterSetResolver.VerifyParameterSetSelected();
             }
 
             // Set the prepipeline parameter set flags so that they can be restored
@@ -294,7 +293,7 @@ namespace System.Management.Automation
 
             // We need to make sure there is at least one valid parameter set. Its
             // OK to allow more than one as long as one of them takes pipeline input.
-            ValidateParameterSets(true, false);
+            ParameterSetResolver.ValidateParameterSets(true, false, AtLeastOneUnboundValidParameterSetTakesPipelineInput);
 
             // Always get the dynamic parameters as there may be mandatory parameters there
 
@@ -957,44 +956,6 @@ namespace System.Management.Automation
                 }
 
                 ThrowOrElaborateBindingException(bindingException);
-            }
-        }
-
-        /// <summary>
-        /// Verifies that a single parameter set is selected and throws an exception if
-        /// one of there are multiple and one of them is not the default parameter set.
-        /// </summary>
-        private void VerifyParameterSetSelected()
-        {
-            // Now verify that a parameter set has been selected if any parameter sets
-            // were defined.
-
-            if (this.BindableParameters.ParameterSetCount > 1)
-            {
-                if (ParameterSetResolver.CurrentParameterSetFlag == uint.MaxValue)
-                {
-                    if ((ParameterSetResolver.CurrentParameterSetFlag &
-                         _commandMetadata.DefaultParameterSetFlag) != 0 &&
-                         _commandMetadata.DefaultParameterSetFlag != uint.MaxValue)
-                    {
-                        ParameterBinderBase.bindingTracer.WriteLine(
-                            "{0} valid parameter sets, using the DEFAULT PARAMETER SET: [{0}]",
-                            this.BindableParameters.ParameterSetCount.ToString(),
-                            _commandMetadata.DefaultParameterSetName);
-
-                        ParameterSetResolver.CurrentParameterSetFlag =
-                            _commandMetadata.DefaultParameterSetFlag;
-                    }
-                    else
-                    {
-                        ParameterBinderBase.bindingTracer.TraceError(
-                            "ERROR: {0} valid parameter sets, but NOT DEFAULT PARAMETER SET.",
-                            this.BindableParameters.ParameterSetCount);
-
-                        // Throw an exception for ambiguous parameter set
-                        ThrowAmbiguousParameterSetException(ParameterSetResolver.CurrentParameterSetFlag, BindableParameters);
-                    }
-                }
             }
         }
 
@@ -1861,10 +1822,10 @@ namespace System.Management.Automation
                 // We need to analyze the prompting data that was gathered to determine what parameter
                 // set to use, which parameters need prompting for, and which parameters take pipeline input.
 
-                int commandMandatorySetsCount = ValidParameterSetCount(commandMandatorySets);
+                int commandMandatorySetsCount = ParameterSetResolver.ValidParameterSetCount(commandMandatorySets);
                 if (commandMandatorySetsCount == 0)
                 {
-                    ThrowAmbiguousParameterSetException(ParameterSetResolver.CurrentParameterSetFlag, BindableParameters);
+                    ParameterSetResolver.ThrowAmbiguousParameterSetException(ParameterSetResolver.CurrentParameterSetFlag);
                 }
                 else if (commandMandatorySetsCount == 1)
                 {
@@ -2219,7 +2180,7 @@ namespace System.Management.Automation
             if ((!foundMultipleSetsThatTakesPipelineInputByValue) &&
                (!foundMultipleSetsThatTakesPipelineInputByPropertyName))
             {
-                ThrowAmbiguousParameterSetException(ParameterSetResolver.CurrentParameterSetFlag, BindableParameters);
+                ParameterSetResolver.ThrowAmbiguousParameterSetException(ParameterSetResolver.CurrentParameterSetFlag);
             }
 
             // Remove the data set that contains non-pipelineable mandatory parameters, since we are not
@@ -2230,10 +2191,10 @@ namespace System.Management.Automation
                 IgnoreOtherMandatoryParameterSets(setsThatContainNonpipelineableMandatoryParameter);
                 if (ParameterSetResolver.CurrentParameterSetFlag == 0)
                 {
-                    ThrowAmbiguousParameterSetException(ParameterSetResolver.CurrentParameterSetFlag, BindableParameters);
+                    ParameterSetResolver.ThrowAmbiguousParameterSetException(ParameterSetResolver.CurrentParameterSetFlag);
                 }
 
-                if (ValidParameterSetCount(ParameterSetResolver.CurrentParameterSetFlag) == 1)
+                if (ParameterSetResolver.ValidParameterSetCount(ParameterSetResolver.CurrentParameterSetFlag) == 1)
                 {
                     Command.SetParameterSetName(CurrentParameterSetName);
                 }
@@ -2360,235 +2321,6 @@ namespace System.Management.Automation
         }
 
         /// <summary>
-        /// Ensures that only one parameter set is valid or throws an appropriate exception.
-        /// </summary>
-        /// <param name="prePipelineInput">
-        /// If true, it is acceptable to have multiple valid parameter sets as long as one
-        /// of those parameter sets take pipeline input.
-        /// </param>
-        /// <param name="setDefault">
-        /// If true, the default parameter set will be selected if there is more than
-        /// one valid parameter set and one is the default set.
-        /// If false, the count of valid parameter sets will be returned but no error
-        /// will occur and the default parameter set will not be used.
-        /// </param>
-        /// <remarks>
-        /// <para><c>ParameterSetResolver.CurrentParameterSetFlag</c> acts as a compact state machine:</para>
-        /// <list type="bullet">
-        /// <item><description><c>uint.MaxValue</c> means all parameter sets are still valid.</description></item>
-        /// <item><description>A single-bit value means exactly one parameter set is selected.</description></item>
-        /// <item><description>A multi-bit value means multiple parameter sets are still valid.</description></item>
-        /// </list>
-        /// <para>
-        /// <paramref name="prePipelineInput"/> allows temporary ambiguity to remain when pipeline
-        /// input can still disambiguate among valid sets. <paramref name="setDefault"/> controls
-        /// whether this method commits to the default parameter set when it is among the valid sets.
-        /// </para>
-        /// </remarks>
-        /// <returns>
-        /// The number of valid parameter sets.
-        /// </returns>
-        /// <exception cref="ParameterBindingException">
-        /// If the more than one or zero parameter sets were resolved from the named
-        /// parameters.
-        /// </exception>
-        private int ValidateParameterSets(bool prePipelineInput, bool setDefault)
-        {
-            // Compute how many parameter sets are still valid
-            int validParameterSetCount = ValidParameterSetCount(ParameterSetResolver.CurrentParameterSetFlag);
-
-            if (validParameterSetCount == 0 && ParameterSetResolver.CurrentParameterSetFlag != uint.MaxValue)
-            {
-                // No valid parameter sets remain — binding has contradicted all sets.
-                ThrowAmbiguousParameterSetException(ParameterSetResolver.CurrentParameterSetFlag, BindableParameters);
-            }
-            else if (validParameterSetCount > 1)
-            {
-                // Multiple sets still valid — try default-set resolution or defer to pipeline input.
-                uint defaultParameterSetFlag = _commandMetadata.DefaultParameterSetFlag;
-                bool hasDefaultSetDefined = defaultParameterSetFlag != 0;
-
-                bool validSetIsAllSet = ParameterSetResolver.CurrentParameterSetFlag == uint.MaxValue;
-                bool validSetIsDefault = ParameterSetResolver.CurrentParameterSetFlag == defaultParameterSetFlag;
-
-                // If no default parameter set is defined and the valid set is the "all" set
-                // then use the all set.
-
-                if (validSetIsAllSet && !hasDefaultSetDefined)
-                {
-                    // The current parameter set flags are valid.
-                    // Note: this is the same as having a single valid parameter set flag.
-                    validParameterSetCount = 1;
-                }
-                // If the valid parameter set is the default parameter set, or if the default
-                // parameter set has been defined and one of the valid parameter sets is
-                // the default parameter set, then use the default parameter set.
-                else if (!prePipelineInput &&
-                    validSetIsDefault ||
-                    (hasDefaultSetDefined && (ParameterSetResolver.CurrentParameterSetFlag & defaultParameterSetFlag) != 0))
-                {
-                    string currentParameterSetName = BindableParameters.GetParameterSetName(defaultParameterSetFlag);
-                    Command.SetParameterSetName(currentParameterSetName);
-                    if (setDefault)
-                    {
-                        ParameterSetResolver.CurrentParameterSetFlag = _commandMetadata.DefaultParameterSetFlag;
-                        validParameterSetCount = 1;
-                    }
-                }
-                // There are multiple valid parameter sets but at least one parameter set takes
-                // pipeline input
-                else if (prePipelineInput &&
-                    AtLeastOneUnboundValidParameterSetTakesPipelineInput(ParameterSetResolver.CurrentParameterSetFlag))
-                {
-                    // We haven't fixated on a valid parameter set yet, but will wait for pipeline input to
-                    // determine which parameter set to use.
-                }
-                else
-                {
-                    int resolvedParameterSetCount = ResolveParameterSetAmbiguityBasedOnMandatoryParameters();
-                    if (resolvedParameterSetCount != 1)
-                    {
-                        ThrowAmbiguousParameterSetException(ParameterSetResolver.CurrentParameterSetFlag, BindableParameters);
-                    }
-
-                    validParameterSetCount = resolvedParameterSetCount;
-                }
-            }
-            else // validParameterSetCount == 1
-            {
-                // Exactly one set is effectively valid — either an explicit single set or the all-set sentinel.
-                // If the valid parameter set is the "all" set, and a default set was defined,
-                // then set the current parameter set to the default set.
-
-                if (!ParameterSetResolver.HasSingleParameterSetSelected)
-                {
-                    // Since this is the "all" set, default the parameter set count to the
-                    // number of parameter sets that were defined for the cmdlet or 1 if
-                    // none were defined.
-
-                    validParameterSetCount =
-                        (this.BindableParameters.ParameterSetCount > 0) ?
-                            this.BindableParameters.ParameterSetCount : 1;
-
-                    if (prePipelineInput &&
-                        AtLeastOneUnboundValidParameterSetTakesPipelineInput(ParameterSetResolver.CurrentParameterSetFlag))
-                    {
-                        // Don't fixate on the default parameter set yet. Wait until after
-                        // we have processed pipeline input.
-                    }
-                    else if (_commandMetadata.DefaultParameterSetFlag != 0)
-                    {
-                        if (setDefault)
-                        {
-                            ParameterSetResolver.CurrentParameterSetFlag = _commandMetadata.DefaultParameterSetFlag;
-                            validParameterSetCount = 1;
-                        }
-                    }
-                    else if (validParameterSetCount > 1)
-                    {
-                        int resolvedParameterSetCount = ResolveParameterSetAmbiguityBasedOnMandatoryParameters();
-                        if (resolvedParameterSetCount != 1)
-                        {
-                            ThrowAmbiguousParameterSetException(ParameterSetResolver.CurrentParameterSetFlag, BindableParameters);
-                        }
-
-                        validParameterSetCount = resolvedParameterSetCount;
-                    }
-                }
-
-                Command.SetParameterSetName(CurrentParameterSetName);
-            }
-
-            return validParameterSetCount;
-        }
-
-        private int ResolveParameterSetAmbiguityBasedOnMandatoryParameters()
-        {
-            uint currentParameterSetFlag = ParameterSetResolver.CurrentParameterSetFlag;
-            int result = ResolveParameterSetAmbiguityBasedOnMandatoryParameters(this.BoundParameters, this.UnboundParameters, this.BindableParameters, ref currentParameterSetFlag, Command);
-            ParameterSetResolver.CurrentParameterSetFlag = currentParameterSetFlag;
-            return result;
-        }
-
-        internal static int ResolveParameterSetAmbiguityBasedOnMandatoryParameters(
-            Dictionary<string, MergedCompiledCommandParameter> boundParameters,
-            ICollection<MergedCompiledCommandParameter> unboundParameters,
-            MergedCommandParameterMetadata bindableParameters,
-            ref uint currentParameterSetFlag,
-            Cmdlet command
-            )
-        {
-            uint remainingParameterSetsWithNoMandatoryUnboundParameters = currentParameterSetFlag;
-
-            IEnumerable<ParameterSetSpecificMetadata> allParameterSetMetadatas = boundParameters.Values
-                .Concat(unboundParameters)
-                .SelectMany(static p => p.Parameter.ParameterSetData.Values);
-            uint allParameterSetFlags = 0;
-            foreach (ParameterSetSpecificMetadata parameterSetMetadata in allParameterSetMetadatas)
-            {
-                allParameterSetFlags |= parameterSetMetadata.ParameterSetFlag;
-            }
-
-            remainingParameterSetsWithNoMandatoryUnboundParameters &= allParameterSetFlags;
-
-            Diagnostics.Assert(
-                ValidParameterSetCount(remainingParameterSetsWithNoMandatoryUnboundParameters) > 1,
-                "This method should only be called when there is an ambiguity wrt parameter sets");
-
-            IEnumerable<ParameterSetSpecificMetadata> parameterSetMetadatasForUnboundMandatoryParameters = unboundParameters
-                .SelectMany(static p => p.Parameter.ParameterSetData.Values)
-                .Where(static p => p.IsMandatory);
-            foreach (ParameterSetSpecificMetadata parameterSetMetadata in parameterSetMetadatasForUnboundMandatoryParameters)
-            {
-                remainingParameterSetsWithNoMandatoryUnboundParameters &= (~parameterSetMetadata.ParameterSetFlag);
-            }
-
-            int finalParameterSetCount = ValidParameterSetCount(remainingParameterSetsWithNoMandatoryUnboundParameters);
-            if (finalParameterSetCount == 1)
-            {
-                currentParameterSetFlag = remainingParameterSetsWithNoMandatoryUnboundParameters;
-
-                if (command != null)
-                {
-                    string currentParameterSetName = bindableParameters.GetParameterSetName(currentParameterSetFlag);
-                    command.SetParameterSetName(currentParameterSetName);
-                }
-
-                return finalParameterSetCount;
-            }
-
-            return -1;
-        }
-
-        private void ThrowAmbiguousParameterSetException(uint parameterSetFlags, MergedCommandParameterMetadata bindableParameters)
-        {
-            ParameterBindingException bindingException =
-                ParameterBindingException.NewAmbiguousParameterSet(this.Command.MyInvocation);
-
-            // Trace the parameter sets still active
-            uint currentParameterSet = 1;
-
-            while (parameterSetFlags != 0)
-            {
-                uint currentParameterSetActive = parameterSetFlags & 0x1;
-
-                if (currentParameterSetActive == 1)
-                {
-                    string parameterSetName = bindableParameters.GetParameterSetName(currentParameterSet);
-                    if (!string.IsNullOrEmpty(parameterSetName))
-                    {
-                        ParameterBinderBase.bindingTracer.WriteLine("Remaining valid parameter set: {0}", parameterSetName);
-                    }
-                }
-
-                parameterSetFlags >>= 1;
-                currentParameterSet <<= 1;
-            }
-
-            ThrowOrElaborateBindingException(bindingException);
-        }
-
-        /// <summary>
         /// Determines if there are any unbound parameters that take pipeline input
         /// for the specified parameter sets.
         /// </summary>
@@ -2628,7 +2360,7 @@ namespace System.Management.Automation
         internal bool HandleUnboundMandatoryParameters(out Collection<MergedCompiledCommandParameter> missingMandatoryParameters)
         {
             return HandleUnboundMandatoryParameters(
-                ValidParameterSetCount(ParameterSetResolver.CurrentParameterSetFlag),
+                ParameterSetResolver.ValidParameterSetCount(ParameterSetResolver.CurrentParameterSetFlag),
                 false,
                 false,
                 false,
@@ -2990,7 +2722,7 @@ namespace System.Management.Automation
             try
             {
                 // Now make sure we have latched on to a single parameter set.
-                VerifyParameterSetSelected();
+                ParameterSetResolver.VerifyParameterSetSelected();
             }
             catch (ParameterBindingException)
             {
@@ -3108,7 +2840,7 @@ namespace System.Management.Automation
                         // must be equal to the specific prioritized parameter set.
                         if (!needToPrioritizeOneSpecificParameterSet || i == 1)
                         {
-                            ValidateParameterSets(true, true);
+                            ParameterSetResolver.ValidateParameterSets(true, true, AtLeastOneUnboundValidParameterSetTakesPipelineInput);
                             validParameterSets = ParameterSetResolver.CurrentParameterSetFlag;
                         }
 
@@ -3132,7 +2864,7 @@ namespace System.Management.Automation
             // Now make sure we only have one valid parameter set
             // Note, this will throw if we have more than one.
 
-            ValidateParameterSets(false, true);
+            ParameterSetResolver.ValidateParameterSets(false, true, AtLeastOneUnboundValidParameterSetTakesPipelineInput);
 
             if (!DefaultParameterBindingInUse)
             {
@@ -3549,27 +3281,6 @@ namespace System.Management.Automation
                 ParameterBinderAssociation.DynamicParameters => _dynamicParameterBinder,
                 _ => null,
             };
-        }
-
-        /// <summary>
-        /// Determines the number of valid parameter sets based on the valid parameter
-        /// set flags.
-        /// </summary>
-        /// <param name="parameterSetFlags">
-        /// The valid parameter set flags.
-        /// </param>
-        /// <returns>
-        /// The number of valid parameter sets in the parameterSetFlags.
-        /// </returns>
-        private static int ValidParameterSetCount(uint parameterSetFlags)
-        {
-            // uint.MaxValue means "all parameter sets" and is treated as one valid set.
-            if (parameterSetFlags == uint.MaxValue)
-            {
-                return 1;
-            }
-
-            return BitOperations.PopCount(parameterSetFlags);
         }
 
         #endregion helper_methods
