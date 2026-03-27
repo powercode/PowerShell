@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Diagnostics;
 using System.Management.Automation.Internal;
 
 namespace System.Management.Automation
@@ -8,6 +9,7 @@ namespace System.Management.Automation
     /// <summary>
     /// The parameter binder for runtime-defined parameters which are declared through the RuntimeDefinedParameterDictionary.
     /// </summary>
+    [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal class RuntimeDefinedParameterBinder : ParameterBinderBase
     {
         #region ctor
@@ -66,6 +68,16 @@ namespace System.Management.Automation
             set
             {
                 base.Target = value;
+            }
+        }
+
+        private string DebuggerDisplayValue
+        {
+            get
+            {
+                var target = Target;
+                int count = target?.Count ?? 0;
+                return $"RuntimeParamBinder: {count} params";
             }
         }
 

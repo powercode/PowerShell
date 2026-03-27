@@ -3,6 +3,7 @@
 
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Management.Automation.Host;
 using System.Management.Automation.Internal;
@@ -25,6 +26,7 @@ internal interface IMandatoryParameterPrompterContext
 /// Encapsulates mandatory-parameter detection, user prompting, and prompt data structure building.
 /// Extracted from <see cref="CmdletParameterBinderController"/> to satisfy SRP.
 /// </summary>
+[DebuggerDisplay("{DebuggerDisplayValue,nq}")]
 internal sealed class MandatoryParameterPrompter
 {
     [TraceSource("ParameterBinderController", "Controls the interaction between the command processor and the parameter binder(s).")]
@@ -44,6 +46,15 @@ internal sealed class MandatoryParameterPrompter
     private readonly ExecutionContext _context;
     private readonly Cmdlet _command;
     private readonly IMandatoryParameterPrompterContext _bindingContext;
+
+    private string DebuggerDisplayValue
+    {
+        get
+        {
+            string commandName = _command?.GetType().Name ?? "(unknown)";
+            return $"MandatoryPrompter: {commandName}";
+        }
+    }
 
     internal MandatoryParameterPrompter(
         ParameterSetResolver parameterSetResolver,

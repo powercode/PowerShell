@@ -15,7 +15,7 @@ namespace System.Management.Automation
     /// its derived classes control the interaction between the command processor
     /// and the parameter binder(s). It holds the state of the arguments and parameters.
     /// </summary>
-    [DebuggerDisplay("InvocationInfo = {InvocationInfo}")]
+    [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal abstract class ParameterBinderController
     {
         #region ctor
@@ -116,6 +116,18 @@ namespace System.Management.Automation
         internal void ClearUnboundArguments()
         {
             UnboundArguments.Clear();
+        }
+
+        private string DebuggerDisplayValue
+        {
+            get
+            {
+                string commandName = InvocationInfo?.MyCommand?.Name ?? "(unknown)";
+                int bound = BoundParameters?.Count ?? 0;
+                int unbound = UnboundParameters?.Count ?? 0;
+                int unboundArgs = UnboundArguments?.Count ?? 0;
+                return $"BinderController: {commandName}, Bound={bound}, Unbound={unbound}, Args={unboundArgs}";
+            }
         }
 
         /// <summary>

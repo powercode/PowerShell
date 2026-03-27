@@ -14,6 +14,7 @@ namespace System.Management.Automation;
 /// <summary>
 /// Encapsulates parameter type coercion and collection encoding logic.
 /// </summary>
+[DebuggerDisplay("{DebuggerDisplayValue,nq}")]
 internal sealed class ParameterTypeCoercer
 {
     [TraceSource("ParameterBinderBase", "A abstract helper class for the CommandProcessor that binds parameters to the specified object.")]
@@ -38,6 +39,15 @@ internal sealed class ParameterTypeCoercer
         _invocationInfo = invocationInfo;
         _context = context;
         _command = command;
+    }
+
+    private string DebuggerDisplayValue
+    {
+        get
+        {
+            string commandName = _invocationInfo?.MyCommand?.Name ?? "(unknown)";
+            return $"TypeCoercer: {commandName}";
+        }
     }
 
     /// <summary>

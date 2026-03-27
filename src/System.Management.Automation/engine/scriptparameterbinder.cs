@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Collections;
+using System.Diagnostics;
 using System.Management.Automation.Internal;
 using System.Management.Automation.Language;
 using System.Runtime.CompilerServices;
@@ -11,6 +12,7 @@ namespace System.Management.Automation
     /// <summary>
     /// The parameter binder for shell functions.
     /// </summary>
+    [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal class ScriptParameterBinder : ParameterBinderBase
     {
         #region ctor
@@ -164,6 +166,16 @@ namespace System.Management.Automation
         internal ScriptBlock Script { get; }
 
         internal SessionStateScope LocalScope { get; set; }
+
+        private string DebuggerDisplayValue
+        {
+            get
+            {
+                string script = Script?.ToString() ?? "(null)";
+                if (script.Length > 60) script = script[..60] + "...";
+                return $"ScriptBinder: {script}";
+            }
+        }
 
         #endregion private members
     }
