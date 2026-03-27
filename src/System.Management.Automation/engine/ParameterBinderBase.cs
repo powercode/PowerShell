@@ -260,8 +260,8 @@ namespace System.Management.Automation
 
         /// <summary>
         /// Does all the type coercion, data generation, and validation necessary to bind the
-        /// parameter, then calls the protected BindParameter method to have
-        /// the derived class do the actual binding.
+        /// parameter, then calls the protected <see cref="StoreParameterValue(string, object, CompiledCommandParameter)"/>
+        /// method to have the derived class do the actual binding.
         /// </summary>
         /// <param name="parameter">
         /// The parameter to be bound.
@@ -278,11 +278,12 @@ namespace System.Management.Automation
         /// </returns>
         /// <remarks>
         /// The binding algorithm goes as follows:
-        /// 1. The data generation attributes are run
-        /// 2. The data is coerced into the correct type
-        /// 3. The data if validated using the validation attributes
-        /// 4. The data is encoded into the bindable object using the
-        ///    protected BindParameter method.
+        /// <list type="number">
+        /// <item><description>The data generation attributes are run.</description></item>
+        /// <item><description>The data is coerced into the correct type.</description></item>
+        /// <item><description>The data is validated using the validation attributes.</description></item>
+        /// <item><description>The data is encoded into the bindable object using the protected <see cref="StoreParameterValue(string, object, CompiledCommandParameter)"/> method.</description></item>
+        /// </list>
         /// </remarks>
         /// <exception cref="ArgumentNullException">
         /// If <paramref name="parameter"/> or <paramref name="parameterMetadata"/> is null.
