@@ -22,7 +22,7 @@ namespace System.Management.Automation
     /// parameter binders required to bind parameters to a cmdlet.
     /// </summary>
     [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
-    internal class CmdletParameterBinderController : ParameterBinderController, IParameterBindingContext, IDefaultParameterBindingContext, IMandatoryParameterPrompterContext, IPipelineParameterBindingContext, IDelayBindScriptBlockContext, IDynamicParameterHandlerContext
+    internal class CmdletParameterBinderController : ParameterBinderController, IParameterBindingContext, IDefaultParameterBindingContext, IMandatoryParameterPrompterContext, IPipelineParameterBindingContext, IDelayBindScriptBlockContext, IDynamicParameterHandlerContext, IDefaultValueManagerContext
     {
         #region tracer
 
@@ -126,6 +126,7 @@ namespace System.Management.Automation
             _pipelineParameterBinder = new PipelineParameterBinder(this);
             _delayBindScriptBlockHandler = new DelayBindScriptBlockHandler(this);
             _dynamicParameterHandler = new DynamicParameterHandler(this);
+            _defaultValueManager = new DefaultValueManager(this);
         }
 
         #endregion ctor
@@ -208,10 +209,10 @@ namespace System.Management.Automation
             => BindToAssociatedBinder(argument, parameter, flags);
 
         void IPipelineParameterBindingContext.BackupDefaultParameter(MergedCompiledCommandParameter parameter)
-            => BackupDefaultParameter(parameter);
+            => _defaultValueManager.Backup(parameter);
 
         void IPipelineParameterBindingContext.RestoreDefaultParameterValues(IEnumerable<MergedCompiledCommandParameter> parameters)
-            => RestoreDefaultParameterValues(parameters);
+            => _defaultValueManager.Restore(parameters);
 
         bool IPipelineParameterBindingContext.DispatchBindToSubBinder(
             uint validParameterSetFlag,
@@ -269,6 +270,23 @@ namespace System.Management.Automation
             uint defaultParameterSetFlag,
             out ParameterBindingException outgoingBindingException)
             => BindPositionalParameters(args, currentParameterSetFlag, defaultParameterSetFlag, out outgoingBindingException);
+
+        InvocationInfo IDefaultValueManagerContext.InvocationInfo => Command.MyInvocation;
+
+        IScriptExtent IDefaultValueManagerContext.GetErrorExtent(CommandParameterInternal argument)
+            => GetErrorExtent(argument);
+
+        object IDefaultValueManagerContext.GetDefaultParameterValue(string name)
+            => GetDefaultParameterValue(name);
+
+        bool IDefaultValueManagerContext.RestoreParameter(CommandParameterInternal argument, MergedCompiledCommandParameter parameter)
+            => RestoreParameter(argument, parameter);
+
+        Dictionary<string, MergedCompiledCommandParameter> IDefaultValueManagerContext.BoundParameters => BoundParameters;
+
+        IList<MergedCompiledCommandParameter> IDefaultValueManagerContext.UnboundParameters => UnboundParameters;
+
+        Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.BoundArguments => BoundArguments;
 
         #region helper_methods
 
@@ -1902,6 +1920,7 @@ namespace System.Management.Automation
         private readonly PipelineParameterBinder _pipelineParameterBinder;
         private readonly DelayBindScriptBlockHandler _delayBindScriptBlockHandler;
         private readonly DynamicParameterHandler _dynamicParameterHandler;
+        private readonly DefaultValueManager _defaultValueManager;
 
         /// <summary>
         /// The cmdlet metadata.
@@ -1939,143 +1958,12 @@ namespace System.Management.Automation
         /// <summary>
         /// A collection of the default values of the parameters.
         /// </summary>
-        private readonly Dictionary<string, CommandParameterInternal> _defaultParameterValues =
-            new Dictionary<string, CommandParameterInternal>(StringComparer.OrdinalIgnoreCase);
 
         #endregion private_members
 
         protected override void SaveDefaultScriptParameterValue(string name, object value)
-        {
-            _defaultParameterValues.Add(name,
-                CommandParameterInternal.CreateParameterWithArgument(
-                    /*parameterAst*/null, name, "-" + name + ":",
-                    /*argumentAst*/null, value,
-                    false));
-        }
+            => _defaultValueManager.SaveScriptParameterValue(name, value);
 
-        /// <summary>
-        /// Backs up the specified parameter value by calling the GetDefaultParameterValue
-        /// abstract method.
-        ///
-        /// This method is called when binding a parameter value that came from a pipeline
-        /// object.
-        /// </summary>
-        /// <exception cref="ParameterBindingParameterDefaultValueException">
-        /// If the parameter binder encounters an error getting the default value.
-        /// </exception>
-        private void BackupDefaultParameter(MergedCompiledCommandParameter parameter)
-        {
-            if (!_defaultParameterValues.ContainsKey(parameter.Parameter.Name))
-            {
-                object defaultParameterValue = GetDefaultParameterValue(parameter.Parameter.Name);
-                _defaultParameterValues.Add(
-                    parameter.Parameter.Name,
-                    CommandParameterInternal.CreateParameterWithArgument(
-                        /*parameterAst*/null, parameter.Parameter.Name, "-" + parameter.Parameter.Name + ":",
-                        /*argumentAst*/null, defaultParameterValue,
-                        false));
-            }
-        }
-
-        /// <summary>
-        /// Replaces the values of the parameters with their initial value for the
-        /// parameters specified.
-        /// </summary>
-        /// <param name="parameters">
-        /// The parameters that should have their default values restored.
-        /// </param>
-        /// <exception cref="ArgumentNullException">
-        /// If <paramref name="parameters"/> is null.
-        /// </exception>
-        private void RestoreDefaultParameterValues(IEnumerable<MergedCompiledCommandParameter> parameters)
-        {
-            if (parameters == null)
-            {
-                throw PSTraceSource.NewArgumentNullException(nameof(parameters));
-            }
-
-            // Get all the matching arguments from the defaultParameterValues collection
-            // and bind those that had parameters that were bound via pipeline input
-
-            foreach (MergedCompiledCommandParameter parameter in parameters)
-            {
-                if (parameter == null)
-                {
-                    continue;
-                }
-
-                CommandParameterInternal argumentToBind = null;
-
-                // If the argument was found then bind it to the parameter
-                // and manage the bound and unbound parameter list
-
-                if (_defaultParameterValues.TryGetValue(parameter.Parameter.Name, out argumentToBind))
-                {
-                    // Don't go through the normal binding routine to run data generation,
-                    // type coercion, validation, or prerequisites since we know the
-                    // type is already correct, and we don't want data generation to
-                    // run when resetting the default value.
-
-                    Exception error = null;
-                    try
-                    {
-                        // We shouldn't have to coerce the type here so its
-                        // faster to pass false
-
-                        bool bindResult = RestoreParameter(argumentToBind, parameter);
-
-                        Diagnostics.Assert(
-                            bindResult,
-                            "Restoring the default value should not require type coercion");
-                    }
-                    catch (SetValueException setValueException)
-                    {
-                        error = setValueException;
-                    }
-
-                    if (error != null)
-                    {
-                        Type specifiedType = argumentToBind.ArgumentValue?.GetType();
-                        ParameterBindingException.ThrowParameterBindingFailed(
-                            error,
-                            this.InvocationInfo,
-                            GetErrorExtent(argumentToBind),
-                            parameter.Parameter.Name,
-                            parameter.Parameter.Type,
-                            specifiedType,
-                            error.Message);
-                    }
-
-                    // Since the parameter was returned to its original value,
-                    // ensure that it is not in the boundParameters list but
-                    // is in the unboundParameters list
-
-                    BoundParameters.Remove(parameter.Parameter.Name);
-
-                    if (!UnboundParameters.Contains(parameter))
-                    {
-                        UnboundParameters.Add(parameter);
-                    }
-
-                    BoundArguments.Remove(parameter.Parameter.Name);
-                }
-                else
-                {
-                    // Since the parameter was not reset, ensure that the parameter
-                    // is in the bound parameters list and not in the unbound
-                    // parameters list
-
-                    if (!BoundParameters.ContainsKey(parameter.Parameter.Name))
-                    {
-                        BoundParameters.Add(parameter.Parameter.Name, parameter);
-                    }
-
-                    // Ensure the parameter is not in the unboundParameters list
-
-                    UnboundParameters.Remove(parameter);
-                }
-            }
-        }
     }
 
 }
