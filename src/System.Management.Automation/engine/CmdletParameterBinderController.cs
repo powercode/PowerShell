@@ -67,6 +67,26 @@ namespace System.Management.Automation
             _commandRuntime = (MshCommandRuntime)cmdlet.CommandRuntime;
             _commandMetadata = commandMetadata;
 
+            _commonParametersBinder = new ReflectionParameterBinder(
+                new CommonParameters(_commandRuntime),
+                this.Command,
+                this.CommandLineParameters);
+
+            _shouldProcessParameterBinder = new ReflectionParameterBinder(
+                new ShouldProcessParameters(_commandRuntime),
+                this.Command,
+                this.CommandLineParameters);
+
+            _pagingParameterBinder = new ReflectionParameterBinder(
+                new PagingParameters(_commandRuntime),
+                this.Command,
+                this.CommandLineParameters);
+
+            _transactionParameterBinder = new ReflectionParameterBinder(
+                new TransactionParameters(_commandRuntime),
+                this.Command,
+                this.CommandLineParameters);
+
             // Add the static parameter metadata to the bindable parameters
             // And add them to the unbound parameters list
 
@@ -717,7 +737,7 @@ namespace System.Management.Automation
 
                 case ParameterBinderAssociation.CommonParameters:
                     result =
-                        CommonParametersBinder.CoerceValidateAndBind(
+                        _commonParametersBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -729,7 +749,7 @@ namespace System.Management.Automation
                         "The metadata for the ShouldProcessParameters should only be available if the command supports ShouldProcess");
 
                     result =
-                        ShouldProcessParametersBinder.CoerceValidateAndBind(
+                        _shouldProcessParameterBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -741,7 +761,7 @@ namespace System.Management.Automation
                         "The metadata for the PagingParameters should only be available if the command supports paging");
 
                     result =
-                        PagingParametersBinder.CoerceValidateAndBind(
+                        _pagingParameterBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -753,7 +773,7 @@ namespace System.Management.Automation
                         "The metadata for the TransactionsParameters should only be available if the command supports transactions");
 
                     result =
-                        TransactionParametersBinder.CoerceValidateAndBind(
+                        _transactionParameterBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -2445,10 +2465,10 @@ namespace System.Management.Automation
             return parameter.BinderAssociation switch
             {
                 ParameterBinderAssociation.DeclaredFormalParameters => DefaultParameterBinder,
-                ParameterBinderAssociation.CommonParameters => CommonParametersBinder,
-                ParameterBinderAssociation.ShouldProcessParameters => ShouldProcessParametersBinder,
-                ParameterBinderAssociation.PagingParameters => PagingParametersBinder,
-                ParameterBinderAssociation.TransactionParameters => TransactionParametersBinder,
+                ParameterBinderAssociation.CommonParameters => _commonParametersBinder,
+                ParameterBinderAssociation.ShouldProcessParameters => _shouldProcessParameterBinder,
+                ParameterBinderAssociation.PagingParameters => _pagingParameterBinder,
+                ParameterBinderAssociation.TransactionParameters => _transactionParameterBinder,
                 ParameterBinderAssociation.DynamicParameters => _dynamicParameterBinder,
                 _ => null,
             };
@@ -2542,113 +2562,10 @@ namespace System.Management.Automation
         /// </summary>
         private ParameterBinderBase _dynamicParameterBinder;
 
-        /// <summary>
-        /// The parameter binder for the ShouldProcess parameters.
-        /// </summary>
-        internal ReflectionParameterBinder ShouldProcessParametersBinder
-        {
-            get
-            {
-                if (_shouldProcessParameterBinder == null)
-                {
-                    // Construct a new instance of the should process parameters object
-                    ShouldProcessParameters shouldProcessParameters = new ShouldProcessParameters(_commandRuntime);
-
-                    // Create reflection binder for this object
-
-                    _shouldProcessParameterBinder =
-                        new ReflectionParameterBinder(
-                            shouldProcessParameters,
-                            this.Command,
-                            this.CommandLineParameters);
-                }
-
-                return _shouldProcessParameterBinder;
-            }
-        }
-
-        private ReflectionParameterBinder _shouldProcessParameterBinder;
-
-        /// <summary>
-        /// The parameter binder for the Paging parameters.
-        /// </summary>
-        internal ReflectionParameterBinder PagingParametersBinder
-        {
-            get
-            {
-                if (_pagingParameterBinder == null)
-                {
-                    // Construct a new instance of the should process parameters object
-                    PagingParameters pagingParameters = new PagingParameters(_commandRuntime);
-
-                    // Create reflection binder for this object
-
-                    _pagingParameterBinder =
-                        new ReflectionParameterBinder(
-                            pagingParameters,
-                            this.Command,
-                            this.CommandLineParameters);
-                }
-
-                return _pagingParameterBinder;
-            }
-        }
-
-        private ReflectionParameterBinder _pagingParameterBinder;
-
-        /// <summary>
-        /// The parameter binder for the Transactions parameters.
-        /// </summary>
-        internal ReflectionParameterBinder TransactionParametersBinder
-        {
-            get
-            {
-                if (_transactionParameterBinder == null)
-                {
-                    // Construct a new instance of the transactions parameters object
-                    TransactionParameters transactionParameters = new TransactionParameters(_commandRuntime);
-
-                    // Create reflection binder for this object
-
-                    _transactionParameterBinder =
-                        new ReflectionParameterBinder(
-                            transactionParameters,
-                            this.Command,
-                            this.CommandLineParameters);
-                }
-
-                return _transactionParameterBinder;
-            }
-        }
-
-        private ReflectionParameterBinder _transactionParameterBinder;
-
-        /// <summary>
-        /// The parameter binder for the CommonParameters.
-        /// </summary>
-        internal ReflectionParameterBinder CommonParametersBinder
-        {
-            get
-            {
-                if (_commonParametersBinder == null)
-                {
-                    // Construct a new instance of the user feedback parameters object
-                    CommonParameters commonParameters = new CommonParameters(_commandRuntime);
-
-                    // Create reflection binder for this object
-
-                    _commonParametersBinder =
-                        new ReflectionParameterBinder(
-                            commonParameters,
-                            this.Command,
-                            this.CommandLineParameters);
-                }
-
-                return _commonParametersBinder;
-            }
-        }
-
-        private ReflectionParameterBinder _commonParametersBinder;
+        private readonly ReflectionParameterBinder _commonParametersBinder;
+        private readonly ReflectionParameterBinder _shouldProcessParameterBinder;
+        private readonly ReflectionParameterBinder _pagingParameterBinder;
+        private readonly ReflectionParameterBinder _transactionParameterBinder;
 
         private sealed class DelayedScriptBlockArgument
         {
