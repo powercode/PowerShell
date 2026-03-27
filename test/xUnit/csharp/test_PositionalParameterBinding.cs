@@ -89,6 +89,7 @@ namespace PSTests.Parallel
     // ---------------------------------------------------------------------------
     // ContainsPositionalParameterInSet tests
     // ---------------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class ContainsPositionalParameterInSetTests
     {
         [Fact]
@@ -176,6 +177,7 @@ namespace PSTests.Parallel
     // ---------------------------------------------------------------------------
     // AddNewPosition tests
     // ---------------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class AddNewPositionTests
     {
         private static ParameterSetSpecificMetadata MakeSetData(uint setFlag, int position)
@@ -301,6 +303,7 @@ namespace PSTests.Parallel
     // ---------------------------------------------------------------------------
     // EvaluateUnboundPositionalParameters tests
     // ---------------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class EvaluateUnboundPositionalParametersTests
     {
         [Fact]
@@ -420,6 +423,7 @@ namespace PSTests.Parallel
     // ---------------------------------------------------------------------------
     // UpdatePositionalDictionary tests
     // ---------------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class UpdatePositionalDictionaryTests
     {
         private static SortedDictionary<int, Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter>>
