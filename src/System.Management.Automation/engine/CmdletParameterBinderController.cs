@@ -149,13 +149,13 @@ namespace System.Management.Automation
                 // parameter set and that all the mandatory
                 // parameters for the working parameter set are specified, or prompt
 
-                validParameterSetCount = ParameterSetResolver.ValidateParameterSets(false, true, AtLeastOneUnboundValidParameterSetTakesPipelineInput);
+                validParameterSetCount = ParameterSetResolver.ValidateParameterSets(false, true, ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
             }
             else
             {
                 // Use ValidateParameterSets to get the number of valid parameter
                 // sets.
-                validParameterSetCount = ParameterSetResolver.ValidateParameterSets(true, false, AtLeastOneUnboundValidParameterSetTakesPipelineInput);
+                validParameterSetCount = ParameterSetResolver.ValidateParameterSets(true, false, ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
             }
 
             // If the parameter set is determined and the default parameters are not used
@@ -170,12 +170,12 @@ namespace System.Management.Automation
             // we should filter out those parameter sets that cannot take pipeline inputs anymore.
             if (validParameterSetCount > 1 && isPipelineInputExpected)
             {
-                uint filteredValidParameterSetFlags = FilterParameterSetsTakingNoPipelineInput();
+                uint filteredValidParameterSetFlags = ParameterSetResolver.FilterParameterSetsTakingNoPipelineInput(_delayBindScriptBlocks.Keys);
                 if (filteredValidParameterSetFlags != ParameterSetResolver.CurrentParameterSetFlag)
                 {
                     ParameterSetResolver.CurrentParameterSetFlag = filteredValidParameterSetFlags;
                     // The valid parameter set flag is narrowed down, we get the new validParameterSetCount
-                    validParameterSetCount = ParameterSetResolver.ValidateParameterSets(true, false, AtLeastOneUnboundValidParameterSetTakesPipelineInput);
+                    validParameterSetCount = ParameterSetResolver.ValidateParameterSets(true, false, ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
                 }
             }
 
@@ -293,7 +293,7 @@ namespace System.Management.Automation
 
             // We need to make sure there is at least one valid parameter set. Its
             // OK to allow more than one as long as one of them takes pipeline input.
-            ParameterSetResolver.ValidateParameterSets(true, false, AtLeastOneUnboundValidParameterSetTakesPipelineInput);
+            ParameterSetResolver.ValidateParameterSets(true, false, ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
 
             // Always get the dynamic parameters as there may be mandatory parameters there
 
@@ -313,63 +313,6 @@ namespace System.Management.Automation
             HandleRemainingArguments();
 
             VerifyArgumentsProcessed(reportedBindingException);
-        }
-
-        /// <summary>
-        /// Process all valid parameter sets, and filter out those that don't take any pipeline input.
-        /// </summary>
-        /// <returns>
-        /// The new valid parameter set flags
-        /// </returns>
-        private uint FilterParameterSetsTakingNoPipelineInput()
-        {
-            uint parameterSetsTakingPipeInput = 0;
-            bool findPipeParameterInAllSets = false;
-
-            foreach (KeyValuePair<MergedCompiledCommandParameter, DelayedScriptBlockArgument> entry in _delayBindScriptBlocks)
-            {
-                parameterSetsTakingPipeInput |= entry.Key.Parameter.ParameterSetFlags;
-            }
-
-            foreach (MergedCompiledCommandParameter parameter in UnboundParameters)
-            {
-                // If a parameter doesn't take pipeline input at all, we can skip it
-                if (!parameter.Parameter.IsPipelineParameterInSomeParameterSet)
-                {
-                    continue;
-                }
-
-                var matchingParameterSetMetadata =
-                    parameter.Parameter.GetMatchingParameterSetData(ParameterSetResolver.CurrentParameterSetFlag);
-
-                foreach (ParameterSetSpecificMetadata parameterSetMetadata in matchingParameterSetMetadata)
-                {
-                    if (parameterSetMetadata.ValueFromPipeline || parameterSetMetadata.ValueFromPipelineByPropertyName)
-                    {
-                        if (parameterSetMetadata.ParameterSetFlag == 0 && parameterSetMetadata.IsInAllSets)
-                        {
-                            // The parameter takes pipeline input and is in all sets, we don't change the ParameterSetResolver.CurrentParameterSetFlag
-                            parameterSetsTakingPipeInput = 0;
-                            findPipeParameterInAllSets = true;
-                            break;
-                        }
-                        else
-                        {
-                            parameterSetsTakingPipeInput |= parameterSetMetadata.ParameterSetFlag;
-                        }
-                    }
-                }
-
-                if (findPipeParameterInAllSets)
-                    break;
-            }
-
-            // If parameterSetsTakingPipeInput is 0, then no parameter set from the ParameterSetResolver.CurrentParameterSetFlag can take piped objects.
-            // Then we just leave what it was, and the pipeline binding deal with the error later
-            if (parameterSetsTakingPipeInput != 0)
-                return ParameterSetResolver.CurrentParameterSetFlag & parameterSetsTakingPipeInput;
-            else
-                return ParameterSetResolver.CurrentParameterSetFlag;
         }
 
         /// <summary>
@@ -1812,7 +1755,7 @@ namespace System.Management.Automation
                         ParameterSetResolver.CurrentParameterSetFlag = commandMandatorySets;
 
                         if (ParameterSetResolver.CurrentParameterSetFlag == defaultParameterSet)
-                            Command.SetParameterSetName(CurrentParameterSetName);
+                            Command.SetParameterSetName(ParameterSetResolver.CurrentParameterSetName);
                         else
                             // Prioritize the default set during pipeline binding to preserve previous behavior
                             // while still keeping additional viable sets available.
@@ -2006,7 +1949,7 @@ namespace System.Management.Automation
 
             // Latch on to the default parameter set.
             ParameterSetResolver.CurrentParameterSetFlag = defaultParameterSet;
-            Command.SetParameterSetName(CurrentParameterSetName);
+            Command.SetParameterSetName(ParameterSetResolver.CurrentParameterSetName);
 
             CollectNonpipelineableMandatoryParameters(promptingData, defaultParameterSet, result);
             return true;
@@ -2196,7 +2139,7 @@ namespace System.Management.Automation
 
                 if (ParameterSetResolver.ValidParameterSetCount(ParameterSetResolver.CurrentParameterSetFlag) == 1)
                 {
-                    Command.SetParameterSetName(CurrentParameterSetName);
+                    Command.SetParameterSetName(ParameterSetResolver.CurrentParameterSetName);
                 }
             }
 
@@ -2215,13 +2158,13 @@ namespace System.Management.Automation
             if (chosenSetContainsNonpipelineableMandatoryParameters)
             {
                 ParameterSetResolver.CurrentParameterSetFlag = chosenMandatorySet;
-                Command.SetParameterSetName(CurrentParameterSetName);
+                Command.SetParameterSetName(ParameterSetResolver.CurrentParameterSetName);
             }
             else
             {
                 // Otherwise, we additionally preserve those valid parameter sets that contain no mandatory parameter, or contain only the common mandatory parameters
                 IgnoreOtherMandatoryParameterSets(otherMandatorySetsToBeIgnored);
-                Command.SetParameterSetName(CurrentParameterSetName);
+                Command.SetParameterSetName(ParameterSetResolver.CurrentParameterSetName);
 
                 if (ParameterSetResolver.CurrentParameterSetFlag != chosenMandatorySet)
                 {
@@ -2318,34 +2261,6 @@ namespace System.Management.Automation
             }
 
             return parameterMandatorySets;
-        }
-
-        /// <summary>
-        /// Determines if there are any unbound parameters that take pipeline input
-        /// for the specified parameter sets.
-        /// </summary>
-        /// <param name="validParameterSetFlags">
-        /// The parameter sets that should be checked for each unbound parameter to see
-        /// if it accepts pipeline input.
-        /// </param>
-        /// <returns>
-        /// True if there is at least one parameter that takes pipeline input for the
-        /// specified parameter sets, or false otherwise.
-        /// </returns>
-        private bool AtLeastOneUnboundValidParameterSetTakesPipelineInput(uint validParameterSetFlags)
-        {
-            // Loop through all the unbound parameters to see if there are any
-            // that take pipeline input for the specified parameter sets.
-
-            foreach (MergedCompiledCommandParameter parameter in UnboundParameters)
-            {
-                if (parameter.Parameter.DoesParameterSetTakePipelineInput(validParameterSetFlags))
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         /// <summary>
@@ -2649,19 +2564,6 @@ namespace System.Management.Automation
         }
 
         /// <summary>
-        /// Gets the parameter set name for the current parameter set.
-        /// </summary>
-        internal string CurrentParameterSetName
-        {
-            get
-            {
-                string currentParameterSetName = BindableParameters.GetParameterSetName(ParameterSetResolver.CurrentParameterSetFlag);
-                s_tracer.WriteLine("CurrentParameterSetName = {0}", currentParameterSetName);
-                return currentParameterSetName;
-            }
-        }
-
-        /// <summary>
         /// Binds the specified object or its properties to parameters
         /// that accept pipeline input.
         /// </summary>
@@ -2840,7 +2742,7 @@ namespace System.Management.Automation
                         // must be equal to the specific prioritized parameter set.
                         if (!needToPrioritizeOneSpecificParameterSet || i == 1)
                         {
-                            ParameterSetResolver.ValidateParameterSets(true, true, AtLeastOneUnboundValidParameterSetTakesPipelineInput);
+                            ParameterSetResolver.ValidateParameterSets(true, true, ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
                             validParameterSets = ParameterSetResolver.CurrentParameterSetFlag;
                         }
 
@@ -2864,7 +2766,7 @@ namespace System.Management.Automation
             // Now make sure we only have one valid parameter set
             // Note, this will throw if we have more than one.
 
-            ParameterSetResolver.ValidateParameterSets(false, true, AtLeastOneUnboundValidParameterSetTakesPipelineInput);
+            ParameterSetResolver.ValidateParameterSets(false, true, ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
 
             if (!DefaultParameterBindingInUse)
             {
