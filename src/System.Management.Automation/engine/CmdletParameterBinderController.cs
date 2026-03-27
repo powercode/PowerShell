@@ -1075,7 +1075,7 @@ namespace System.Management.Automation
 
                     if (parameter.Parameter.ParameterSetFlags != 0)
                     {
-                        ParameterSetResolver.CurrentParameterSetFlag &= parameter.Parameter.ParameterSetFlags;
+                        ParameterSetResolver.NarrowByParameterSetFlags(parameter.Parameter.ParameterSetFlags);
                     }
 
                     UnboundParameters.Remove(parameter);
@@ -1231,7 +1231,7 @@ namespace System.Management.Automation
 
                 if (parameter.Parameter.ParameterSetFlags != 0)
                 {
-                    ParameterSetResolver.CurrentParameterSetFlag &= parameter.Parameter.ParameterSetFlags;
+                    ParameterSetResolver.NarrowByParameterSetFlags(parameter.Parameter.ParameterSetFlags);
                 }
 
                 UnboundParameters.Remove(parameter);
@@ -2195,7 +2195,7 @@ namespace System.Management.Automation
             }
             else
             {
-                ParameterSetResolver.CurrentParameterSetFlag &= (~otherMandatorySetsToBeIgnored);
+                ParameterSetResolver.NarrowByParameterSetFlags(~otherMandatorySetsToBeIgnored);
             }
         }
 
