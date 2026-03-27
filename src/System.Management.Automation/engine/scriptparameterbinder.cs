@@ -98,7 +98,7 @@ namespace System.Management.Automation
         ///     place and that any prerequisite metadata has been satisfied.
         /// </param>
         /// <param name="parameterMetadata"></param>
-        internal override void BindParameter(string name, object value, CompiledCommandParameter parameterMetadata)
+        internal override void StoreParameterValue(string name, object value, CompiledCommandParameter parameterMetadata)
         {
             if (value == AutomationNull.Value || value == UnboundParameter.Value)
             {

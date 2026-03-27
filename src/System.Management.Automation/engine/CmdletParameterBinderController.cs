@@ -995,7 +995,7 @@ namespace System.Management.Automation
         /// </returns>
         private bool RestoreParameter(CommandParameterInternal argumentToBind, MergedCompiledCommandParameter parameter)
         {
-            GetBinderForParameter(parameter)?.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
+            GetBinderForParameter(parameter)?.StoreParameterValue(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
 
             return true;
         }
