@@ -121,7 +121,7 @@ namespace System.Management.Automation
         /// True if the parameter was successfully bound. Any error condition
         /// produces an exception.
         /// </returns>
-        internal override bool BindParameter(CommandParameterInternal argument, ParameterBindingFlags flags)
+        internal override bool ResolveAndBindNamedParameter(CommandParameterInternal argument, ParameterBindingFlags flags)
         {
             // Just pass the binding straight through.  No metadata to verify the parameter against.
             DefaultParameterBinder.StoreParameterValue(argument.ParameterName, argument.ArgumentValue, parameterMetadata: null);

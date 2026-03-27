@@ -413,7 +413,7 @@ namespace System.Management.Automation
         /// or
         /// The parameter has already been bound.
         /// </exception>
-        internal virtual bool BindParameter(
+        internal virtual bool ResolveAndBindNamedParameter(
             CommandParameterInternal argument,
             ParameterBindingFlags flags)
         {

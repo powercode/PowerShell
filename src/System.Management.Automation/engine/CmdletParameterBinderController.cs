@@ -2701,7 +2701,7 @@ namespace System.Management.Automation
 
                             // Ignore the result since any failure should cause an exception
                             result =
-                                BindParameter(argument, ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.ThrowOnParameterNotFound);
+                                ResolveAndBindNamedParameter(argument, ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.ThrowOnParameterNotFound);
 
                             Diagnostics.Assert(
                                 result,
