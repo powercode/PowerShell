@@ -7,6 +7,7 @@ using Xunit;
 
 namespace PSTests.Parallel
 {
+    [Trait("Category", "ParameterBinding")]
     public class ParameterBindingIntegrationTests
     {
         [Fact]
@@ -185,6 +186,7 @@ namespace PSTests.Parallel
         }
     }
 
+    [Trait("Category", "ParameterBinding")]
     public class PositionalBindingIntegrationTests
     {
         [Fact]
@@ -362,6 +364,7 @@ namespace PSTests.Parallel
         }
     }
 
+    [Trait("Category", "ParameterBinding")]
     public class ArgumentReparsingIntegrationTests
     {
         [Fact]
@@ -481,6 +484,7 @@ namespace PSTests.Parallel
         }
     }
 
+    [Trait("Category", "ParameterBinding")]
     public class TypeCoercionIntegrationTests
     {
         [Fact]
@@ -586,6 +590,7 @@ namespace PSTests.Parallel
     // Validation integration tests — validation attributes fire through full
     // PowerShell parameter binding pipeline.
     // -----------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public class ValidationIntegrationTests
     {
         [Fact]
