@@ -446,8 +446,8 @@ namespace System.Management.Automation
                            /*parameterAst*/null, parameterName, "-" + parameterName + ":",
                            /*argumentAst*/null, argumentValue, false);
 
-                    bool bindResult =
-                            BindParameter(
+                        bool bindResult =
+                            DispatchBindToSubBinder(
                                 validParameterSetFlag,
                                 bindableArgument,
                                 parameter,
@@ -1026,7 +1026,7 @@ namespace System.Management.Automation
 
             try
             {
-                BindParameter(parameterSets, argument, parameter,
+                DispatchBindToSubBinder(parameterSets, argument, parameter,
                     ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock);
             }
             catch (ParameterBindingException pbex)
@@ -1095,7 +1095,7 @@ namespace System.Management.Automation
         /// True if the parameter was successfully bound. False if <paramref name="flags"/>
         /// has the flag <see cref="ParameterBindingFlags.ShouldCoerceType"/> set and the type does not match the parameter type.
         /// </returns>
-        internal override bool BindParameter(
+        internal override bool DispatchBindToSubBinder(
             uint parameterSets,
             CommandParameterInternal argument,
             MergedCompiledCommandParameter parameter,
@@ -3846,7 +3846,7 @@ namespace System.Management.Automation
                     false);
 
                 flags &= ~ParameterBindingFlags.DelayBindScriptBlock;
-                result = BindParameter(_currentParameterSetFlag, param, parameter, flags);
+                result = DispatchBindToSubBinder(_currentParameterSetFlag, param, parameter, flags);
 
                 if (result)
                 {
