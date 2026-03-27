@@ -1177,7 +1177,7 @@ namespace System.Management.Automation
             {
                 try
                 {
-                    result = BindParameter(argument, parameter, flags);
+                    result = BindToAssociatedBinder(argument, parameter, flags);
                 }
                 catch (Exception e)
                 {
@@ -1226,7 +1226,7 @@ namespace System.Management.Automation
         /// True if the parameter was successfully bound. False if <paramref name="flags"/>
         /// has the flag <see cref="ParameterBindingFlags.ShouldCoerceType"/> set and the type does not match the parameter type.
         /// </returns>
-        private bool BindParameter(
+        private bool BindToAssociatedBinder(
             CommandParameterInternal argument,
             MergedCompiledCommandParameter parameter,
             ParameterBindingFlags flags)
@@ -1436,7 +1436,7 @@ namespace System.Management.Automation
 
                         try
                         {
-                            BindParameter(cpi, varargsParameter, ParameterBindingFlags.ShouldCoerceType);
+                            BindToAssociatedBinder(cpi, varargsParameter, ParameterBindingFlags.ShouldCoerceType);
                         }
                         catch (ParameterBindingException pbex)
                         {
@@ -3499,7 +3499,7 @@ namespace System.Management.Automation
                     argument.ArgumentAst, newValue,
                     false);
 
-                if (!BindParameter(newArgument, parameter, ParameterBindingFlags.ShouldCoerceType))
+                if (!BindToAssociatedBinder(newArgument, parameter, ParameterBindingFlags.ShouldCoerceType))
                 {
                     result = false;
                 }
