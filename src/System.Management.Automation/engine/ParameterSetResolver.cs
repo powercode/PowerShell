@@ -302,6 +302,70 @@ internal sealed class ParameterSetResolver
         return BitOperations.PopCount(parameterSetFlags);
     }
 
+    internal string CurrentParameterSetName => _bindableParameters.GetParameterSetName(CurrentParameterSetFlag);
+
+    internal uint FilterParameterSetsTakingNoPipelineInput(ICollection<MergedCompiledCommandParameter> delayBindScriptBlockParameters)
+    {
+        uint parameterSetsTakingPipeInput = 0;
+        bool findPipeParameterInAllSets = false;
+
+        foreach (MergedCompiledCommandParameter parameter in delayBindScriptBlockParameters)
+        {
+            parameterSetsTakingPipeInput |= parameter.Parameter.ParameterSetFlags;
+        }
+
+        foreach (MergedCompiledCommandParameter parameter in _context.UnboundParameters)
+        {
+            if (!parameter.Parameter.IsPipelineParameterInSomeParameterSet)
+            {
+                continue;
+            }
+
+            var matchingParameterSetMetadata =
+                parameter.Parameter.GetMatchingParameterSetData(CurrentParameterSetFlag);
+
+            foreach (ParameterSetSpecificMetadata parameterSetMetadata in matchingParameterSetMetadata)
+            {
+                if (parameterSetMetadata.ValueFromPipeline || parameterSetMetadata.ValueFromPipelineByPropertyName)
+                {
+                    if (parameterSetMetadata.ParameterSetFlag == 0 && parameterSetMetadata.IsInAllSets)
+                    {
+                        parameterSetsTakingPipeInput = 0;
+                        findPipeParameterInAllSets = true;
+                        break;
+                    }
+
+                    parameterSetsTakingPipeInput |= parameterSetMetadata.ParameterSetFlag;
+                }
+            }
+
+            if (findPipeParameterInAllSets)
+            {
+                break;
+            }
+        }
+
+        if (parameterSetsTakingPipeInput != 0)
+        {
+            return CurrentParameterSetFlag & parameterSetsTakingPipeInput;
+        }
+
+        return CurrentParameterSetFlag;
+    }
+
+    internal bool AtLeastOneUnboundValidParameterSetTakesPipelineInput(uint validParameterSetFlags)
+    {
+        foreach (MergedCompiledCommandParameter parameter in _context.UnboundParameters)
+        {
+            if (parameter.Parameter.DoesParameterSetTakePipelineInput(validParameterSetFlags))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     internal Collection<MergedCompiledCommandParameter> GetMissingMandatoryParameters(
         int validParameterSetCount,
         bool isPipelineInputExpected)

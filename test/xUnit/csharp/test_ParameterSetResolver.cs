@@ -515,4 +515,86 @@ namespace PSTests.Parallel
         }
     }
 
+    [Trait("Category", "ParameterBinding")]
+    public static class ParameterSetResolverPipelineMethodTests
+    {
+        [Fact]
+        public static void AtLeastOneUnboundValidParameterSetTakesPipelineInput_WhenPresent_ReturnsTrue()
+        {
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(
+                ParameterSetResolverTestFactory.MakeParam("Input", setName: "SetA", valueFromPipeline: true));
+            (ParameterSetResolver resolver, TestBindingContext context) = ParameterSetResolverTestFactory.CreateResolver(metadata);
+
+            MergedCompiledCommandParameter input = metadata.BindableParameters["Input"];
+            context.UnboundParameters = new List<MergedCompiledCommandParameter> { input };
+
+            bool result = resolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput(input.Parameter.ParameterSetFlags);
+
+            Assert.True(result);
+        }
+
+        [Fact]
+        public static void AtLeastOneUnboundValidParameterSetTakesPipelineInput_WhenAbsent_ReturnsFalse()
+        {
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(
+                ParameterSetResolverTestFactory.MakeParam("Name", setName: "SetA"));
+            (ParameterSetResolver resolver, TestBindingContext context) = ParameterSetResolverTestFactory.CreateResolver(metadata);
+
+            MergedCompiledCommandParameter name = metadata.BindableParameters["Name"];
+            context.UnboundParameters = new List<MergedCompiledCommandParameter> { name };
+
+            bool result = resolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput(name.Parameter.ParameterSetFlags);
+
+            Assert.False(result);
+        }
+
+        [Fact]
+        public static void FilterParameterSetsTakingNoPipelineInput_DelayBindSetNarrowsFlags()
+        {
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(
+                ParameterSetResolverTestFactory.MakeParam("SetAOnly", setName: "SetA"),
+                ParameterSetResolverTestFactory.MakeParam("SetBOnly", setName: "SetB"));
+            (ParameterSetResolver resolver, TestBindingContext context) = ParameterSetResolverTestFactory.CreateResolver(metadata);
+
+            MergedCompiledCommandParameter setAOnly = metadata.BindableParameters["SetAOnly"];
+            MergedCompiledCommandParameter setBOnly = metadata.BindableParameters["SetBOnly"];
+
+            context.UnboundParameters = new List<MergedCompiledCommandParameter> { setBOnly };
+            resolver.CurrentParameterSetFlag = setAOnly.Parameter.ParameterSetFlags | setBOnly.Parameter.ParameterSetFlags;
+
+            uint filtered = resolver.FilterParameterSetsTakingNoPipelineInput(new List<MergedCompiledCommandParameter> { setAOnly });
+
+            Assert.Equal(setAOnly.Parameter.ParameterSetFlags, filtered);
+        }
+
+        [Fact]
+        public static void FilterParameterSetsTakingNoPipelineInput_AllSetPipelineInput_LeavesFlagsUntouched()
+        {
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(
+                ParameterSetResolverTestFactory.MakeParam("AnyInput", valueFromPipeline: true));
+            (ParameterSetResolver resolver, TestBindingContext context) = ParameterSetResolverTestFactory.CreateResolver(metadata);
+
+            MergedCompiledCommandParameter anyInput = metadata.BindableParameters["AnyInput"];
+            context.UnboundParameters = new List<MergedCompiledCommandParameter> { anyInput };
+            resolver.CurrentParameterSetFlag = uint.MaxValue;
+
+            uint filtered = resolver.FilterParameterSetsTakingNoPipelineInput(new List<MergedCompiledCommandParameter>());
+
+            Assert.Equal(uint.MaxValue, filtered);
+        }
+
+        [Fact]
+        public static void CurrentParameterSetName_UsesCurrentFlag()
+        {
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(
+                ParameterSetResolverTestFactory.MakeParam("Name", setName: "SetA"),
+                ParameterSetResolverTestFactory.MakeParam("Id", setName: "SetB"));
+            (ParameterSetResolver resolver, _) = ParameterSetResolverTestFactory.CreateResolver(metadata);
+
+            resolver.CurrentParameterSetFlag = metadata.BindableParameters["Id"].Parameter.ParameterSetFlags;
+
+            Assert.Equal("SetB", resolver.CurrentParameterSetName);
+        }
+    }
+
 }
