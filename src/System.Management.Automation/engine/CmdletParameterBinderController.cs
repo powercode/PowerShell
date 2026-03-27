@@ -20,7 +20,7 @@ namespace System.Management.Automation
     /// This is the interface between the CommandProcessor and the various
     /// parameter binders required to bind parameters to a cmdlet.
     /// </summary>
-    internal class CmdletParameterBinderController : ParameterBinderController, IParameterBindingContext, IDefaultParameterBindingContext
+    internal class CmdletParameterBinderController : ParameterBinderController, IParameterBindingContext, IDefaultParameterBindingContext, IMandatoryParameterPrompterContext
     {
         #region tracer
 
@@ -94,6 +94,12 @@ namespace System.Management.Automation
                 context: cmdlet.Context,
                 bindableParameters: this.BindableParameters,
                 bindingContext: this);
+
+            _mandatoryParameterPrompter = new MandatoryParameterPrompter(
+                parameterSetResolver: ParameterSetResolver,
+                context: this.Context,
+                command: this.Command,
+                bindingContext: this);
         }
 
         #endregion ctor
@@ -125,6 +131,11 @@ namespace System.Management.Automation
 
         Collection<string> IDefaultParameterBindingContext.BoundDefaultParameters
             => BoundDefaultParameters;
+
+        bool IMandatoryParameterPrompterContext.ResolveAndBindNamedParameter(
+            CommandParameterInternal argument,
+            ParameterBindingFlags flags)
+            => ResolveAndBindNamedParameter(argument, flags);
 
         HashSet<string> IDefaultParameterBindingContext.CopyBoundPositionalParameters()
             => DefaultParameterBinder.CommandLineParameters.CopyBoundPositionalParameters();
@@ -2783,6 +2794,7 @@ namespace System.Management.Automation
         internal Cmdlet Command { get; }
 
         private readonly DefaultParameterValueBinder _defaultParameterValueBinder;
+        private readonly MandatoryParameterPrompter _mandatoryParameterPrompter;
 
         /// <summary>
         /// The cmdlet metadata.
