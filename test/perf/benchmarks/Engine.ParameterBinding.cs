@@ -53,6 +53,12 @@ Get-ChildItem @parameters
         private ScriptBlock directAdvancedFunctionBindingScript;
         private ScriptBlock validationAttributesBindingScript;
         private ScriptBlock pipelineByPropertyNameBindingScript;
+        private ScriptBlock delayBindScriptBlockScript;
+        private ScriptBlock dynamicParameterScript;
+        private ScriptBlock largeParameterCountScript;
+        private ScriptBlock vraScript;
+        private ScriptBlock defaultParameterValuesScript;
+        private ScriptBlock pipelineTypeCoercionScript;
 
         [GlobalSetup]
         public void GlobalSetup()
@@ -222,6 +228,126 @@ function Test-ParameterBindingByPropertyName {
 [pscustomobject]@{ Name = 'item'; Count = 5 } | Test-ParameterBindingByPropertyName
 ");
 
+            var delayBindTemplate = @"
+$benchmarkPath = @'
+__ROOT_PATH__
+'@
+function Test-DelayBind {
+    [CmdletBinding()]
+    param(
+        [Parameter(ValueFromPipeline)]
+        [object]$InputObject,
+
+        [string]$Path
+    )
+
+    process {
+        $Path
+    }
+}
+
+Get-ChildItem -Path $benchmarkPath -File -Recurse |
+    Test-DelayBind -Path { $_.FullName } |
+    Out-Null
+";
+            delayBindScriptBlockScript = ScriptBlock.Create(delayBindTemplate.Replace("__ROOT_PATH__", escapedRootPath));
+
+            var dynamicParameterTemplate = @"
+$benchmarkPath = @'
+__ROOT_PATH__
+'@
+$csvPath = Join-Path $benchmarkPath 'dynamic-parameter-data.csv'
+if (-not (Test-Path -Path $csvPath)) {
+    'a,b,c,d,e' | Set-Content -Path $csvPath -NoNewline
+}
+
+Get-Content -Path $csvPath -Delimiter ',' | Out-Null
+";
+            dynamicParameterScript = ScriptBlock.Create(dynamicParameterTemplate.Replace("__ROOT_PATH__", escapedRootPath));
+
+            largeParameterCountScript = ScriptBlock.Create(@"
+function Test-LargeParameterCount {
+    [CmdletBinding()]
+    param(
+        [string]$P01, [string]$P02, [string]$P03, [string]$P04, [string]$P05,
+        [string]$P06, [string]$P07, [string]$P08, [string]$P09, [string]$P10,
+        [string]$P11, [string]$P12, [string]$P13, [string]$P14, [string]$P15,
+        [string]$P16, [string]$P17, [string]$P18, [string]$P19, [string]$P20,
+        [string]$P21, [string]$P22, [string]$P23, [string]$P24, [string]$P25
+    )
+
+    '{0}{1}' -f $P01, $P25
+}
+
+Test-LargeParameterCount `
+    -P01 'a' -P02 'b' -P03 'c' -P04 'd' -P05 'e' `
+    -P06 'f' -P07 'g' -P08 'h' -P09 'i' -P10 'j' `
+    -P11 'k' -P12 'l' -P13 'm' -P14 'n' -P15 'o' `
+    -P16 'p' -P17 'q' -P18 'r' -P19 's' -P20 't' `
+    -P21 'u' -P22 'v' -P23 'w' -P24 'x' -P25 'y' |
+    Out-Null
+");
+
+            vraScript = ScriptBlock.Create(@"
+function Test-VRA {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position=0)]
+        [string]$First,
+
+        [Parameter(ValueFromRemainingArguments)]
+        [string[]]$Rest
+    )
+
+    $Rest.Count
+}
+
+Test-VRA 'start' '1' '2' '3' '4' '5' '6' '7' '8' '9' '10' '11' '12' '13' '14' '15' '16' '17' '18' '19' '20' | Out-Null
+");
+
+            defaultParameterValuesScript = ScriptBlock.Create(@"
+$oldDefault = $PSDefaultParameterValues
+$PSDefaultParameterValues = @{
+    'Test-DefaultBenchmark:Name' = 'benchmark'
+    'Test-DefaultBenchmark:Count' = 7
+    'Test-DefaultBenchmark:Path' = 'root'
+}
+
+function Test-DefaultBenchmark {
+    [CmdletBinding()]
+    param(
+        [string]$Name,
+        [int]$Count,
+        [string]$Path
+    )
+
+    '{0}{1}{2}' -f $Name, $Count, $Path
+}
+
+try {
+    Test-DefaultBenchmark | Out-Null
+}
+finally {
+    $PSDefaultParameterValues = $oldDefault
+}
+");
+
+            pipelineTypeCoercionScript = ScriptBlock.Create(@"
+function Test-PipelineCoercion {
+    [CmdletBinding()]
+    param(
+        [Parameter(ValueFromPipeline)]
+        [int]$Value
+    )
+
+    process {
+        $Value
+    }
+}
+
+1..100 | ForEach-Object { $_.ToString() } | Test-PipelineCoercion | Out-Null
+");
+
             // Warm all scripts once to avoid startup and first-JIT noise in benchmark iterations.
             NamedParameterBinding();
             PositionalParameterBinding();
@@ -233,6 +359,12 @@ function Test-ParameterBindingByPropertyName {
             AdvancedFunctionDirectBinding();
             ValidationAttributesBinding();
             PipelineByPropertyNameBinding();
+            DelayBindScriptBlockBinding();
+            DynamicParameterBinding();
+            LargeParameterCountBinding();
+            ValueFromRemainingArgumentsBinding();
+            DefaultParameterValuesBinding();
+            PipelineWithTypeCoercionBinding();
         }
 
         private static ScriptBlock CreateScriptBlockWithRootPath(string scriptTemplate, string escapedRootPath)
@@ -294,6 +426,24 @@ function Test-ParameterBindingByPropertyName {
 
         [Benchmark]
         public Collection<PSObject> PipelineByPropertyNameBinding() => pipelineByPropertyNameBindingScript.Invoke();
+
+        [Benchmark]
+        public Collection<PSObject> DelayBindScriptBlockBinding() => delayBindScriptBlockScript.Invoke();
+
+        [Benchmark]
+        public Collection<PSObject> DynamicParameterBinding() => dynamicParameterScript.Invoke();
+
+        [Benchmark]
+        public Collection<PSObject> LargeParameterCountBinding() => largeParameterCountScript.Invoke();
+
+        [Benchmark]
+        public Collection<PSObject> ValueFromRemainingArgumentsBinding() => vraScript.Invoke();
+
+        [Benchmark]
+        public Collection<PSObject> DefaultParameterValuesBinding() => defaultParameterValuesScript.Invoke();
+
+        [Benchmark]
+        public Collection<PSObject> PipelineWithTypeCoercionBinding() => pipelineTypeCoercionScript.Invoke();
 
         [GlobalCleanup]
         public void GlobalCleanup()
