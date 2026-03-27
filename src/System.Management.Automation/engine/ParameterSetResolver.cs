@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Linq;
 using System.Numerics;
 
@@ -35,6 +36,7 @@ internal interface IParameterBindingContext
 /// Encapsulates parameter-set state management, validation, and resolution.
 /// Extracted from CmdletParameterBinderController to satisfy SRP.
 /// </summary>
+[DebuggerDisplay("{DebuggerDisplayValue,nq}")]
 internal sealed class ParameterSetResolver
 {
     private readonly CommandMetadata _commandMetadata;
@@ -65,6 +67,16 @@ internal sealed class ParameterSetResolver
         CurrentParameterSetFlag != 0 &&
         CurrentParameterSetFlag != uint.MaxValue &&
         (CurrentParameterSetFlag & (CurrentParameterSetFlag - 1)) == 0;
+
+    private string DebuggerDisplayValue
+    {
+        get
+        {
+            int validCount = ValidParameterSetCount(CurrentParameterSetFlag);
+            bool resolved = HasSingleParameterSetSelected;
+            return $"ParamSetResolver: 0x{CurrentParameterSetFlag:X8}, Valid={validCount}, Resolved={resolved}";
+        }
+    }
 
     /// <summary>Narrows the current parameter set flag by AND-ing with the given flags.</summary>
     internal void NarrowByParameterSetFlags(uint flags)

@@ -56,7 +56,7 @@ namespace System.Management.Automation
     /// Use <see cref="InvocationInfo"/> directly for errors attributable to the command invocation
     /// itself rather than a specific parameter token.
     /// </remarks>
-    [DebuggerDisplay("Command = {command}")]
+    [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal abstract class ParameterBinderBase
     {
         #region tracer
@@ -71,6 +71,15 @@ namespace System.Management.Automation
                 false);
 
         #endregion tracer
+
+        private string DebuggerDisplayValue
+        {
+            get
+            {
+                string commandName = _invocationInfo?.MyCommand?.Name ?? _command?.GetType().Name ?? "(unknown)";
+                return $"ParameterBinder: {commandName}";
+            }
+        }
 
         #region ctor
 
@@ -1011,9 +1020,12 @@ namespace System.Management.Automation
         internal IDictionary ImplicitUsingParameters { get; set; }
     }
 
+    [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal sealed class CommandLineParameters
     {
         private readonly PSBoundParametersDictionary _dictionary = new PSBoundParametersDictionary();
+
+        private string DebuggerDisplayValue => $"CommandLineParameters: Count={_dictionary.Count}";
 
         internal bool ContainsKey(string name)
         {

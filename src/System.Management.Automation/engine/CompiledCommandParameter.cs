@@ -4,6 +4,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 
@@ -12,6 +13,7 @@ namespace System.Management.Automation
     /// <summary>
     /// The metadata associated with a parameter.
     /// </summary>
+    [DebuggerDisplay("{Name,nq} [{Type.Name,nq}] Sets=0x{ParameterSetFlags:X} Mandatory={IsMandatoryInSomeParameterSet}")]
     internal class CompiledCommandParameter
     {
         #region ctor
@@ -581,6 +583,7 @@ namespace System.Management.Automation
     /// <summary>
     /// Contains the collection type information for a parameter.
     /// </summary>
+    [DebuggerDisplay("{ParameterCollectionType} ElementType={ElementType}")]
     internal class ParameterCollectionTypeInformation
     {
         /// <summary>

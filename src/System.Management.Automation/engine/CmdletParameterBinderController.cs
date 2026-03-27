@@ -10,6 +10,7 @@ using System.Linq;
 using System.Management.Automation.Host;
 using System.Management.Automation.Internal;
 using System.Management.Automation.Language;
+using System.Diagnostics;
 using System.Management.Automation.Runspaces;
 using System.Runtime.ExceptionServices;
 using System.Text;
@@ -20,6 +21,7 @@ namespace System.Management.Automation
     /// This is the interface between the CommandProcessor and the various
     /// parameter binders required to bind parameters to a cmdlet.
     /// </summary>
+    [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal class CmdletParameterBinderController : ParameterBinderController, IParameterBindingContext, IDefaultParameterBindingContext, IMandatoryParameterPrompterContext
     {
         #region tracer
@@ -123,6 +125,16 @@ namespace System.Management.Automation
         }
 
         #endregion ctor
+
+        private string DebuggerDisplayValue
+        {
+            get
+            {
+                string commandName = InvocationInfo?.MyCommand?.Name ?? "(unknown)";
+                uint setFlag = ParameterSetResolver?.CurrentParameterSetFlag ?? 0;
+                return $"CmdletBinder: {commandName}, ParamSet=0x{setFlag:X8}";
+            }
+        }
 
         ICollection<MergedCompiledCommandParameter> IParameterBindingContext.UnboundParameters => UnboundParameters;
 

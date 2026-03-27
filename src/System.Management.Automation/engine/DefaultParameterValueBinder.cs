@@ -4,6 +4,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Management.Automation.Internal;
 using System.Management.Automation.Language;
@@ -42,6 +43,7 @@ internal interface IDefaultParameterBindingContext
 /// Encapsulates $PSDefaultParameterValues lookup, qualification, and binding.
 /// Extracted from <see cref="CmdletParameterBinderController"/> to satisfy SRP.
 /// </summary>
+[DebuggerDisplay("{DebuggerDisplayValue,nq}")]
 internal sealed class DefaultParameterValueBinder
 {
     [TraceSource("ParameterBinderController", "Controls the interaction between the command processor and the parameter binder(s).")]
@@ -86,6 +88,15 @@ internal sealed class DefaultParameterValueBinder
 
     /// <summary>Whether default parameter binding has successfully bound at least one parameter.</summary>
     internal bool DefaultParameterBindingInUse { get; set; }
+
+    private string DebuggerDisplayValue
+    {
+        get
+        {
+            int pairCount = _allDefaultParameterValuePairs?.Count ?? 0;
+            return $"DefaultValueBinder: InUse={DefaultParameterBindingInUse}, Pairs={pairCount}";
+        }
+    }
 
     /// <summary>The $PSDefaultParameterValues hashtable from the session.</summary>
     internal IDictionary DefaultParameterValues { get; set; }

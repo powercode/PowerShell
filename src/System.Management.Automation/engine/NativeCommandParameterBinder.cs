@@ -4,6 +4,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Management.Automation.Internal;
@@ -18,6 +19,7 @@ namespace System.Management.Automation
     /// <summary>
     /// The parameter binder for native commands.
     /// </summary>
+    [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal class NativeCommandParameterBinder : ParameterBinderBase
     {
         #region ctor
@@ -39,6 +41,17 @@ namespace System.Management.Automation
         #endregion ctor
 
         #region internal members
+
+        private string DebuggerDisplayValue
+        {
+            get
+            {
+                string cmd = _nativeCommand?.MyInvocation?.MyCommand?.Name ?? "(unknown)";
+                string args = _arguments.ToString();
+                if (args.Length > 80) args = args[..80] + "...";
+                return $"NativeBinder: {cmd} {args}";
+            }
+        }
 
         #region Parameter binding
 
