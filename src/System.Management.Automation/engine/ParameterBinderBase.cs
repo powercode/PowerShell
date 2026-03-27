@@ -225,7 +225,7 @@ namespace System.Management.Automation
         ///     place and that any validation metadata has been satisfied.
         /// </param>
         /// <param name="parameterMetadata"></param>
-        internal abstract void BindParameter(string name, object value, CompiledCommandParameter parameterMetadata);
+        internal abstract void StoreParameterValue(string name, object value, CompiledCommandParameter parameterMetadata);
 
         private void ValidatePSTypeName(
             CommandParameterInternal parameter,
@@ -544,7 +544,7 @@ namespace System.Management.Automation
 
             try
             {
-                BindParameter(parameter.ParameterName, parameterValue, parameterMetadata);
+                StoreParameterValue(parameter.ParameterName, parameterValue, parameterMetadata);
             }
             catch (SetValueException setValueException)
             {

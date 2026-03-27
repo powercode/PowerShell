@@ -124,7 +124,7 @@ namespace System.Management.Automation
         internal override bool BindParameter(CommandParameterInternal argument, ParameterBindingFlags flags)
         {
             // Just pass the binding straight through.  No metadata to verify the parameter against.
-            DefaultParameterBinder.BindParameter(argument.ParameterName, argument.ArgumentValue, parameterMetadata: null);
+            DefaultParameterBinder.StoreParameterValue(argument.ParameterName, argument.ArgumentValue, parameterMetadata: null);
             return true;
         }
 
@@ -217,7 +217,7 @@ namespace System.Management.Automation
 
             object[] argsArray = args.ToArray();
 
-            DefaultParameterBinder.BindParameter(SpecialVariables.Args, argsArray, parameterMetadata: null);
+            DefaultParameterBinder.StoreParameterValue(SpecialVariables.Args, argsArray, parameterMetadata: null);
 
             DollarArgs.AddRange(argsArray);
         }

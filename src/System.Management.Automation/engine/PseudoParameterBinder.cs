@@ -110,7 +110,7 @@ namespace System.Management.Automation
         /// <exception cref="ArgumentException">
         /// If <paramref name="name"/> is null or empty.
         /// </exception>
-        internal override void BindParameter(string name, object value, CompiledCommandParameter parameterMetadata)
+        internal override void StoreParameterValue(string name, object value, CompiledCommandParameter parameterMetadata)
         {
             if (string.IsNullOrEmpty(name))
             {
