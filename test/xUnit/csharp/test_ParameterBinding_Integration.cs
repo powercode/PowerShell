@@ -3,6 +3,7 @@
 
 using System;
 using System.Management.Automation;
+using System.Management.Automation.Runspaces;
 using Xunit;
 
 namespace PSTests.Parallel
@@ -720,6 +721,154 @@ namespace PSTests.Parallel
                 ");
                 ps.Invoke();
                 Assert.NotEmpty(ps.Streams.Error);
+            }
+        }
+    }
+
+    [Trait("Category", "ParameterBinding")]
+    public class ConstrainedLanguageBindingTests
+    {
+        [Fact]
+        public void ConstrainedLanguage_CustomTypeConversion_TrustedCmdlet_Succeeds()
+        {
+            var initialSessionState = InitialSessionState.CreateDefault2();
+            initialSessionState.LanguageMode = PSLanguageMode.ConstrainedLanguage;
+
+            using (var runspace = RunspaceFactory.CreateRunspace(initialSessionState))
+            using (var ps = PowerShell.Create())
+            {
+                runspace.Open();
+                ps.Runspace = runspace;
+                ps.AddScript(@"
+                    (Get-Date -Date '2024-01-02').Year
+                ");
+
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Single(results);
+                Assert.Equal(2024, results[0].BaseObject);
+            }
+        }
+
+        [Fact]
+        public void ConstrainedLanguage_CustomTypeConversion_UntrustedCmdlet_Throws()
+        {
+            var initialSessionState = InitialSessionState.CreateDefault2();
+            initialSessionState.LanguageMode = PSLanguageMode.ConstrainedLanguage;
+
+            using (var runspace = RunspaceFactory.CreateRunspace(initialSessionState))
+            using (var ps = PowerShell.Create())
+            {
+                runspace.Open();
+                ps.Runspace = runspace;
+                ps.AddScript(@"
+                    function Test-Untrusted {
+                        [CmdletBinding()]
+                        param([string]$Path)
+
+                        [System.IO.FileInfo]::new($Path)
+                    }
+
+                    Test-Untrusted -Path 'a.txt'
+                ");
+
+                ps.Invoke();
+                Assert.NotEmpty(ps.Streams.Error);
+            }
+        }
+
+        [Fact]
+        public void ArgumentTransformation_OptionalArgWithExplicitNull()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-OptionalArg {
+                        [CmdletBinding()]
+                        param([AllowNull()] [string]$Name = 'default')
+
+                        if ($null -eq $Name) { 'null' } else { $Name }
+                    }
+
+                    Test-OptionalArg -Name $null
+                ");
+
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Single(results);
+                Assert.Equal(string.Empty, (string)results[0].BaseObject);
+            }
+        }
+    }
+
+    [Trait("Category", "ParameterBinding")]
+    public class ArrayParameterBindingTests
+    {
+        [Fact]
+        public void ArrayToParameter_ExplicitArray_BindsCorrectly()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Array {
+                        [CmdletBinding()]
+                        param([string[]]$Items)
+                        $Items -join ','
+                    }
+
+                    Test-Array -Items @('a','b')
+                ");
+
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Single(results);
+                Assert.Equal("a,b", (string)results[0].BaseObject);
+            }
+        }
+
+        [Fact]
+        public void ArrayToParameter_MultipleArgs_CombinedIntoArray()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    function Test-Array {
+                        [CmdletBinding()]
+                        param([string[]]$Items)
+                        $Items.Count
+                    }
+
+                    Test-Array -Items 'a','b','c'
+                ");
+
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Single(results);
+                Assert.Equal(3, results[0].BaseObject);
+            }
+        }
+    }
+
+    [Trait("Category", "ParameterBinding")]
+    public class PipelineVariableTests
+    {
+        [Fact]
+        public void PipelineVariable_SetAndAccessible_AcrossPipeline()
+        {
+            using (var ps = PowerShell.Create())
+            {
+                ps.AddScript(@"
+                    1..3 |
+                        ForEach-Object -PipelineVariable pv { $_ } |
+                        ForEach-Object { '{0}:{1}' -f $pv, $_ }
+                ");
+
+                var results = ps.Invoke();
+                Assert.Empty(ps.Streams.Error);
+                Assert.Equal(3, results.Count);
+                Assert.Equal("1:1", (string)results[0].BaseObject);
+                Assert.Equal("2:2", (string)results[1].BaseObject);
+                Assert.Equal("3:3", (string)results[2].BaseObject);
             }
         }
     }

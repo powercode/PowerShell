@@ -11,6 +11,7 @@ namespace PSTests.Parallel
     // ---------------------------------------------------------------------------
     // LanguagePrimitives.ConvertTo type coercion tests
     // ---------------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class LanguagePrimitivesCoercionTests
     {
         // -----------------------------------------------------------------------

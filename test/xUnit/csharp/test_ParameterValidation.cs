@@ -12,6 +12,7 @@ namespace PSTests.Parallel
     // -----------------------------------------------------------------------
     // ValidateLengthAttribute tests
     // -----------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class ValidateLengthAttributeTests
     {
         [Fact]
@@ -72,6 +73,7 @@ namespace PSTests.Parallel
     // -----------------------------------------------------------------------
     // ValidateRangeAttribute tests
     // -----------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class ValidateRangeAttributeTests
     {
         [Fact]
@@ -126,6 +128,7 @@ namespace PSTests.Parallel
     // -----------------------------------------------------------------------
     // ValidateSetAttribute tests
     // -----------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class ValidateSetAttributeTests
     {
         [Fact]
@@ -180,6 +183,7 @@ namespace PSTests.Parallel
     // -----------------------------------------------------------------------
     // ValidatePatternAttribute tests
     // -----------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class ValidatePatternAttributeTests
     {
         [Fact]
@@ -214,6 +218,7 @@ namespace PSTests.Parallel
     // -----------------------------------------------------------------------
     // ValidateCountAttribute tests
     // -----------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class ValidateCountAttributeTests
     {
         [Fact]
@@ -255,6 +260,7 @@ namespace PSTests.Parallel
     // -----------------------------------------------------------------------
     // ValidateNotNullAttribute tests
     // -----------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class ValidateNotNullAttributeTests
     {
         [Fact]
@@ -298,6 +304,7 @@ namespace PSTests.Parallel
     // -----------------------------------------------------------------------
     // ValidateNotNullOrEmptyAttribute tests
     // -----------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class ValidateNotNullOrEmptyAttributeTests
     {
         [Fact]
