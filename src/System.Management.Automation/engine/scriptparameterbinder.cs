@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#nullable enable
+
 using System.Collections;
 using System.Diagnostics;
 using System.Management.Automation.Internal;
@@ -51,8 +53,9 @@ namespace System.Management.Automation
         private readonly CallSite<Func<CallSite, object, object>> _copyMutableValueSite =
             CallSite<Func<CallSite, object, object>>.Create(PSVariableAssignmentBinder.Get());
 
-        internal object CopyMutableValues(object o)
+        internal object? CopyMutableValues(object? o)
         {
+            if (o is null) return null;
             // The variable assignment binder copies mutable values and returns other values as is.
             return _copyMutableValueSite.Target.Invoke(_copyMutableValueSite, o);
         }
@@ -73,9 +76,9 @@ namespace System.Management.Automation
         /// The default value of the specified parameter.
         /// </returns>
         /// <exception cref="Exception">See SessionStateInternal.GetVariableValue.</exception>
-        internal override object GetDefaultParameterValue(string name)
+        internal override object? GetDefaultParameterValue(string name)
         {
-            RuntimeDefinedParameter runtimeDefinedParameter;
+            RuntimeDefinedParameter? runtimeDefinedParameter;
             if (Script.RuntimeDefinedParameters.TryGetValue(name, out runtimeDefinedParameter))
             {
                 return GetDefaultScriptParameterValue(runtimeDefinedParameter);
@@ -100,7 +103,7 @@ namespace System.Management.Automation
         ///     place and that any prerequisite metadata has been satisfied.
         /// </param>
         /// <param name="parameterMetadata"></param>
-        internal override void StoreParameterValue(string name, object value, CompiledCommandParameter parameterMetadata)
+        internal override void StoreParameterValue(string name, object? value, CompiledCommandParameter parameterMetadata)
         {
             if (value == AutomationNull.Value || value == UnboundParameter.Value)
             {
@@ -129,7 +132,7 @@ namespace System.Management.Automation
             PSVariable variable = new PSVariable(varPath.UnqualifiedPath, value,
                                                  varPath.IsPrivate ? ScopedItemOptions.Private : ScopedItemOptions.None);
             Context.EngineSessionState.SetVariable(varPath, variable, false, CommandOrigin.Internal);
-            RuntimeDefinedParameter runtimeDefinedParameter;
+            RuntimeDefinedParameter? runtimeDefinedParameter;
             if (Script.RuntimeDefinedParameters.TryGetValue(name, out runtimeDefinedParameter))
             {
                 // The attributes have already been checked and conversions run, so it is wrong
@@ -141,7 +144,7 @@ namespace System.Management.Automation
         /// <summary>
         /// Return the default value of a script parameter, evaluating the parse tree if necessary.
         /// </summary>
-        internal object GetDefaultScriptParameterValue(RuntimeDefinedParameter parameter, IDictionary implicitUsingParameters = null)
+        internal object GetDefaultScriptParameterValue(RuntimeDefinedParameter parameter, IDictionary? implicitUsingParameters = null)
         {
             object result = parameter.Value;
 

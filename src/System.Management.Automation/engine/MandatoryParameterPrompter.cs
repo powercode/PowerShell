@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#nullable enable
+
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -194,9 +196,9 @@ internal sealed class MandatoryParameterPrompter
         Collection<FieldDescription> fieldDescriptionList,
         Collection<MergedCompiledCommandParameter> missingMandatoryParameters)
     {
-        Dictionary<string, PSObject> parameters = null;
+        Dictionary<string, PSObject>? parameters = null;
 
-        Exception error = null;
+        Exception? error = null;
 
         // Prompt
         try
@@ -277,7 +279,7 @@ internal sealed class MandatoryParameterPrompter
 
             FieldDescription fDesc = new FieldDescription(parameter.Parameter.Name);
 
-            string helpInfo = null;
+            string? helpInfo = null;
 
             try
             {
