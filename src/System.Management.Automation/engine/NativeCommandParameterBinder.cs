@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#nullable enable
+
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -46,7 +48,7 @@ namespace System.Management.Automation
         {
             get
             {
-                string cmd = _nativeCommand?.MyInvocation?.MyCommand?.Name ?? "(unknown)";
+                string cmd = _nativeCommand.MyInvocation.MyCommand?.Name ?? "(unknown)";
                 string args = _arguments.ToString();
                 if (args.Length > 80) args = args[..80] + "...";
                 return $"NativeBinder: {cmd} {args}";
@@ -75,7 +77,7 @@ namespace System.Management.Automation
             throw new NotSupportedException();
         }
 
-        internal override object GetDefaultParameterValue(string name)
+        internal override object? GetDefaultParameterValue(string name)
         {
             return null;
         }
@@ -122,8 +124,8 @@ namespace System.Management.Automation
                         // The parser produced an array of strings but marked the parameter so we
                         // can properly reconstruct the correct command line.
                         bool usedQuotes = false;
-                        ArrayLiteralAst arrayLiteralAst = null;
-                        switch (parameter?.ArgumentAst)
+                        ArrayLiteralAst? arrayLiteralAst = null;
+                        switch (parameter.ArgumentAst)
                         {
                             case StringConstantExpressionAst sce:
                                 usedQuotes = sce.StringConstantType != StringConstantType.BareWord;
@@ -235,11 +237,11 @@ namespace System.Management.Automation
         /// <param name="argArrayAst">If the argument was an array literal, the Ast, otherwise null.</param>
         /// <param name="sawVerbatimArgumentMarker">True if the argument occurs after --%.</param>
         /// <param name="usedQuotes">True if the argument was a quoted string (single or double).</param>
-        private void AppendOneNativeArgument(ExecutionContext context, CommandParameterInternal parameter, object obj, ArrayLiteralAst argArrayAst, bool sawVerbatimArgumentMarker, bool usedQuotes)
+        private void AppendOneNativeArgument(ExecutionContext context, CommandParameterInternal parameter, object obj, ArrayLiteralAst? argArrayAst, bool sawVerbatimArgumentMarker, bool usedQuotes)
         {
-            IEnumerator list = LanguagePrimitives.GetEnumerator(obj);
+            IEnumerator? list = LanguagePrimitives.GetEnumerator(obj);
 
-            Diagnostics.Assert((argArrayAst == null) || (obj is object[] && ((object[])obj).Length == argArrayAst.Elements.Count), "array argument and ArrayLiteralAst differ in number of elements");
+            Diagnostics.Assert(argArrayAst == null || (obj is object[] objects && objects.Length == argArrayAst.Elements.Count), "array argument and ArrayLiteralAst differ in number of elements");
 
             int currentElement = -1;
             string separator = string.Empty;
@@ -324,10 +326,8 @@ namespace System.Management.Automation
 
                                 break;
                             }
-                            else
-                            {
-                                PossiblyGlobArg(arg, parameter, usedQuotes);
-                            }
+
+                            PossiblyGlobArg(arg, parameter, usedQuotes);
                         }
                     }
                 }
@@ -367,7 +367,7 @@ namespace System.Management.Automation
                     bool normalizePath = arg.Length == 0 || !(arg[0] == '~' || arg[0] == '/');
 
                     // See if there are any matching paths otherwise just add the pattern as the argument
-                    Collection<PSObject> paths = null;
+                    Collection<PSObject>? paths = null;
                     try
                     {
                         paths = Context.EngineSessionState.InvokeProvider.ChildItem.Get(arg, false);
@@ -484,7 +484,7 @@ namespace System.Management.Automation
             return needQuotes;
         }
 
-        private static string GetEnumerableArgSeparator(ArrayLiteralAst arrayLiteralAst, int index)
+        private static string GetEnumerableArgSeparator(ArrayLiteralAst? arrayLiteralAst, int index)
         {
             if (arrayLiteralAst == null)
             {
