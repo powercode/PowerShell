@@ -1,11 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#nullable enable
+
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using System.Management.Automation.Internal;
@@ -61,14 +62,12 @@ namespace System.Management.Automation
     {
         #region tracer
         [TraceSource("ParameterBinderBase", "A abstract helper class for the CommandProcessor that binds parameters to the specified object.")]
-        private static readonly PSTraceSource s_tracer = PSTraceSource.GetTracer("ParameterBinderBase", "A abstract helper class for the CommandProcessor that binds parameters to the specified object.");
+        private static readonly PSTraceSource s_tracer = 
+            PSTraceSource.GetTracer("ParameterBinderBase", "A abstract helper class for the CommandProcessor that binds parameters to the specified object.");
 
         [TraceSource("ParameterBinding", "Traces the process of binding the arguments to the parameters of cmdlets, scripts, and applications.")]
         internal static readonly PSTraceSource bindingTracer =
-            PSTraceSource.GetTracer(
-                "ParameterBinding",
-                "Traces the process of binding the arguments to the parameters of cmdlets, scripts, and applications.",
-                false);
+            PSTraceSource.GetTracer("ParameterBinding", "Traces the process of binding the arguments to the parameters of cmdlets, scripts, and applications.", false);
 
         #endregion tracer
 
@@ -76,7 +75,7 @@ namespace System.Management.Automation
         {
             get
             {
-                string commandName = _invocationInfo?.MyCommand?.Name ?? _command?.GetType().Name ?? "(unknown)";
+                string commandName = _invocationInfo.MyCommand?.Name ?? _command?.GetType().Name ?? "(unknown)";
                 return $"ParameterBinder: {commandName}";
             }
         }
@@ -103,7 +102,7 @@ namespace System.Management.Automation
             object target,
             InvocationInfo invocationInfo,
             ExecutionContext context,
-            InternalCommand command)
+            InternalCommand? command)
         {
             Diagnostics.Assert(target != null, "caller to verify target is not null.");
             Diagnostics.Assert(invocationInfo != null, "caller to verify invocationInfo is not null.");
@@ -136,7 +135,7 @@ namespace System.Management.Automation
         internal ParameterBinderBase(
             InvocationInfo invocationInfo,
             ExecutionContext context,
-            InternalCommand command)
+            InternalCommand? command)
         {
             Diagnostics.Assert(invocationInfo != null, "caller to verify invocationInfo is not null.");
             Diagnostics.Assert(context != null, "caller to verify context is not null.");
@@ -167,7 +166,7 @@ namespace System.Management.Automation
                     _target != null,
                     "The target should always be set for the binder");
 
-                return _target;
+                return _target!;
             }
 
             set
@@ -179,7 +178,7 @@ namespace System.Management.Automation
         /// <summary>
         /// The bindable object that parameters will be bound to.
         /// </summary>
-        private object _target;
+        private object? _target;
 
         /// <summary>
         /// Holds the set of parameters that have been bound from the command line...
@@ -192,7 +191,7 @@ namespace System.Management.Automation
             set { _commandLineParameters = value; }
         }
 
-        private CommandLineParameters _commandLineParameters;
+        private CommandLineParameters? _commandLineParameters;
 
         /// <summary>
         /// If this is true, then we want to record the list of bound parameters...
@@ -216,7 +215,7 @@ namespace System.Management.Automation
         /// <returns>
         /// The value of the parameter specified by name.
         /// </returns>
-        internal abstract object GetDefaultParameterValue(string name);
+        internal abstract object? GetDefaultParameterValue(string name);
 
         #endregion Parameter default values
 
@@ -235,13 +234,13 @@ namespace System.Management.Automation
         ///     place and that any validation metadata has been satisfied.
         /// </param>
         /// <param name="parameterMetadata"></param>
-        internal abstract void StoreParameterValue(string name, object value, CompiledCommandParameter parameterMetadata);
+        internal abstract void StoreParameterValue(string name, object? value, CompiledCommandParameter? parameterMetadata);
 
         private void ValidatePSTypeName(
             CommandParameterInternal parameter,
             CompiledCommandParameter parameterMetadata,
             bool retryOtherBindingAfterFailure,
-            object parameterValue)
+            object? parameterValue)
         {
             Dbg.Assert(parameter != null, "Caller should verify parameter != null");
             Dbg.Assert(parameterMetadata != null, "Caller should verify parameterMetadata != null");
@@ -257,9 +256,9 @@ namespace System.Management.Automation
             if (!psTypeNamesOfArgumentValue.Contains(psTypeNameRequestedByParameter, StringComparer.OrdinalIgnoreCase))
             {
                 ParameterBindingException.ThrowMismatchedPSTypeName(
-                    this.InvocationInfo,
+                    InvocationInfo,
                     GetErrorExtent(parameter),
-                    (_invocationInfo != null) && (_invocationInfo.MyCommand != null) ? _invocationInfo.MyCommand.Name : string.Empty,
+                    _invocationInfo.MyCommand?.Name ?? string.Empty,
                     parameterMetadata.Name,
                     parameterMetadata.Type,
                     parameterValue.GetType(),
@@ -270,7 +269,7 @@ namespace System.Management.Automation
 
         /// <summary>
         /// Does all the type coercion, data generation, and validation necessary to bind the
-        /// parameter, then calls the protected <see cref="StoreParameterValue(string, object, CompiledCommandParameter)"/>
+        /// parameter, then calls the protected <see cref="StoreParameterValue(string, object?, CompiledCommandParameter?)"/>
         /// method to have the derived class do the actual binding.
         /// </summary>
         /// <param name="parameter">
@@ -292,7 +291,7 @@ namespace System.Management.Automation
         /// <item><description>The data generation attributes are run.</description></item>
         /// <item><description>The data is coerced into the correct type.</description></item>
         /// <item><description>The data is validated using the validation attributes.</description></item>
-        /// <item><description>The data is encoded into the bindable object using the protected <see cref="StoreParameterValue(string, object, CompiledCommandParameter)"/> method.</description></item>
+        /// <item><description>The data is encoded into the bindable object using the protected <see cref="StoreParameterValue(string, object?, CompiledCommandParameter?)"/> method.</description></item>
         /// </list>
         /// </remarks>
         /// <exception cref="ArgumentNullException">
@@ -331,7 +330,7 @@ namespace System.Management.Automation
 
                 parameter.ParameterName = parameterMetadata.Name;
 
-                object parameterValue = parameter.ArgumentValue;
+                object? parameterValue = parameter.ArgumentValue;
 
                 parameterValue = ApplyArgumentTransformations(parameter, parameterMetadata, parameterValue, flags);
 
@@ -355,17 +354,17 @@ namespace System.Management.Automation
         /// <summary>
         /// Apply argument transformation attributes and return the transformed value.
         /// </summary>
-        private object ApplyArgumentTransformations(
+        private object? ApplyArgumentTransformations(
             CommandParameterInternal parameter,
             CompiledCommandParameter parameterMetadata,
-            object parameterValue,
+            object? parameterValue,
             ParameterBindingFlags flags)
         {
             bool coerceTypeIfNeeded = (flags & ParameterBindingFlags.ShouldCoerceType) != 0;
             bool isDefaultValue = (flags & ParameterBindingFlags.IsDefaultValue) != 0;
 
-            ScriptParameterBinder spb = this as ScriptParameterBinder;
-            bool usesCmdletBinding = spb != null && spb.Script.UsesCmdletBinding;
+            ScriptParameterBinder? spb = this as ScriptParameterBinder;
+            bool usesCmdletBinding = spb is { Script.UsesCmdletBinding: true };
 
             // No transformation is done for default values in script when the value is null and optional.
             foreach (ArgumentTransformationAttribute dma in parameterMetadata.ArgumentTransformationAttributes)
@@ -419,10 +418,10 @@ namespace System.Management.Automation
         /// <summary>
         /// Apply type coercion (or compatibility checks for uncoerced binding) and return the value.
         /// </summary>
-        private object ApplyTypeCoercion(
+        private object? ApplyTypeCoercion(
             CommandParameterInternal parameter,
             CompiledCommandParameter parameterMetadata,
-            object parameterValue,
+            object? parameterValue,
             ParameterBindingFlags flags,
             out bool shouldContinueBinding)
         {
@@ -438,7 +437,7 @@ namespace System.Management.Automation
                     parameterValue);
             }
 
-            shouldContinueBinding = ShouldContinueUncoercedBind(parameter, parameterMetadata, flags, ref parameterValue);
+            shouldContinueBinding = ShouldContinueUncoercedBind(parameter, parameterMetadata, flags, ref parameterValue!);
             return parameterValue;
         }
 
@@ -448,7 +447,7 @@ namespace System.Management.Automation
         private void RunValidationPipeline(
             CommandParameterInternal parameter,
             CompiledCommandParameter parameterMetadata,
-            object parameterValue,
+            object? parameterValue,
             ParameterBindingFlags flags)
         {
             bool coerceTypeIfNeeded = (flags & ParameterBindingFlags.ShouldCoerceType) != 0;
@@ -523,7 +522,7 @@ namespace System.Management.Automation
             ParameterBindingFlags flags)
         {
             bool isDefaultValue = (flags & ParameterBindingFlags.IsDefaultValue) != 0;
-            ScriptParameterBinder spb = this as ScriptParameterBinder;
+            ScriptParameterBinder? spb = this as ScriptParameterBinder;
             bool usesCmdletBinding = spb != null && spb.Script.UsesCmdletBinding;
 
             if (parameterMetadata.ObsoleteAttribute == null || isDefaultValue || spb == null || usesCmdletBinding)
@@ -537,7 +536,7 @@ namespace System.Management.Automation
                 parameterMetadata.Name,
                 parameterMetadata.ObsoleteAttribute.Message);
 
-            var mshCommandRuntime = this.Command.commandRuntime as MshCommandRuntime;
+            var mshCommandRuntime = this.Command?.commandRuntime as MshCommandRuntime;
 
             // Keep warning behavior aligned with obsolete command/cmdlet parameter warnings.
             mshCommandRuntime?.WriteWarning(new WarningRecord(FQIDParameterObsolete, obsoleteWarning));
@@ -549,9 +548,9 @@ namespace System.Management.Automation
         private bool DispatchBind(
             CommandParameterInternal parameter,
             CompiledCommandParameter parameterMetadata,
-            object parameterValue)
+            object? parameterValue)
         {
-            Exception bindError = null;
+            Exception? bindError = null;
 
             try
             {
@@ -564,7 +563,7 @@ namespace System.Management.Automation
 
             if (bindError != null)
             {
-                Type specifiedType = parameterValue?.GetType();
+                Type? specifiedType = parameterValue?.GetType();
                 ParameterBindingException.ThrowParameterBindingFailed(
                     bindError,
                     this.InvocationInfo,
@@ -581,13 +580,9 @@ namespace System.Management.Automation
         /// <summary>
         /// Record tracing and runtime logging information for the bind result.
         /// </summary>
-        private void RecordBindingResult(CommandParameterInternal parameter, object parameterValue, bool result)
+        private void RecordBindingResult(CommandParameterInternal parameter, object? parameterValue, bool result)
         {
-            bindingTracer.WriteLine(
-                "BIND arg [{0}] to param [{1}] {2}",
-                parameterValue,
-                parameter.ParameterName,
-                result ? "SUCCESSFUL" : "SKIPPED");
+            bindingTracer.WriteLine("BIND arg [{0}] to param [{1}] {2}", parameterValue, parameter.ParameterName, result ? "SUCCESSFUL" : "SKIPPED");
 
             if (!result)
             {
@@ -596,21 +591,20 @@ namespace System.Management.Automation
 
             if (RecordBoundParameters)
             {
-                this.CommandLineParameters.Add(parameter.ParameterName, parameterValue);
+                CommandLineParameters.Add(parameter.ParameterName, parameterValue);
             }
 
-            MshCommandRuntime cmdRuntime = this.Command.commandRuntime as MshCommandRuntime;
-            if ((cmdRuntime == null) ||
-                (!cmdRuntime.LogPipelineExecutionDetail && !_isTranscribing) ||
-                (cmdRuntime.PipelineProcessor == null))
+            if (Command?.commandRuntime is not MshCommandRuntime cmdRuntime
+                || (!cmdRuntime.LogPipelineExecutionDetail && !_isTranscribing) ||
+                cmdRuntime.PipelineProcessor == null)
             {
                 return;
             }
 
-            string stringToPrint = null;
+            string? stringToPrint = null;
             try
             {
-                IEnumerable values = LanguagePrimitives.GetEnumerable(parameterValue);
+                IEnumerable? values = LanguagePrimitives.GetEnumerable(parameterValue);
                 if (values != null)
                 {
                     var sb = new Text.StringBuilder(256);
@@ -631,7 +625,7 @@ namespace System.Management.Automation
                 }
                 else if (parameterValue != null)
                 {
-                    stringToPrint = parameterValue.ToString();
+                    stringToPrint = parameterValue.ToString() ?? string.Empty;
                 }
             }
             catch (Exception) // Catch-all OK, 3rd party callout
@@ -667,7 +661,7 @@ namespace System.Management.Automation
             CommandParameterInternal parameter,
             CompiledCommandParameter parameterMetadata,
             Type argumentType,
-            object parameterValue,
+            object? parameterValue,
             bool recurseIntoCollections)
         {
             if (parameterValue == null && argumentType != typeof(bool?))
@@ -708,7 +702,7 @@ namespace System.Management.Automation
                         GetErrorExtent(parameter),
                         parameterMetadata.Name,
                         parameterMetadata.Type,
-                        parameterValue?.GetType());
+                        parameterValue.GetType());
                 }
 
                 return;
@@ -793,7 +787,7 @@ namespace System.Management.Automation
             CommandParameterInternal parameter,
             CompiledCommandParameter parameterMetadata,
             ParameterBindingFlags flags,
-            ref object parameterValue)
+            ref object? parameterValue)
         {
             bool isDefaultValue = (flags & ParameterBindingFlags.IsDefaultValue) != 0;
             Type parameterType = parameterMetadata.Type;
@@ -841,7 +835,7 @@ namespace System.Management.Automation
                 // See if the value needs to be encoded in a collection
 
                 bool coercionRequired;
-                object encodedValue =
+                object? encodedValue =
                     _typeCoercer.EncodeCollection(
                         parameter,
                         parameterMetadata.Name,
@@ -897,11 +891,11 @@ namespace System.Management.Automation
         /// <summary>
         /// An instance of InternalCommand that the binder is binding to.
         /// </summary>
-        private readonly InternalCommand _command;
+        private readonly InternalCommand? _command;
 
         private readonly ParameterTypeCoercer _typeCoercer;
 
-        internal InternalCommand Command
+        internal InternalCommand? Command
         {
             get
             {
@@ -920,7 +914,7 @@ namespace System.Management.Automation
 
         #region Private helpers
 
-        internal static IList GetIList(object value)
+        internal static IList? GetIList(object value)
         {
             var baseObj = PSObject.Base(value);
             if (baseObj is IList result)
@@ -1004,7 +998,7 @@ namespace System.Management.Automation
     // $PSBoundParameters used to be a PSObject with an instance member, but that was quite
     // slow for a relatively common case, this class should work identically, except maybe
     // if somebody depends on the typename being the same.
-    internal sealed class PSBoundParametersDictionary : Dictionary<string, object>
+    internal sealed class PSBoundParametersDictionary : Dictionary<string, object?>
     {
         internal PSBoundParametersDictionary()
             : base(StringComparer.OrdinalIgnoreCase)
@@ -1017,7 +1011,7 @@ namespace System.Management.Automation
 
         public List<string> BoundPositionally { get; }
 
-        internal IDictionary ImplicitUsingParameters { get; set; }
+        internal IDictionary? ImplicitUsingParameters { get; set; }
     }
 
     [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
@@ -1033,7 +1027,7 @@ namespace System.Management.Automation
             return _dictionary.ContainsKey(name);
         }
 
-        internal void Add(string name, object value)
+        internal void Add(string name, object? value)
         {
             Dbg.Assert(!string.IsNullOrEmpty(name), "parameter names should not be empty");
             _dictionary[name] = value;
@@ -1058,8 +1052,7 @@ namespace System.Management.Automation
             if (_dictionary.ImplicitUsingParameters == null)
             {
                 // Handle downlevel V4 case where using parameters are passed as an array list.
-                IList implicitArrayUsingParameters = PSObject.Base(obj) as IList;
-                if ((implicitArrayUsingParameters != null) && (implicitArrayUsingParameters.Count > 0))
+                if (PSObject.Base(obj) is IList { Count: > 0 } implicitArrayUsingParameters)
                 {
                     // Convert array to hash table.
                     _dictionary.ImplicitUsingParameters = new Hashtable();
@@ -1071,7 +1064,7 @@ namespace System.Management.Automation
             }
         }
 
-        internal IDictionary GetImplicitUsingParameters()
+        internal IDictionary? GetImplicitUsingParameters()
         {
             return _dictionary.ImplicitUsingParameters;
         }

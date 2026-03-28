@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#nullable enable
+
 using System.Diagnostics;
 using System.Management.Automation.Internal;
 
@@ -37,7 +39,7 @@ namespace System.Management.Automation
             {
                 string key = pair.Key;
                 RuntimeDefinedParameter pp = pair.Value;
-                string ppName = pp?.Name;
+                string? ppName = pp?.Name;
                 if (pp == null || key != ppName)
                 {
                     ParameterBindingException.ThrowRuntimeDefinedParameterNameMismatch(
@@ -62,7 +64,7 @@ namespace System.Management.Automation
         {
             get
             {
-                return base.Target as RuntimeDefinedParameterDictionary;
+                return (RuntimeDefinedParameterDictionary)base.Target;
             }
 
             set
@@ -92,10 +94,10 @@ namespace System.Management.Automation
         /// <returns>
         /// The value of the specified parameter
         /// </returns>
-        internal override object GetDefaultParameterValue(string name)
+        internal override object? GetDefaultParameterValue(string name)
         {
-            object result = null;
-            RuntimeDefinedParameter parameter;
+            object? result = null;
+            RuntimeDefinedParameter? parameter;
             if (this.Target.TryGetValue(name, out parameter) && parameter != null)
             {
                 result = parameter.Value;
@@ -122,7 +124,7 @@ namespace System.Management.Automation
         /// <exception cref="ArgumentException">
         /// If <paramref name="name"/> is null or empty.
         /// </exception>
-        internal override void StoreParameterValue(string name, object value, CompiledCommandParameter parameterMetadata)
+        internal override void StoreParameterValue(string name, object? value, CompiledCommandParameter? parameterMetadata)
         {
             if (string.IsNullOrEmpty(name))
             {
