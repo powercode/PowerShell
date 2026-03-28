@@ -130,7 +130,7 @@ namespace System.Management.Automation
         /// <exception cref="SetValueException">
         /// If the setter raises an exception.
         /// </exception>
-        internal override void StoreParameterValue(string name, object value, CompiledCommandParameter parameterMetadata)
+        internal override void StoreParameterValue(string name, object? value, CompiledCommandParameter? parameterMetadata)
         {
             Diagnostics.Assert(!string.IsNullOrEmpty(name), "caller to verify name parameter");
 
@@ -139,7 +139,7 @@ namespace System.Management.Automation
                 var setter = parameterMetadata != null
                     ? (parameterMetadata.Setter ??= GetSetter(Target.GetType(), name))
                     : GetSetter(Target.GetType(), name);
-                setter(Target, value);
+                setter(Target, value!);
             }
             catch (TargetInvocationException ex)
             {
