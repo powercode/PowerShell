@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System;
+#nullable enable
+
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -191,8 +192,7 @@ internal sealed class ParameterSetResolver
                 if ((CurrentParameterSetFlag & _commandMetadata.DefaultParameterSetFlag) != 0 &&
                      _commandMetadata.DefaultParameterSetFlag != uint.MaxValue)
                 {
-                    ParameterBinderBase.bindingTracer.WriteLine(
-                        "{0} valid parameter sets, using the DEFAULT PARAMETER SET: [{0}]",
+                    ParameterBinderBase.bindingTracer.WriteLine("{0} valid parameter sets, using the DEFAULT PARAMETER SET: [{0}]",
                         _bindableParameters.ParameterSetCount.ToString(),
                         _commandMetadata.DefaultParameterSetName);
 
@@ -200,9 +200,7 @@ internal sealed class ParameterSetResolver
                 }
                 else
                 {
-                    ParameterBinderBase.bindingTracer.TraceError(
-                        "ERROR: {0} valid parameter sets, but NOT DEFAULT PARAMETER SET.",
-                        _bindableParameters.ParameterSetCount);
+                    ParameterBinderBase.bindingTracer.TraceError("ERROR: {0} valid parameter sets, but NOT DEFAULT PARAMETER SET.", _bindableParameters.ParameterSetCount);
 
                     ThrowAmbiguousParameterSetException(CurrentParameterSetFlag);
                 }
@@ -230,7 +228,7 @@ internal sealed class ParameterSetResolver
         ICollection<MergedCompiledCommandParameter> unboundParameters,
         MergedCommandParameterMetadata bindableParameters,
         ref uint currentParameterSetFlag,
-        Action<string> setParameterSetName)
+        Action<string>? setParameterSetName)
     {
         uint remainingParameterSetsWithNoMandatoryUnboundParameters = currentParameterSetFlag;
 
@@ -254,7 +252,7 @@ internal sealed class ParameterSetResolver
             .Where(static p => p.IsMandatory);
         foreach (ParameterSetSpecificMetadata parameterSetMetadata in parameterSetMetadatasForUnboundMandatoryParameters)
         {
-            remainingParameterSetsWithNoMandatoryUnboundParameters &= (~parameterSetMetadata.ParameterSetFlag);
+            remainingParameterSetsWithNoMandatoryUnboundParameters &= ~parameterSetMetadata.ParameterSetFlag;
         }
 
         int finalParameterSetCount = ValidParameterSetCount(remainingParameterSetsWithNoMandatoryUnboundParameters);
@@ -337,7 +335,7 @@ internal sealed class ParameterSetResolver
             {
                 if (parameterSetMetadata.ValueFromPipeline || parameterSetMetadata.ValueFromPipelineByPropertyName)
                 {
-                    if (parameterSetMetadata.ParameterSetFlag == 0 && parameterSetMetadata.IsInAllSets)
+                    if (parameterSetMetadata is { ParameterSetFlag: 0, IsInAllSets: true })
                     {
                         parameterSetsTakingPipeInput = 0;
                         findPipeParameterInAllSets = true;
@@ -557,8 +555,7 @@ internal sealed class ParameterSetResolver
         bool anotherSetTakesPipelineInput = false;
         foreach (ParameterSetPromptingData paramPromptingData in promptingData.Values)
         {
-            if (!paramPromptingData.IsAllSet &&
-                !paramPromptingData.IsDefaultSet &&
+            if (paramPromptingData is { IsAllSet: false, IsDefaultSet: false } &&
                 paramPromptingData.PipelineableMandatoryParameters.Count > 0 &&
                 paramPromptingData.NonpipelineableMandatoryParameters.Count == 0)
             {
@@ -580,7 +577,7 @@ internal sealed class ParameterSetResolver
         }
 
         bool latchOnToDefault = false;
-        if (promptingData.TryGetValue(defaultParameterSet, out ParameterSetPromptingData defaultSetPromptingData))
+        if (promptingData.TryGetValue(defaultParameterSet, out ParameterSetPromptingData? defaultSetPromptingData))
         {
             bool defaultSetTakesPipelineInput = defaultSetPromptingData.PipelineableMandatoryParameters.Count > 0;
             bool defaultSetTakesPipelineInputByPropertyName = defaultSetPromptingData.PipelineableMandatoryByPropertyNameParameters.Count > 0;
@@ -600,7 +597,7 @@ internal sealed class ParameterSetResolver
             latchOnToDefault = true;
         }
 
-        if (!latchOnToDefault && promptingData.TryGetValue(uint.MaxValue, out ParameterSetPromptingData allSetPromptingData))
+        if (!latchOnToDefault && promptingData.TryGetValue(uint.MaxValue, out ParameterSetPromptingData? allSetPromptingData))
         {
             latchOnToDefault = allSetPromptingData.NonpipelineableMandatoryParameters.Count > 0;
         }
@@ -861,7 +858,7 @@ internal sealed class ParameterSetResolver
 
         if (isMandatory)
         {
-            if (!promptingData.TryGetValue(parameterSetFlag, out ParameterSetPromptingData promptingDataForSet))
+            if (!promptingData.TryGetValue(parameterSetFlag, out ParameterSetPromptingData? promptingDataForSet))
             {
                 promptingDataForSet = new ParameterSetPromptingData(parameterSetFlag, isDefaultSet);
                 promptingData.Add(parameterSetFlag, promptingDataForSet);

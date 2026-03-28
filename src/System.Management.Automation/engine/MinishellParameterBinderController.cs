@@ -1,15 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#nullable enable
+
 using System.Collections;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
-using System.Management.Automation.Language;
 using System.Xml;
 
 using System.Diagnostics;
-using Dbg = System.Management.Automation.Diagnostics;
 
 namespace System.Management.Automation
 {
@@ -82,8 +82,8 @@ namespace System.Management.Automation
         internal Collection<CommandParameterInternal> BindParameters(Collection<CommandParameterInternal> parameters, bool outputRedirected, string hostName)
         {
             MinishellParameters seen = 0;
-            string inputFormat = null;
-            string outputFormat = null;
+            string? inputFormat = null;
+            string? outputFormat = null;
             for (int i = 0; i < parameters.Count; i++)
             {
                 var parameter = parameters[i];
@@ -113,7 +113,7 @@ namespace System.Management.Automation
                         if (!scriptBlockArgument.ArgumentSpecified || argumentValue is not ScriptBlock)
                         {
                             throw NewParameterBindingException(null, ErrorCategory.InvalidArgument, CommandParameter,
-                                                               typeof(ScriptBlock), argumentValue.GetType(),
+                                                               typeof(ScriptBlock), argumentValue?.GetType(),
                                                                NativeCP.IncorrectValueForCommandParameter,
                                                                "IncorrectValueForCommandParameter");
                         }
@@ -333,10 +333,10 @@ namespace System.Management.Automation
             ArrayList list = ConvertArgsValueToArrayList(value);
 
             // Serialize the list
-            StringWriter stringWriter = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+            StringWriter stringWriter = new(CultureInfo.InvariantCulture);
             // When (if) switching to XmlTextWriter.Create remember the OmitXmlDeclaration difference
             XmlWriter xmlWriter = XmlWriter.Create(stringWriter);
-            Serializer serializer = new Serializer(xmlWriter);
+            Serializer serializer = new(xmlWriter);
             serializer.Serialize(list);
             serializer.Done();
             xmlWriter.Flush();
@@ -370,11 +370,11 @@ namespace System.Management.Automation
         }
 
         private ParameterBindingException NewParameterBindingException(
-            Exception innerException,
+            Exception? innerException,
             ErrorCategory errorCategory,
-            string parameterName,
-            Type parameterType,
-            Type typeSpecified,
+            string? parameterName,
+            Type? parameterType,
+            Type? typeSpecified,
             string resourceString,
             string errorId,
             params object[] args)

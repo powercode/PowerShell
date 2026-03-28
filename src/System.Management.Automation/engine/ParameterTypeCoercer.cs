@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#nullable enable
+
 using System.Collections;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -15,7 +17,7 @@ namespace System.Management.Automation;
 /// Encapsulates parameter type coercion and collection encoding logic.
 /// </summary>
 [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
-internal sealed class ParameterTypeCoercer
+internal sealed class ParameterTypeCoercer  
 {
     [TraceSource("ParameterBinderBase", "A abstract helper class for the CommandProcessor that binds parameters to the specified object.")]
     private static readonly PSTraceSource s_tracer = PSTraceSource.GetTracer("ParameterBinderBase", "A abstract helper class for the CommandProcessor that binds parameters to the specified object.");
@@ -29,12 +31,12 @@ internal sealed class ParameterTypeCoercer
 
     private readonly InvocationInfo _invocationInfo;
     private readonly ExecutionContext _context;
-    private readonly InternalCommand _command;
+    private readonly InternalCommand? _command;
 
     internal ParameterTypeCoercer(
         InvocationInfo invocationInfo,
         ExecutionContext context,
-        InternalCommand command)
+        InternalCommand? command)
     {
         _invocationInfo = invocationInfo;
         _context = context;
@@ -45,7 +47,7 @@ internal sealed class ParameterTypeCoercer
     {
         get
         {
-            string commandName = _invocationInfo?.MyCommand?.Name ?? "(unknown)";
+            string commandName = _invocationInfo.MyCommand?.Name ?? "(unknown)";
             return $"TypeCoercer: {commandName}";
         }
     }
@@ -61,12 +63,12 @@ internal sealed class ParameterTypeCoercer
     /// or
     /// If the argument value could not be converted to the parameter type.
     /// </exception>
-    internal object CoerceTypeAsNeeded(
+    internal object? CoerceTypeAsNeeded(
         CommandParameterInternal argument,
         string parameterName,
         Type toType,
-        ParameterCollectionTypeInformation collectionTypeInfo,
-        object currentValue)
+        ParameterCollectionTypeInformation? collectionTypeInfo,
+        object? currentValue)
     {
         if (argument == null)
         {
@@ -80,13 +82,12 @@ internal sealed class ParameterTypeCoercer
 
         collectionTypeInfo ??= new ParameterCollectionTypeInformation(toType);
 
-        object originalValue = currentValue;
-        object result = currentValue;
+        object? originalValue = currentValue;
+        object? result = currentValue;
 
-        using (bindingTracer.TraceScope(
-            "COERCE arg to [{0}]", toType))
+        using (bindingTracer.TraceScope("COERCE arg to [{0}]", toType))
         {
-            object FinalizeResult(object value)
+            object? FinalizeResult(object? value)
             {
                 if (value != null)
                 {
@@ -96,7 +97,7 @@ internal sealed class ParameterTypeCoercer
                 return value;
             }
 
-            Type argumentType = null;
+            Type? argumentType = null;
             try
             {
                 if (IsNullParameterValue(currentValue))
@@ -109,8 +110,7 @@ internal sealed class ParameterTypeCoercer
 
                 if (toType.IsAssignableFrom(argumentType))
                 {
-                    bindingTracer.WriteLine(
-                        "Parameter and arg types the same, no coercion is needed.");
+                    bindingTracer.WriteLine("Parameter and arg types the same, no coercion is needed.");
 
                     result = currentValue;
                     return FinalizeResult(result);
@@ -120,48 +120,41 @@ internal sealed class ParameterTypeCoercer
 
                 if (toType == typeof(PSObject))
                 {
-                    if (_command != null &&
-                        currentValue == _command.CurrentPipelineObject.BaseObject)
+                    if (_command != null && currentValue == _command.CurrentPipelineObject.BaseObject)
                     {
                         currentValue = _command.CurrentPipelineObject;
                     }
 
-                    bindingTracer.WriteLine(
-                        "The parameter is of type [{0}] and the argument is an PSObject, so the parameter value is the argument value wrapped into an PSObject.",
-                        toType);
+                    bindingTracer.WriteLine("The parameter is of type [{0}] and the argument is an PSObject, so the parameter value is the argument value wrapped into an PSObject.", toType);
                     result = LanguagePrimitives.AsPSObjectOrNull(currentValue);
                     return FinalizeResult(result);
                 }
 
-                if (toType == typeof(string) &&
-                    argumentType == typeof(PSObject))
+                if (toType == typeof(string) && argumentType == typeof(PSObject))
                 {
                     PSObject currentValueAsPSObject = (PSObject)currentValue;
 
                     if (currentValueAsPSObject == AutomationNull.Value)
                     {
-                        bindingTracer.WriteLine(
-                            "CONVERT a null PSObject to a null string.");
+                        bindingTracer.WriteLine("CONVERT a null PSObject to a null string.");
                         result = null;
                         return FinalizeResult(result);
                     }
                 }
 
-                if (toType == typeof(bool) || toType == typeof(SwitchParameter) ||
-                    toType == typeof(bool?))
+                if (toType == typeof(bool) || toType == typeof(SwitchParameter) || toType == typeof(bool?))
                 {
                     result = CoerceToBooleanOrSwitch(currentValue, argumentType, toType, argument, parameterName);
                     return FinalizeResult(result);
                 }
 
-                if (collectionTypeInfo.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric
-                    || collectionTypeInfo.ParameterCollectionType == ParameterCollectionType.IList)
+                if (collectionTypeInfo.ParameterCollectionType is ParameterCollectionType.ICollectionGeneric or ParameterCollectionType.IList)
                 {
                     object currentValueToConvert = PSObject.Base(currentValue);
                     if (currentValueToConvert != null)
                     {
                         ConversionRank rank = LanguagePrimitives.GetConversionRank(currentValueToConvert.GetType(), toType);
-                        if (rank == ConversionRank.Constructor || rank == ConversionRank.ImplicitCast || rank == ConversionRank.ExplicitCast)
+                        if (rank is ConversionRank.Constructor or ConversionRank.ImplicitCast or ConversionRank.ExplicitCast)
                         {
                             if (LanguagePrimitives.TryConvertTo(currentValue, toType, CultureInfo.CurrentCulture, out result))
                             {
@@ -173,19 +166,10 @@ internal sealed class ParameterTypeCoercer
 
                 if (collectionTypeInfo.ParameterCollectionType != ParameterCollectionType.NotCollection)
                 {
-                    bindingTracer.WriteLine(
-                        "ENCODING arg into collection");
-
-                    bool ignored = false;
+                    bindingTracer.WriteLine("ENCODING arg into collection");
+                    
                     result =
-                        EncodeCollection(
-                            argument,
-                            parameterName,
-                            collectionTypeInfo,
-                            toType,
-                            currentValue,
-                            (collectionTypeInfo.ElementType != null),
-                            out ignored);
+                        EncodeCollection(argument, parameterName, collectionTypeInfo, toType, currentValue, (collectionTypeInfo.ElementType != null), out _);
 
                     return FinalizeResult(result);
                 }
@@ -207,10 +191,7 @@ internal sealed class ParameterTypeCoercer
             }
             catch (NotSupportedException notSupported)
             {
-                bindingTracer.TraceError(
-                    "ERROR: COERCE FAILED: arg [{0}] could not be converted to the parameter type [{1}]",
-                    result ?? "null",
-                    toType);
+                bindingTracer.TraceError("ERROR: COERCE FAILED: arg [{0}] could not be converted to the parameter type [{1}]", result ?? "null", toType);
 
                 ParameterBindingException.ThrowCannotConvertArgument(
                     notSupported,
@@ -226,10 +207,7 @@ internal sealed class ParameterTypeCoercer
             }
             catch (PSInvalidCastException invalidCast)
             {
-                bindingTracer.TraceError(
-                  "ERROR: COERCE FAILED: arg [{0}] could not be converted to the parameter type [{1}]",
-                  result ?? "null",
-                  toType);
+                bindingTracer.TraceError("ERROR: COERCE FAILED: arg [{0}] could not be converted to the parameter type [{1}]", result ?? "null", toType);
 
                 ParameterBindingException.ThrowCannotConvertArgumentNoMessage(
                     invalidCast,
@@ -245,25 +223,24 @@ internal sealed class ParameterTypeCoercer
         }
     }
 
-    internal static bool IsNullParameterValue(object currentValue)
+    internal static bool IsNullParameterValue([NotNullWhen(returnValue:false)] object? currentValue)
     {
         return currentValue == null ||
                currentValue == AutomationNull.Value ||
                currentValue == UnboundParameter.Value;
     }
 
-    private object HandleNullParameterForSpecialTypes(
+    private object? HandleNullParameterForSpecialTypes(
         CommandParameterInternal argument,
         string parameterName,
         Type toType,
-        object currentValue)
+        object? currentValue)
     {
-        object result = null;
+        object? result = null;
 
         if (toType == typeof(bool))
         {
-            bindingTracer.WriteLine(
-                    "ERROR: No argument is specified for parameter and parameter type is BOOL");
+            bindingTracer.WriteLine("ERROR: No argument is specified for parameter and parameter type is BOOL");
 
             ParameterBindingValidationException.ThrowParameterArgumentValidationErrorNullNotAllowed(
                 _invocationInfo,
@@ -275,14 +252,12 @@ internal sealed class ParameterTypeCoercer
         else
             if (toType == typeof(SwitchParameter))
         {
-            bindingTracer.WriteLine(
-                "Arg is null or not present, parameter type is SWITCHPARAMTER, value is true.");
+            bindingTracer.WriteLine("Arg is null or not present, parameter type is SWITCHPARAMTER, value is true.");
             result = SwitchParameter.Present;
         }
         else if (currentValue == UnboundParameter.Value)
         {
-            bindingTracer.TraceError(
-                "ERROR: No argument was specified for the parameter and the parameter is not of type bool");
+            bindingTracer.TraceError("ERROR: No argument was specified for the parameter and the parameter is not of type bool");
 
             ParameterBindingException.ThrowMissingArgument(
                 _invocationInfo,
@@ -292,8 +267,7 @@ internal sealed class ParameterTypeCoercer
         }
         else
         {
-            bindingTracer.WriteLine(
-                "Arg is null, parameter type not bool or SwitchParameter, value is null.");
+            bindingTracer.WriteLine("Arg is null, parameter type not bool or SwitchParameter, value is null.");
             result = null;
         }
 
@@ -316,9 +290,9 @@ internal sealed class ParameterTypeCoercer
             PSObject currentValueAsPSObject = (PSObject)currentValue;
             currentValue = currentValueAsPSObject.BaseObject;
 
-            if (currentValue is SwitchParameter)
+            if (currentValue is SwitchParameter parameter)
             {
-                currentValue = ((SwitchParameter)currentValue).IsPresent;
+                currentValue = parameter.IsPresent;
             }
 
             boType = currentValue.GetType();
@@ -370,24 +344,23 @@ internal sealed class ParameterTypeCoercer
     /// Converts a value using LanguagePrimitives.ConvertTo, handling language mode
     /// switching for parameters that allow it.
     /// </summary>
-    private object CoerceWithLanguagePrimitives(
-        object currentValue,
+    private object? CoerceWithLanguagePrimitives(
+        object? currentValue,
         Type toType,
         CommandParameterInternal argument,
         string parameterName,
-        Type argumentType)
+        Type? argumentType)
     {
         _ = argument;
         _ = parameterName;
         _ = argumentType;
 
-        bindingTracer.WriteLine(
-            "CONVERT arg type to param type using LanguagePrimitives.ConvertTo");
+        bindingTracer.WriteLine("CONVERT arg type to param type using LanguagePrimitives.ConvertTo");
 
         var currentLanguageMode = _context.LanguageMode;
         bool changeLanguageModeForTrustedCommand =
             currentLanguageMode == PSLanguageMode.ConstrainedLanguage &&
-            _command.CommandInfo.DefiningLanguageMode == PSLanguageMode.FullLanguage;
+            _command?.CommandInfo.DefiningLanguageMode == PSLanguageMode.FullLanguage;
         bool oldLangModeTransitionStatus = _context.LanguageModeTransitionInParameterBinding;
 
         object result;
@@ -410,9 +383,7 @@ internal sealed class ParameterTypeCoercer
             }
         }
 
-        bindingTracer.WriteLine(
-            "CONVERT SUCCESSFUL using LanguagePrimitives.ConvertTo: [{0}]",
-            result is null ? "null" : result.ToString());
+        bindingTracer.WriteLine("CONVERT SUCCESSFUL using LanguagePrimitives.ConvertTo: [{0}]", result is null ? "null" : result.ToString());
 
         return result;
     }
@@ -423,17 +394,17 @@ internal sealed class ParameterTypeCoercer
     /// </summary>
     [SuppressMessage("Microsoft.Maintainability", "CA1505:AvoidUnmaintainableCode")]
     [SuppressMessage("Microsoft.Maintainability", "CA1506:AvoidExcessiveClassCoupling", Justification = "Consider Simplifying it")]
-    internal object EncodeCollection(
+    internal object? EncodeCollection(
         CommandParameterInternal argument,
         string parameterName,
         ParameterCollectionTypeInformation collectionTypeInformation,
         Type toType,
-        object currentValue,
+        object? currentValue,
         bool coerceElementTypeIfNeeded,
         out bool coercionRequired)
     {
-        object originalValue = currentValue;
-        object result = null;
+        object? originalValue = currentValue;
+        object? result = null;
         coercionRequired = false;
 
         bindingTracer.WriteLine(
@@ -451,9 +422,9 @@ internal sealed class ParameterTypeCoercer
         }
 
         int numberOfElements = 1;
-        Type collectionElementType = collectionTypeInformation.ElementType;
+        Type? collectionElementType = collectionTypeInformation.ElementType;
 
-        IList currentValueAsIList = ParameterBinderBase.GetIList(currentValue);
+        IList? currentValueAsIList = ParameterBinderBase.GetIList(currentValue);
 
         if (currentValueAsIList != null)
         {
@@ -511,20 +482,20 @@ internal sealed class ParameterTypeCoercer
     /// <summary>
     /// Creates a collection instance for the destination parameter type.
     /// </summary>
-    private (object collection, IList asIList, MethodInfo addMethod, bool isSystemDotArray, Type elementType) CreateTargetCollection(
+    private (object? collection, IList? asIList, MethodInfo? addMethod, bool isSystemDotArray, Type? elementType) CreateTargetCollection(
         CommandParameterInternal argument,
         string parameterName,
         ParameterCollectionTypeInformation collectionTypeInformation,
         Type toType,
-        object currentValue,
+        object? currentValue,
         int numberOfElements,
-        Type collectionElementType)
+        Type? collectionElementType)
     {
-        object resultCollection = null;
-        IList resultAsIList = null;
-        MethodInfo addMethod = null;
+        object? resultCollection = null;
+        IList? resultAsIList = null;
+        MethodInfo? addMethod = null;
 
-        bool isSystemDotArray = (toType == typeof(System.Array));
+        bool isSystemDotArray = toType == typeof(Array);
 
         if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array ||
             isSystemDotArray)
@@ -534,51 +505,33 @@ internal sealed class ParameterTypeCoercer
                 collectionElementType = typeof(object);
             }
 
-            bindingTracer.WriteLine(
-                "Creating array with element type [{0}] and {1} elements",
-                collectionElementType,
-                numberOfElements);
+            bindingTracer.WriteLine("Creating array with element type [{0}] and {1} elements", collectionElementType, numberOfElements);
 
-            resultCollection = resultAsIList =
-                (IList)Array.CreateInstance(
-                    collectionElementType,
-                    numberOfElements);
+            resultCollection = resultAsIList = Array.CreateInstance(collectionElementType!, numberOfElements);
         }
-        else if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList ||
-                 collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric)
+        else if (collectionTypeInformation.ParameterCollectionType is ParameterCollectionType.IList or ParameterCollectionType.ICollectionGeneric)
         {
-            bindingTracer.WriteLine(
-                "Creating collection [{0}]",
-                toType);
+            bindingTracer.WriteLine("Creating collection [{0}]", toType);
 
             bool errorOccurred = false;
-            Exception error = null;
+            Exception? error = null;
             try
             {
-                resultCollection =
-                    Activator.CreateInstance(
-                        toType,
-                        0,
-                        null,
-                        Array.Empty<object>(),
-                        CultureInfo.InvariantCulture);
+                resultCollection = Activator.CreateInstance(toType, 0, null, Array.Empty<object>(), CultureInfo.InvariantCulture);
                 if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList)
                 {
-                    resultAsIList = (IList)resultCollection;
+                    resultAsIList = (IList)resultCollection!;
                 }
                 else
                 {
-                    Diagnostics.Assert(
-                        collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric,
-                        "invalid collection type"
-                        );
+                    Diagnostics.Assert(collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric, "invalid collection type");
                     const BindingFlags bindingFlags = BindingFlags.Public | BindingFlags.Instance;
                     Type elementType = collectionTypeInformation.ElementType;
                     Diagnostics.Assert(elementType != null, "null ElementType");
-                    Exception getMethodError = null;
+                    Exception? getMethodError = null;
                     try
                     {
-                        addMethod = toType.GetMethod("Add", bindingFlags, null, new Type[1] { elementType }, null);
+                        addMethod = toType.GetMethod("Add", bindingFlags, null, [elementType], null);
                     }
                     catch (AmbiguousMatchException e)
                     {
@@ -587,8 +540,7 @@ internal sealed class ParameterTypeCoercer
                     }
                     catch (ArgumentException e)
                     {
-                        bindingTracer.WriteLine(
-                            "ArgumentException matching Add(T) for type {0}: {1}", toType.FullName, e.Message);
+                        bindingTracer.WriteLine("ArgumentException matching Add(T) for type {0}: {1}", toType.FullName, e.Message);
                         getMethodError = e;
                     }
 
@@ -600,8 +552,8 @@ internal sealed class ParameterTypeCoercer
                             GetErrorExtent(argument),
                             parameterName,
                             toType,
-                            currentValue.GetType(),
-                            (getMethodError == null) ? string.Empty : getMethodError.Message);
+                            currentValue?.GetType(),
+                            getMethodError == null ? string.Empty : getMethodError.Message);
                     }
                 }
             }
@@ -622,21 +574,19 @@ internal sealed class ParameterTypeCoercer
             if (errorOccurred)
             {
                 ParameterBindingException.ThrowCannotConvertArgument(
-                    error,
+                    error!,
                     _invocationInfo,
                     GetErrorExtent(argument),
                     parameterName,
                     toType,
-                    currentValue.GetType(),
+                    currentValue?.GetType(),
                     "null",
-                    error.Message);
+                    error!.Message);
             }
         }
         else
         {
-            Diagnostics.Assert(
-                false,
-                "This method should not be called for a parameter that is not a collection");
+            Diagnostics.Assert(false, "This method should not be called for a parameter that is not a collection");
         }
 
         return (resultCollection, resultAsIList, addMethod, isSystemDotArray, collectionElementType);
@@ -651,11 +601,11 @@ internal sealed class ParameterTypeCoercer
         ParameterCollectionTypeInformation collectionTypeInformation,
         Type toType,
         object currentValue,
-        IList currentValueAsIList,
-        object resultCollection,
-        IList resultAsIList,
-        MethodInfo addMethod,
-        Type collectionElementType,
+        IList? currentValueAsIList,
+        object? resultCollection,
+        IList? resultAsIList,
+        MethodInfo? addMethod,
+        Type? collectionElementType,
         bool coerceElementTypeIfNeeded,
         bool isSystemDotArray,
         ref bool coercionRequired)
@@ -664,26 +614,23 @@ internal sealed class ParameterTypeCoercer
         {
             int arrayIndex = 0;
 
-            bindingTracer.WriteLine(
-                "Argument type {0} is IList",
-                currentValue.GetType());
+            bindingTracer.WriteLine("Argument type {0} is IList", currentValue.GetType());
 
             foreach (object valueElement in currentValueAsIList)
             {
-                object currentValueElement = PSObject.Base(valueElement);
+                object? currentValueElement = PSObject.Base(valueElement);
 
                 if (coerceElementTypeIfNeeded)
                 {
-                    bindingTracer.WriteLine(
-                        "COERCE collection element from type {0} to type {1}",
-                        (valueElement == null) ? "null" : valueElement.GetType().Name,
-                        collectionElementType);
+                    bindingTracer.WriteLine("COERCE collection element from type {0} to type {1}",
+                        (valueElement == null) ? "null" : valueElement.GetType().Name, collectionElementType);
 
+                    Type elementConversionType = collectionElementType ?? typeof(object);
                     currentValueElement =
                         CoerceTypeAsNeeded(
                             argument,
                             parameterName,
-                            collectionElementType,
+                            elementConversionType,
                             null,
                             valueElement);
                 }
@@ -695,10 +642,8 @@ internal sealed class ParameterTypeCoercer
                     if (currentValueElementType != desiredElementType &&
                         !currentValueElementType.IsSubclassOf(desiredElementType))
                     {
-                        bindingTracer.WriteLine(
-                            "COERCION REQUIRED: Did not attempt to coerce collection element from type {0} to type {1}",
-                            (valueElement == null) ? "null" : valueElement.GetType().Name,
-                            collectionElementType);
+                        bindingTracer.WriteLine("COERCION REQUIRED: Did not attempt to coerce collection element from type {0} to type {1}",
+                            (valueElement == null) ? "null" : valueElement.GetType().Name, collectionElementType);
 
                         coercionRequired = true;
                         return;
@@ -726,19 +671,16 @@ internal sealed class ParameterTypeCoercer
             return;
         }
 
-        bindingTracer.WriteLine(
-            "Argument type {0} is not IList, treating this as scalar",
-            currentValue.GetType().Name);
+        bindingTracer.WriteLine("Argument type {0} is not IList, treating this as scalar", currentValue.GetType().Name);
 
+        object? valueToAdd = currentValue;
         if (collectionElementType != null)
         {
             if (coerceElementTypeIfNeeded)
             {
-                bindingTracer.WriteLine(
-                    "Coercing scalar arg value to type {0}",
-                    collectionElementType);
+                bindingTracer.WriteLine("Coercing scalar arg value to type {0}", collectionElementType);
 
-                currentValue =
+                valueToAdd =
                     CoerceTypeAsNeeded(
                         argument,
                         parameterName,
@@ -754,9 +696,7 @@ internal sealed class ParameterTypeCoercer
                 if (currentValueElementType != desiredElementType &&
                     !currentValueElementType.IsSubclassOf(desiredElementType))
                 {
-                    bindingTracer.WriteLine(
-                        "COERCION REQUIRED: Did not coerce scalar arg value to type {1}",
-                        collectionElementType);
+                    bindingTracer.WriteLine("COERCION REQUIRED: Did not coerce scalar arg value to type {1}", collectionElementType);
 
                     coercionRequired = true;
                     return;
@@ -773,7 +713,7 @@ internal sealed class ParameterTypeCoercer
             resultAsIList,
             addMethod,
             isSystemDotArray,
-            currentValue,
+            valueToAdd,
             0);
     }
 
@@ -782,11 +722,11 @@ internal sealed class ParameterTypeCoercer
         string parameterName,
         ParameterCollectionTypeInformation collectionTypeInformation,
         Type toType,
-        object resultCollection,
-        IList resultAsIList,
-        MethodInfo addMethod,
+        object? resultCollection,
+        IList? resultAsIList,
+        MethodInfo? addMethod,
         bool isSystemDotArray,
-        object value,
+        object? value,
         int arrayIndex)
     {
         try
@@ -794,25 +734,18 @@ internal sealed class ParameterTypeCoercer
             if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array ||
                 isSystemDotArray)
             {
-                bindingTracer.WriteLine(
-                    "Adding element of type {0} to array position {1}",
-                    (value == null) ? "null" : value.GetType().Name,
-                    arrayIndex);
-                resultAsIList[arrayIndex] = value;
+                bindingTracer.WriteLine("Adding element of type {0} to array position {1}", (value == null) ? "null" : value.GetType().Name, arrayIndex);
+                resultAsIList![arrayIndex] = value;
             }
             else if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList)
             {
-                bindingTracer.WriteLine(
-                    "Adding element of type {0} via IList.Add",
-                    (value == null) ? "null" : value.GetType().Name);
-                resultAsIList.Add(value);
+                bindingTracer.WriteLine("Adding element of type {0} via IList.Add", (value == null) ? "null" : value.GetType().Name);
+                resultAsIList!.Add(value);
             }
             else
             {
-                bindingTracer.WriteLine(
-                    "Adding element of type {0} via ICollection<T>::Add()",
-                    (value == null) ? "null" : value.GetType().Name);
-                addMethod.Invoke(resultCollection, new object[1] { value });
+                bindingTracer.WriteLine("Adding element of type {0} via ICollection<T>::Add()", (value == null) ? "null" : value.GetType().Name);
+                addMethod!.Invoke(resultCollection, [value]);
             }
         }
         catch (Exception error)
