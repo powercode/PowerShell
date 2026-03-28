@@ -112,24 +112,14 @@ namespace System.Management.Automation.Internal
         /// <summary>
         /// Internal helper to get to SessionState.
         /// </summary>
-        internal SessionState InternalState
-        {
-            get { return _state; }
-        }
+        internal SessionState InternalState => _state;
 
         private SessionState _state;
 
         /// <summary>
         /// Internal helper. Indicates whether stop has been requested on this command.
         /// </summary>
-        internal bool IsStopping
-        {
-            get
-            {
-                MshCommandRuntime mcr = this.commandRuntime as MshCommandRuntime;
-                return (mcr != null && mcr.IsStopping);
-            }
-        }
+        internal bool IsStopping => (commandRuntime as MshCommandRuntime) is { IsStopping: true };
 
         /// <summary>
         /// Gets the CancellationToken that is signaled when the pipeline is stopping.
