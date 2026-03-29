@@ -573,16 +573,16 @@ namespace System.Management.Automation
         /// or
         /// If the binding to the parameter fails.
         /// </exception>
-        protected Collection<CommandParameterInternal> BindNamedParameters(uint parameterSets, Collection<CommandParameterInternal> arguments)
+        protected void BindNamedParameters(uint parameterSets, Collection<CommandParameterInternal> arguments)
         {
-            Collection<CommandParameterInternal> result = new Collection<CommandParameterInternal>();
             HashSet<string>? boundExplicitNamedParams = null;
 
-            foreach (CommandParameterInternal argument in arguments)
+            for (int i = 0; i < arguments.Count; i++)
             {
+                CommandParameterInternal argument = arguments[i];
+
                 if (!argument.ParameterNameSpecified)
                 {
-                    result.Add(argument);
                     continue;
                 }
 
@@ -613,6 +613,7 @@ namespace System.Management.Automation
                             // is superseded by the explicit one. For example:
                             //   $splat = @{ Path = $path1 }
                             //   dir @splat -Path $path2
+                            arguments.RemoveAt(i--);
                             continue;
                         }
                     }
@@ -629,6 +630,7 @@ namespace System.Management.Automation
                     }
 
                     BindNamedParameter(parameterSets, argument, parameter);
+                    arguments.RemoveAt(i--);
                 }
                 else if (argument.ParameterName.Equals(Parser.VERBATIM_PARAMETERNAME, StringComparison.Ordinal))
                 {
@@ -636,14 +638,10 @@ namespace System.Management.Automation
                     // a using expression ($using:x).  We then access these values via PSBoundParameters, so
                     // "bind" them here.
                     DefaultParameterBinder.CommandLineParameters.SetImplicitUsingParameters(argument.ArgumentValue);
+                    arguments.RemoveAt(i--);
                 }
-                else
-                {
-                    result.Add(argument);
-                }
+                // else: leave in collection for positional binding
             }
-
-            return result;
         }
 
         /// <summary>
