@@ -603,7 +603,7 @@ internal sealed class PipelineParameterBinder
 
             // Now bind the new value
             CommandParameterInternal param = CommandParameterInternal.CreateParameterWithArgument(
-                /*parameterAst*/null, parameter.Parameter.Name, "-" + parameter.Parameter.Name + ":",
+                /*parameterAst*/null, parameter.Parameter.Name, parameter.Parameter.ParameterText,
                 /*argumentAst*/null, parameterValue,
                 false);
 

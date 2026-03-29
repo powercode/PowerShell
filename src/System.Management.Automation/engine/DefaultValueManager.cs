@@ -57,11 +57,11 @@ internal sealed class DefaultValueManager
     /// Records a script parameter's default value so it can be restored after pipeline binding.
     /// Called from the <c>SaveDefaultScriptParameterValue</c> override on the controller.
     /// </summary>
-    internal void SaveScriptParameterValue(string name, object value)
+    internal void SaveScriptParameterValue(string name, string parameterText, object value)
     {
         _context.DefaultParameterValues.Add(name,
             CommandParameterInternal.CreateParameterWithArgument(
-                /*parameterAst*/null, name, "-" + name + ":",
+                /*parameterAst*/null, name, parameterText,
                 /*argumentAst*/null, value,
                 false));
     }
@@ -77,7 +77,7 @@ internal sealed class DefaultValueManager
             _context.DefaultParameterValues.Add(
                 parameter.Parameter.Name,
                 CommandParameterInternal.CreateParameterWithArgument(
-                    /*parameterAst*/null, parameter.Parameter.Name, "-" + parameter.Parameter.Name + ":",
+                    /*parameterAst*/null, parameter.Parameter.Name, parameter.Parameter.ParameterText,
                     /*argumentAst*/null, defaultParameterValue,
                     false));
         }
