@@ -307,7 +307,7 @@ namespace System.Management.Automation
 
         void IDynamicParameterHandlerContext.ReparseUnboundArguments() => ReparseUnboundArguments();
 
-        Collection<CommandParameterInternal> IDynamicParameterHandlerContext.BindNamedParameters(
+        void IDynamicParameterHandlerContext.BindNamedParameters(
             uint parameterSetFlag, Collection<CommandParameterInternal> args)
             => BindNamedParameters(parameterSetFlag, args);
 
@@ -506,7 +506,7 @@ namespace System.Management.Automation
                 _commandMetadata.Name))
             {
                 // Bind the actual arguments
-                UnboundArguments = BindNamedParameters(ParameterSetResolver.CurrentParameterSetFlag, this.UnboundArguments);
+                BindNamedParameters(ParameterSetResolver.CurrentParameterSetFlag, this.UnboundArguments);
             }
 
             ParameterBindingException? reportedBindingException;

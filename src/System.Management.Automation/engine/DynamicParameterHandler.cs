@@ -52,7 +52,7 @@ internal interface IDynamicParameterHandlerContext
     void ReparseUnboundArguments();
 
     /// <summary>Binds named parameters from <paramref name="args"/> against the current parameter set.</summary>
-    Collection<CommandParameterInternal> BindNamedParameters(uint parameterSetFlag, Collection<CommandParameterInternal> args);
+    void BindNamedParameters(uint parameterSetFlag, Collection<CommandParameterInternal> args);
 
     /// <summary>Binds positional parameters from <paramref name="args"/>.</summary>
     Collection<CommandParameterInternal> BindPositionalParameters(
@@ -192,7 +192,7 @@ internal sealed class DynamicParameterHandler
 
                         _context.ReparseUnboundArguments();
 
-                        _context.UnboundArguments = _context.BindNamedParameters(_context.CurrentParameterSetFlag, _context.UnboundArguments);
+                        _context.BindNamedParameters(_context.CurrentParameterSetFlag, _context.UnboundArguments);
                     }
 
                     using (ParameterBinderBase.bindingTracer.TraceScope("BIND POSITIONAL args to DYNAMIC parameters"))

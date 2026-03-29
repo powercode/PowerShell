@@ -94,7 +94,7 @@ namespace System.Management.Automation
             InitUnboundArguments(arguments);
             ReparseUnboundArguments();
 
-            UnboundArguments = BindNamedParameters(uint.MaxValue, UnboundArguments);
+            BindNamedParameters(uint.MaxValue, UnboundArguments);
 
             UnboundArguments = BindPositionalParameters(UnboundArguments, uint.MaxValue, uint.MaxValue, out ParameterBindingException? _);
 
