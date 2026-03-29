@@ -311,7 +311,7 @@ namespace System.Management.Automation
             uint parameterSetFlag, Collection<CommandParameterInternal> args)
             => BindNamedParameters(parameterSetFlag, args);
 
-        Collection<CommandParameterInternal> IDynamicParameterHandlerContext.BindPositionalParameters(
+        void IDynamicParameterHandlerContext.BindPositionalParameters(
             Collection<CommandParameterInternal> args,
             uint currentParameterSetFlag,
             uint defaultParameterSetFlag,
@@ -517,12 +517,11 @@ namespace System.Management.Automation
                 _commandMetadata.Name))
             {
                 // Now that we know the parameter set, bind the positional parameters
-                UnboundArguments =
-                    BindPositionalParameters(
-                        UnboundArguments,
-                        ParameterSetResolver.CurrentParameterSetFlag,
-                        cmdletMetadata.DefaultParameterSetFlag,
-                        out currentBindingException);
+                BindPositionalParameters(
+                    UnboundArguments,
+                    ParameterSetResolver.CurrentParameterSetFlag,
+                    cmdletMetadata.DefaultParameterSetFlag,
+                    out currentBindingException);
 
                 reportedBindingException = currentBindingException;
             }

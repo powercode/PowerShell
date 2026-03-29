@@ -96,7 +96,7 @@ namespace System.Management.Automation
 
             BindNamedParameters(uint.MaxValue, UnboundArguments);
 
-            UnboundArguments = BindPositionalParameters(UnboundArguments, uint.MaxValue, uint.MaxValue, out ParameterBindingException? _);
+            BindPositionalParameters(UnboundArguments, uint.MaxValue, uint.MaxValue, out ParameterBindingException? _);
 
             try
             {
