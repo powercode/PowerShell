@@ -105,6 +105,37 @@ namespace Engine
         /// <inheritdoc/>
         protected override void ProcessRecord() { }
     }
+
+    /// <summary>
+    /// Cmdlet with a single <c>ValueFromPipeline</c> parameter for high-volume
+    /// pipeline binding isolation benchmarks.
+    /// </summary>
+    [Cmdlet("Test", "IsolatedPipeline")]
+    public sealed class TestIsolatedPipelineCommand : Cmdlet
+    {
+        [Parameter(ValueFromPipeline = true)]
+        public int Value { get; set; }
+
+        /// <inheritdoc/>
+        protected override void ProcessRecord() { }
+    }
+
+    /// <summary>
+    /// Cmdlet with two <c>ValueFromPipelineByPropertyName</c> parameters for
+    /// property-name pipeline binding isolation benchmarks.
+    /// </summary>
+    [Cmdlet("Test", "IsolatedPipelineByPropertyName")]
+    public sealed class TestIsolatedPipelineByPropertyNameCommand : Cmdlet
+    {
+        [Parameter(ValueFromPipelineByPropertyName = true)]
+        public string Name { get; set; }
+
+        [Parameter(ValueFromPipelineByPropertyName = true)]
+        public int Count { get; set; }
+
+        /// <inheritdoc/>
+        protected override void ProcessRecord() { }
+    }
 #endif
 
     /// <summary>
@@ -146,6 +177,16 @@ namespace Engine
         private Collection<CommandParameterInternal> _namedArgs3;
         private Collection<CommandParameterInternal> _positionalArgs3;
         private Collection<CommandParameterInternal> _namedArgs25;
+
+        // ── High-volume pipeline binding infrastructure ─────────────────────────
+
+        private CmdletParameterBinderController _pipelineController;
+        private List<MergedCompiledCommandParameter> _pipelineAllParams;
+        private PSObject[] _pipeline100kInts;
+
+        private CmdletParameterBinderController _pipelineByPropNameController;
+        private List<MergedCompiledCommandParameter> _pipelineByPropNameAllParams;
+        private PSObject[] _pipeline100kObjects;
 #endif
 
         // ── Setup / Teardown ─────────────────────────────────────────────────────
@@ -217,6 +258,50 @@ namespace Engine
                 string pValue = ((char)('a' + (i - 4))).ToString();
                 _namedArgs25.Add(CommandParameterInternal.CreateParameterWithArgument(
                     null, pName, pText, null, pValue, true));
+            }
+
+            // ── High-volume pipeline binding: ValueFromPipeline ──────────────────
+
+            {
+                var pipelineCmdletInfo = new CmdletInfo("Test-IsolatedPipeline", typeof(TestIsolatedPipelineCommand));
+                var pipelineProcessor = new CommandProcessor(pipelineCmdletInfo, execContext);
+                _pipelineController = pipelineProcessor.CmdletParameterBinderController;
+                _pipelineAllParams = new List<MergedCompiledCommandParameter>(
+                    _pipelineController.BindableParameters.BindableParameters.Values);
+
+                // Perform command-line binding with no arguments and pipeline expected.
+                // The MshCommandRuntime.IsClosed defaults to false, so BindCommandLineParameters
+                // treats this as a pipeline-expecting invocation and sets PrePipelineProcessingParameterSetFlags.
+                _pipelineController.BindCommandLineParameters(new Collection<CommandParameterInternal>());
+
+                // Pre-build 100k PSObject-wrapped ints for the pipeline loop.
+                _pipeline100kInts = new PSObject[100_000];
+                for (int i = 0; i < _pipeline100kInts.Length; i++)
+                {
+                    _pipeline100kInts[i] = PSObject.AsPSObject(i);
+                }
+            }
+
+            // ── High-volume pipeline binding: ValueFromPipelineByPropertyName ────
+
+            {
+                var propNameCmdletInfo = new CmdletInfo("Test-IsolatedPipelineByPropertyName", typeof(TestIsolatedPipelineByPropertyNameCommand));
+                var propNameProcessor = new CommandProcessor(propNameCmdletInfo, execContext);
+                _pipelineByPropNameController = propNameProcessor.CmdletParameterBinderController;
+                _pipelineByPropNameAllParams = new List<MergedCompiledCommandParameter>(
+                    _pipelineByPropNameController.BindableParameters.BindableParameters.Values);
+
+                _pipelineByPropNameController.BindCommandLineParameters(new Collection<CommandParameterInternal>());
+
+                // Pre-build 100k PSObjects with Name + Count properties.
+                _pipeline100kObjects = new PSObject[100_000];
+                for (int i = 0; i < _pipeline100kObjects.Length; i++)
+                {
+                    var pso = new PSObject();
+                    pso.Properties.Add(new PSNoteProperty("Name", "item"));
+                    pso.Properties.Add(new PSNoteProperty("Count", i));
+                    _pipeline100kObjects[i] = pso;
+                }
             }
 #endif
 
@@ -305,6 +390,54 @@ function Test-IsolatedPipeline {
             ResetController();
             _controller.BindCommandLineParametersNoValidation(_namedArgs25);
             return _controller.State.BoundParameters.Count;
+        }
+
+        // ── High-volume pipeline binding benchmarks (source build) ────────────────
+
+        /// <summary>
+        /// Binds 100,000 pipeline objects to a single <c>ValueFromPipeline</c> parameter.
+        /// Calls <c>BindPipelineParameters()</c> directly on the controller, bypassing
+        /// ScriptBlock/pipeline/command-discovery overhead. Each iteration measures
+        /// pure per-object binding cost × 100 k, including <c>RestoreDefaultParameterValues</c>,
+        /// 4-phase state machine, <c>ValidateParameterSets</c>, and value coercion.
+        /// Baseline comparison: <c>HighVolumePipelineBinding</c> in Engine.ParameterBinding.
+        /// </summary>
+        [Benchmark]
+        public int PurePipelineBinding_1Param_100kObjects()
+        {
+            var objects = _pipeline100kInts;
+            int bound = 0;
+            for (int i = 0; i < objects.Length; i++)
+            {
+                if (_pipelineController.BindPipelineParameters(objects[i]))
+                {
+                    bound++;
+                }
+            }
+
+            return bound;
+        }
+
+        /// <summary>
+        /// Binds 100,000 pipeline objects to two <c>ValueFromPipelineByPropertyName</c>
+        /// parameters (Name, Count). Each object is a <see cref="PSObject"/> with matching
+        /// NoteProperties. Measures per-object property-name lookup + binding cost × 100 k.
+        /// Baseline comparison: <c>HighVolumePipelineByPropertyNameBinding</c>.
+        /// </summary>
+        [Benchmark]
+        public int PurePipelineByPropName_2Params_100kObjects()
+        {
+            var objects = _pipeline100kObjects;
+            int bound = 0;
+            for (int i = 0; i < objects.Length; i++)
+            {
+                if (_pipelineByPropNameController.BindPipelineParameters(objects[i]))
+                {
+                    bound++;
+                }
+            }
+
+            return bound;
         }
 #endif
 
