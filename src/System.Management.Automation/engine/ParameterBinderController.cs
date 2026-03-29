@@ -533,7 +533,7 @@ namespace System.Management.Automation
 
             if (result && ((flags & ParameterBindingFlags.IsDefaultValue) == 0))
             {
-                UnboundParameters.Remove(parameter);
+                BindingState.SwapRemove(UnboundParameters, parameter);
                 BoundParameters.Add(parameter.Parameter.Name, parameter);
             }
 

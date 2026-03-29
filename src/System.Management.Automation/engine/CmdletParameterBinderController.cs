@@ -824,7 +824,7 @@ namespace System.Management.Automation
                         ParameterSetResolver.NarrowByParameterSetFlags(parameter.Parameter.ParameterSetFlags);
                     }
 
-                    UnboundParameters.Remove(parameter);
+                    BindingState.SwapRemove(UnboundParameters, parameter);
 
                     BoundParameters[parameter.Parameter.Name] = parameter;
                     BoundArguments[parameter.Parameter.Name] = argument;
@@ -980,7 +980,7 @@ namespace System.Management.Automation
                     ParameterSetResolver.NarrowByParameterSetFlags(parameter.Parameter.ParameterSetFlags);
                 }
 
-                UnboundParameters.Remove(parameter);
+                BindingState.SwapRemove(UnboundParameters, parameter);
 
                 if (!BoundParameters.ContainsKey(parameter.Parameter.Name))
                 {

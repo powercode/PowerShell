@@ -213,5 +213,30 @@ namespace System.Management.Automation
             Debug.Assert(BoundObsoleteParameterNames == null, $"[{caller}] BoundObsoleteParameterNames not clean after Reset");
             Debug.Assert(ObsoleteParameterWarningList == null, $"[{caller}] ObsoleteParameterWarningList not clean after Reset");
         }
+
+        // ── O(1) list-removal helpers ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Removes <paramref name="item"/> from <paramref name="list"/> in O(1) by swapping it
+        /// with the last element and removing the tail. Order is NOT preserved.
+        /// </summary>
+        /// <returns><see langword="true"/> if the item was found and removed; otherwise <see langword="false"/>.</returns>
+        internal static bool SwapRemove<T>(IList<T> list, T item)
+        {
+            int index = list.IndexOf(item);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            int lastIndex = list.Count - 1;
+            if (index < lastIndex)
+            {
+                list[index] = list[lastIndex];
+            }
+
+            list.RemoveAt(lastIndex);
+            return true;
+        }
     }
 }
