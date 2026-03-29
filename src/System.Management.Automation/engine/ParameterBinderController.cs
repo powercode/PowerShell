@@ -79,15 +79,25 @@ namespace System.Management.Automation
         protected MergedCommandParameterMetadata _bindableParameters = new();
 
         /// <summary>
+        /// Consolidated per-invocation mutable binding state. All state fields
+        /// previously declared individually are now stored here to enable pooling.
+        /// </summary>
+        internal BindingState State { get; set; } = new();
+
+        /// <summary>
         /// A list of the unbound parameters for the command.
         /// </summary>
-        protected List<MergedCompiledCommandParameter> UnboundParameters { get; init; } = [];
+        protected List<MergedCompiledCommandParameter> UnboundParameters
+        {
+            get => State.UnboundParameters;
+            set => State.UnboundParameters = value;
+        }
 
         /// <summary>
         /// A collection of the bound parameters for the command. The collection is
         /// indexed based on the name of the parameter.
         /// </summary>
-        protected Dictionary<string, MergedCompiledCommandParameter> BoundParameters { get; } = new Dictionary<string, MergedCompiledCommandParameter>(StringComparer.OrdinalIgnoreCase);
+        protected Dictionary<string, MergedCompiledCommandParameter> BoundParameters => State.BoundParameters;
 
         internal CommandLineParameters CommandLineParameters
         {
@@ -99,22 +109,25 @@ namespace System.Management.Automation
         /// <summary>
         /// Set true if the default parameter binding is in use.
         /// </summary>
-        protected bool DefaultParameterBindingInUse { get; set; }
-
-        // Set true if the default parameter values are applied
+        protected bool DefaultParameterBindingInUse
+        {
+            get => State.DefaultParameterBindingInUse;
+            set => State.DefaultParameterBindingInUse = value;
+        }
 
         /// <summary>
         /// A collection of bound default parameters.
         /// </summary>
-        protected Collection<string> BoundDefaultParameters { get; } = [];
-
-        // Keep record of the bound default parameters
+        protected Collection<string> BoundDefaultParameters => State.BoundDefaultParameters;
 
         /// <summary>
         /// A collection of the unbound arguments.
         /// </summary>
-        /// <value></value>
-        protected Collection<CommandParameterInternal> UnboundArguments { get; set; } = [];
+        protected Collection<CommandParameterInternal> UnboundArguments
+        {
+            get => State.UnboundArguments;
+            set => State.UnboundArguments = value;
+        }
 
         internal void ClearUnboundArguments()
         {
@@ -136,7 +149,7 @@ namespace System.Management.Automation
         /// <summary>
         /// A collection of the arguments that have been bound.
         /// </summary>
-        protected Dictionary<string, CommandParameterInternal> BoundArguments { get; } = new Dictionary<string, CommandParameterInternal>(StringComparer.OrdinalIgnoreCase);
+        protected Dictionary<string, CommandParameterInternal> BoundArguments => State.BoundArguments;
 
         /// <summary>
         /// Reparses the unbound arguments using the parameter metadata of the
@@ -1174,7 +1187,7 @@ namespace System.Management.Automation
         /// Keeps track of the parameters that get bound through pipeline input, so that their
         /// previous values can be restored before the next pipeline input comes.
         /// </summary>
-        internal Collection<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput { get; } = new Collection<MergedCompiledCommandParameter>();
+        internal Collection<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput => State.ParametersBoundThroughPipelineInput;
 
         /// <summary>
         /// For any unbound parameters, this method checks to see if the

@@ -91,6 +91,9 @@ namespace System.Management.Automation
                 this.Command,
                 this.CommandLineParameters);
 
+            // Record the command name in the binding state for debugger display.
+            State.CommandName = commandMetadata.Name;
+
             // Add the static parameter metadata to the bindable parameters
             // And add them to the unbound parameters list
 
