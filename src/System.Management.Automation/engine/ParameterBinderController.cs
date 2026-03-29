@@ -163,7 +163,7 @@ namespace System.Management.Automation
         /// </exception>
         protected void ReparseUnboundArguments()
         {
-            Collection<CommandParameterInternal> result = new Collection<CommandParameterInternal>();
+            int writeIndex = 0;
 
             for (int index = 0; index < UnboundArguments.Count; ++index)
             {
@@ -173,7 +173,7 @@ namespace System.Management.Automation
                 // argument, we have nothing to reparse for this argument.
                 if (!argument.ParameterNameSpecified || argument.ArgumentSpecified)
                 {
-                    result.Add(argument);
+                    UnboundArguments[writeIndex++] = argument;
                     continue;
                 }
 
@@ -189,7 +189,7 @@ namespace System.Management.Automation
                 {
                     // Since we couldn't find a match, just add the argument as it was
                     // and continue
-                    result.Add(argument);
+                    UnboundArguments[writeIndex++] = argument;
                     continue;
                 }
 
@@ -200,7 +200,7 @@ namespace System.Management.Automation
 
                 if (IsSwitchAndSetValue(parameterName, argument, matchingParameter.Parameter))
                 {
-                    result.Add(argument);
+                    UnboundArguments[writeIndex++] = argument;
                     continue;
                 }
 
@@ -236,7 +236,7 @@ namespace System.Management.Automation
                         ++index;
                         argument.ParameterName = matchingParameter.Parameter.Name;
                         argument.SetArgumentValue(nextArgument.ArgumentAst, nextArgument.ParameterText);
-                        result.Add(argument);
+                        UnboundArguments[writeIndex++] = argument;
                         continue;
                     }
 
@@ -246,7 +246,7 @@ namespace System.Management.Automation
                     ++index;
                     argument.ParameterName = matchingParameter.Parameter.Name;
                     argument.SetArgumentValue(nextArgument.ArgumentAst, nextArgument.ArgumentValue);
-                    result.Add(argument);
+                    UnboundArguments[writeIndex++] = argument;
                 }
                 else
                 {
@@ -257,7 +257,10 @@ namespace System.Management.Automation
                 }
             }
 
-            UnboundArguments = result;
+            while (UnboundArguments.Count > writeIndex)
+            {
+                UnboundArguments.RemoveAt(UnboundArguments.Count - 1);
+            }
         }
 
         protected void InitUnboundArguments(Collection<CommandParameterInternal> arguments)
