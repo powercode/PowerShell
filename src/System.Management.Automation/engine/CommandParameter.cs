@@ -12,30 +12,24 @@ namespace System.Management.Automation
     [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal sealed class CommandParameterInternal
     {
-        private sealed class Parameter
-        {
-            internal Ast ast;
-            internal string parameterName;
-            internal string parameterText;
-        }
+        private Ast _parameterAst;
+        private string _parameterName;
+        private string _parameterText;
+        private bool _hasParameter;
 
-        private sealed class Argument
-        {
-            internal Ast ast;
-            internal object value;
-            internal bool splatted;
-        }
+        private Ast _argumentAst;
+        private object _argumentValue;
+        private bool _argumentSplatted;
+        private bool _hasArgument;
 
-        private Parameter _parameter;
-        private Argument _argument;
         private bool _spaceAfterParameter;
         private bool _fromHashtableSplatting;
 
         internal bool SpaceAfterParameter => _spaceAfterParameter;
 
-        internal bool ParameterNameSpecified => _parameter != null;
+        internal bool ParameterNameSpecified => _hasParameter;
 
-        internal bool ArgumentSpecified => _argument != null;
+        internal bool ArgumentSpecified => _hasArgument;
 
         internal bool ParameterAndArgumentSpecified => ParameterNameSpecified && ArgumentSpecified;
 
@@ -49,13 +43,13 @@ namespace System.Management.Automation
             get
             {
                 Diagnostics.Assert(ParameterNameSpecified, "Caller must verify parameter name was specified");
-                return _parameter.parameterName;
+                return _parameterName;
             }
 
             set
             {
                 Diagnostics.Assert(ParameterNameSpecified, "Caller must verify parameter name was specified");
-                _parameter.parameterName = value;
+                _parameterName = value;
             }
         }
 
@@ -67,7 +61,7 @@ namespace System.Management.Automation
             get
             {
                 Diagnostics.Assert(ParameterNameSpecified, "Caller must verify parameter name was specified");
-                return _parameter.parameterText;
+                return _parameterText;
             }
         }
 
@@ -76,7 +70,7 @@ namespace System.Management.Automation
         /// </summary>
         internal Ast ParameterAst
         {
-            get => _parameter?.ast;
+            get => _hasParameter ? _parameterAst : null;
         }
 
         /// <summary>
@@ -92,7 +86,7 @@ namespace System.Management.Automation
         /// </summary>
         internal Ast ArgumentAst
         {
-            get => _argument?.ast;
+            get => _hasArgument ? _argumentAst : null;
         }
 
         /// <summary>
@@ -108,7 +102,7 @@ namespace System.Management.Automation
         /// </summary>
         internal object ArgumentValue
         {
-            get { return _argument != null ? _argument.value : UnboundParameter.Value; }
+            get { return _hasArgument ? _argumentValue : UnboundParameter.Value; }
         }
 
         /// <summary>
@@ -116,7 +110,7 @@ namespace System.Management.Automation
         /// </summary>
         internal bool ArgumentToBeSplatted
         {
-            get { return _argument != null && _argument.splatted; }
+            get { return _hasArgument && _argumentSplatted; }
         }
 
         /// <summary>
@@ -124,10 +118,9 @@ namespace System.Management.Automation
         /// </summary>
         internal void SetArgumentValue(Ast ast, object value)
         {
-            _argument ??= new Argument();
-
-            _argument.value = value;
-            _argument.ast = ast;
+            _hasArgument = true;
+            _argumentValue = value;
+            _argumentAst = ast;
         }
 
         /// <summary>
@@ -151,11 +144,11 @@ namespace System.Management.Automation
                 {
                     string val = ArgumentValue?.ToString() ?? "null";
                     if (val.Length > 50) val = val[..50] + "...";
-                    return $"-{_parameter.parameterName}: {val}";
+                    return $"-{_parameterName}: {val}";
                 }
 
                 if (ParameterNameSpecified)
-                    return $"-{_parameter.parameterName} (no arg)";
+                    return $"-{_parameterName} (no arg)";
 
                 if (ArgumentSpecified)
                 {
@@ -183,8 +176,10 @@ namespace System.Management.Automation
         {
             return new CommandParameterInternal
             {
-                _parameter =
-                           new Parameter { ast = ast, parameterName = parameterName, parameterText = parameterText }
+                _parameterAst = ast,
+                _parameterName = parameterName,
+                _parameterText = parameterText,
+                _hasParameter = true,
             };
         }
 
@@ -201,12 +196,10 @@ namespace System.Management.Automation
         {
             return new CommandParameterInternal
             {
-                _argument = new Argument
-                {
-                    value = value,
-                    ast = ast,
-                    splatted = splatted,
-                }
+                _argumentAst = ast,
+                _argumentValue = value,
+                _argumentSplatted = splatted,
+                _hasArgument = true,
             };
         }
 
@@ -238,8 +231,13 @@ namespace System.Management.Automation
         {
             return new CommandParameterInternal
             {
-                _parameter = new Parameter { ast = parameterAst, parameterName = parameterName, parameterText = parameterText },
-                _argument = new Argument { ast = argumentAst, value = value },
+                _parameterAst = parameterAst,
+                _parameterName = parameterName,
+                _parameterText = parameterText,
+                _hasParameter = true,
+                _argumentAst = argumentAst,
+                _argumentValue = value,
+                _hasArgument = true,
                 _spaceAfterParameter = spaceAfterParameter,
                 _fromHashtableSplatting = fromSplatting,
             };
