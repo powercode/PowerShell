@@ -863,6 +863,18 @@ namespace System.Management.Automation
             return base.IsHelpRequested(out helpTarget, out helpCategory);
         }
 
+        protected override void Dispose(bool disposing, out bool markedDisposed)
+        {
+            // Return the rented BindingState to the per-runspace pool before
+            // base cleanup runs, so the pool is replenished as early as possible.
+            if (disposing)
+            {
+                _cmdletParameterBinderController?.ReturnState();
+            }
+
+            base.Dispose(disposing, out markedDisposed);
+        }
+
         #endregion helper_methods
     }
 }

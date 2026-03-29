@@ -94,21 +94,28 @@ namespace System.Management.Automation
             // Record the command name in the binding state for debugger display.
             State.CommandName = commandMetadata.Name;
 
-            // Add the static parameter metadata to the bindable parameters
-            // And add them to the unbound parameters list
-
+            // Resolve the initial unbound parameter list before renting BindingState,
+            // because RentBindingState.Reset() will populate UnboundParameters from it.
+            List<MergedCompiledCommandParameter> initialParameters;
             if (commandMetadata.ImplementsDynamicParameters)
             {
                 // ReplaceMetadata makes a copy for us, so we can use that collection as is.
-                this.UnboundParameters = this.BindableParameters.ReplaceMetadata(commandMetadata.StaticCommandParameterMetadata);
+                initialParameters = this.BindableParameters.ReplaceMetadata(commandMetadata.StaticCommandParameterMetadata);
             }
             else
             {
                 _bindableParameters = commandMetadata.StaticCommandParameterMetadata;
 
                 // Must make a copy of the list because we'll modify it.
-                this.UnboundParameters = new List<MergedCompiledCommandParameter>(_bindableParameters.BindableParameters.Values);
+                initialParameters = new List<MergedCompiledCommandParameter>(_bindableParameters.BindableParameters.Values);
             }
+
+            // Rent a BindingState from the per-runspace pool (or allocate a new one if the pool
+            // is empty). This overwrites the default State allocated by ParameterBinderController.
+            State = cmdlet.Context.RentBindingState(initialParameters, commandMetadata.Name);
+
+            // In DEBUG builds, assert that the rented state is fully clean.
+            State.AssertClean(initialParameters.Count);
 
             ParameterSetResolver = new System.Management.Automation.ParameterSetResolver(
                 commandMetadata: _commandMetadata,
@@ -135,6 +142,16 @@ namespace System.Management.Automation
         }
 
         #endregion ctor
+
+        /// <summary>
+        /// Returns the rented <see cref="BindingState"/> to the per-runspace pool on
+        /// <see cref="ExecutionContext"/> so it can be reused by the next command invocation.
+        /// Called from <see cref="CommandProcessor"/> during disposal.
+        /// </summary>
+        internal void ReturnState()
+        {
+            Context.ReturnBindingState(State);
+        }
 
         private string DebuggerDisplayValue
         {

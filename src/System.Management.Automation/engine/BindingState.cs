@@ -6,6 +6,7 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 
 namespace System.Management.Automation
 {
@@ -73,6 +74,48 @@ namespace System.Management.Automation
                 int defaults = BoundDefaultParameters.Count;
                 return $"BindingState: {name}, Bound={bound}/{total}, Args={args} unbound, Pipeline={pipeline}, Defaults={defaults}, DelayBind=n/a";
             }
+        }
+
+        /// <summary>
+        /// Resets all mutable state so the object is ready for reuse in a new command invocation.
+        /// Collections are cleared (retaining their allocated capacity) and then <paramref name="allParameters"/>
+        /// is repopulated into <see cref="UnboundParameters"/>.
+        /// </summary>
+        /// <param name="allParameters">The full set of parameters for the new invocation.</param>
+        /// <param name="commandName">The name of the command being bound.</param>
+        internal void Reset(IReadOnlyList<MergedCompiledCommandParameter> allParameters, string? commandName)
+        {
+            CommandName = commandName;
+
+            // Argument tracking
+            UnboundArguments.Clear();
+            BoundArguments.Clear();
+
+            // Parameter tracking
+            UnboundParameters.Clear();
+            UnboundParameters.AddRange(allParameters);
+            BoundParameters.Clear();
+            ParametersBoundThroughPipelineInput.Clear();
+
+            // Default parameter tracking
+            BoundDefaultParameters.Clear();
+            DefaultParameterBindingInUse = false;
+        }
+
+        /// <summary>
+        /// Asserts that all collections are in their expected post-<see cref="Reset"/> state.
+        /// Called in DEBUG builds after renting from the pool to detect stale state leaks.
+        /// </summary>
+        [Conditional("DEBUG")]
+        internal void AssertClean(int expectedUnboundCount, [CallerMemberName] string caller = "")
+        {
+            Debug.Assert(BoundParameters.Count == 0, $"[{caller}] BoundParameters not clean after Reset");
+            Debug.Assert(BoundArguments.Count == 0, $"[{caller}] BoundArguments not clean after Reset");
+            Debug.Assert(UnboundArguments.Count == 0, $"[{caller}] UnboundArguments not clean after Reset");
+            Debug.Assert(ParametersBoundThroughPipelineInput.Count == 0, $"[{caller}] PipelineInput not clean after Reset");
+            Debug.Assert(BoundDefaultParameters.Count == 0, $"[{caller}] BoundDefaultParameters not clean after Reset");
+            Debug.Assert(!DefaultParameterBindingInUse, $"[{caller}] DefaultParameterBindingInUse not clean after Reset");
+            Debug.Assert(UnboundParameters.Count == expectedUnboundCount, $"[{caller}] UnboundParameters count mismatch after Reset: expected {expectedUnboundCount}, got {UnboundParameters.Count}");
         }
     }
 }
