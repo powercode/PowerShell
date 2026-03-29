@@ -199,6 +199,27 @@ namespace System.Management.Automation
         HashSet<string> IDefaultParameterBindingContext.CopyBoundPositionalParameters()
             => DefaultParameterBinder.CommandLineParameters.CopyBoundPositionalParameters();
 
+        List<string>? IDefaultParameterBindingContext.DefaultParameterAliasList
+        {
+            get => State.DefaultParameterAliasList;
+            set => State.DefaultParameterAliasList = value;
+        }
+
+        HashSet<string> IDefaultParameterBindingContext.DefaultParameterWarningSet
+            => State.DefaultParameterWarningSet;
+
+        Dictionary<MergedCompiledCommandParameter, object>? IDefaultParameterBindingContext.AllDefaultParameterValuePairs
+        {
+            get => State.AllDefaultParameterValuePairs;
+            set => State.AllDefaultParameterValuePairs = value;
+        }
+
+        bool IDefaultParameterBindingContext.UseDefaultParameterBinding
+        {
+            get => State.UseDefaultParameterBinding;
+            set => State.UseDefaultParameterBinding = value;
+        }
+
         IList<MergedCompiledCommandParameter> IPipelineParameterBindingContext.UnboundParameters => UnboundParameters;
 
         Collection<MergedCompiledCommandParameter> IPipelineParameterBindingContext.ParametersBoundThroughPipelineInput
@@ -229,6 +250,9 @@ namespace System.Management.Automation
             MergedCompiledCommandParameter parameter,
             ParameterBindingFlags flags)
             => BindToAssociatedBinder(argument, parameter, flags);
+
+        Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument> IDelayBindScriptBlockContext.DelayBindScriptBlocks
+            => State.DelayBindScriptBlocks;
 
         void IPipelineParameterBindingContext.BackupDefaultParameter(MergedCompiledCommandParameter parameter)
             => _defaultValueManager.Backup(parameter);
@@ -310,6 +334,9 @@ namespace System.Management.Automation
         IList<MergedCompiledCommandParameter> IDefaultValueManagerContext.UnboundParameters => UnboundParameters;
 
         Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.BoundArguments => BoundArguments;
+
+        Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.DefaultParameterValues
+            => State.DefaultParameterValues;
 
         #region helper_methods
 
@@ -979,9 +1006,9 @@ namespace System.Management.Automation
 
                     BoundObsoleteParameterNames.Add(parameter.Parameter.Name);
 
-                    ObsoleteParameterWarningList ??= new List<WarningRecord>();
+                    State.ObsoleteParameterWarningList ??= new List<WarningRecord>();
 
-                    ObsoleteParameterWarningList.Add(warningRecord);
+                    State.ObsoleteParameterWarningList.Add(warningRecord);
                 }
             }
 
@@ -1209,8 +1236,9 @@ namespace System.Management.Automation
 
         /// <summary>
         /// Keep the obsolete parameter warnings generated from parameter binding.
+        /// Routes through <see cref="BindingState"/> for pooled allocation.
         /// </summary>
-        internal List<WarningRecord>? ObsoleteParameterWarningList { get; private set; }
+        internal List<WarningRecord>? ObsoleteParameterWarningList => State.ObsoleteParameterWarningList;
 
         /// <summary>
         /// Keep names of the parameters for which we have generated obsolete warning messages.
@@ -1219,11 +1247,9 @@ namespace System.Management.Automation
         {
             get
             {
-                return _boundObsoleteParameterNames ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                return State.BoundObsoleteParameterNames ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             }
         }
-
-        private HashSet<string>? _boundObsoleteParameterNames;
 
         private readonly ReflectionParameterBinder _commonParametersBinder;
         private readonly ReflectionParameterBinder _shouldProcessParameterBinder;
