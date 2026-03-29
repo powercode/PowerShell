@@ -438,7 +438,8 @@ namespace System.Management.Automation
                     argument.ParameterName,
                     (flags & ParameterBindingFlags.ThrowOnParameterNotFound) != 0,
                     true,
-                    new InvocationInfo(InvocationInfo.MyCommand, argument.ParameterExtent));
+                    InvocationInfo.MyCommand,
+                    argument.ParameterExtent);
 
             if (matchingParameter != null)
             {
@@ -590,10 +591,11 @@ namespace System.Management.Automation
                 // or in case of a cmdlet or an advanced function, it might match up to a dynamic parameter.
                 MergedCompiledCommandParameter parameter =
                     BindableParameters.GetMatchingParameter(
-                        name: argument.ParameterName,
+                        argument.ParameterName,
                         throwOnParameterNotFound: false,
                         tryExactMatching: true,
-                        invocationInfo: new InvocationInfo(InvocationInfo.MyCommand, argument.ParameterExtent));
+                        InvocationInfo.MyCommand,
+                        argument.ParameterExtent);
 
                 // If the parameter is not in the specified parameter set, throw a binding exception
                 if (parameter != null)
