@@ -126,6 +126,44 @@ namespace System.Management.Automation
         /// </summary>
         internal List<WarningRecord>? ObsoleteParameterWarningList { get; set; }
 
+        // ── Pipeline CPI pool ─────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Per-invocation CPI pool for the pipeline binding hot path.
+        /// Sized for typical pipeline parameter counts (1-4); excess CPIs are GC'd normally.
+        /// </summary>
+        private CommandParameterInternal[]? _cpiPool;
+        private int _cpiPoolCount;
+
+        /// <summary>
+        /// Rents a <see cref="CommandParameterInternal"/> from the pool, or allocates a new one.
+        /// </summary>
+        internal CommandParameterInternal RentPipelineCpi()
+        {
+            if (_cpiPoolCount > 0)
+            {
+                var cpi = _cpiPool![--_cpiPoolCount];
+                _cpiPool[_cpiPoolCount] = null!; // don't hold refs
+                return cpi;
+            }
+
+            return new CommandParameterInternal();
+        }
+
+        /// <summary>
+        /// Returns a <see cref="CommandParameterInternal"/> to the pool after resetting its fields.
+        /// CPIs beyond the pool capacity are simply dropped for GC.
+        /// </summary>
+        internal void ReturnPipelineCpi(CommandParameterInternal cpi)
+        {
+            cpi.Reset();
+            _cpiPool ??= new CommandParameterInternal[4];
+            if (_cpiPoolCount < _cpiPool.Length)
+            {
+                _cpiPool[_cpiPoolCount++] = cpi;
+            }
+        }
+
         // ── Debugger display ──────────────────────────────────────────────────────────
 
         private string DebuggerDisplayValue
@@ -188,6 +226,10 @@ namespace System.Management.Automation
             // Obsolete-tracking state (Task 3.4)
             BoundObsoleteParameterNames = null;
             ObsoleteParameterWarningList = null;
+
+            // Pipeline CPI pool — drop all refs so pooled CPIs don't outlive this invocation
+            _cpiPoolCount = 0;
+            _cpiPool = null;
         }
 
         /// <summary>

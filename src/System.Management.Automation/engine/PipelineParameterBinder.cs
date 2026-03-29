@@ -52,6 +52,9 @@ internal interface IPipelineParameterBindingContext
     /// </summary>
     void RestoreDefaultParameterValues(IEnumerable<MergedCompiledCommandParameter> parameters);
 
+    /// <summary>Rents a <see cref="CommandParameterInternal"/> from the pipeline CPI pool.</summary>
+    CommandParameterInternal RentPipelineCpi();
+
     /// <summary>Dispatches a parameter bind call to the appropriate sub-binder.</summary>
     bool DispatchBindToSubBinder(
         uint validParameterSetFlag,
@@ -601,8 +604,9 @@ internal sealed class PipelineParameterBinder
             // Backup the default value
             _context.BackupDefaultParameter(parameter);
 
-            // Now bind the new value
-            CommandParameterInternal param = CommandParameterInternal.CreateParameterWithArgument(
+            // Now bind the new value — rent from the per-invocation CPI pool to avoid allocation
+            CommandParameterInternal param = _context.RentPipelineCpi();
+            param.InitializeAsParameterWithArgument(
                 /*parameterAst*/null, parameter.Parameter.Name, parameter.Parameter.ParameterText,
                 /*argumentAst*/null, parameterValue,
                 false);

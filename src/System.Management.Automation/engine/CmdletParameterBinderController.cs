@@ -271,6 +271,9 @@ namespace System.Management.Automation
         void IPipelineParameterBindingContext.ThrowOrElaborateBindingException(ParameterBindingException ex)
             => ThrowOrElaborateBindingException(ex);
 
+        CommandParameterInternal IPipelineParameterBindingContext.RentPipelineCpi()
+            => State.RentPipelineCpi();
+
         bool IPipelineParameterBindingContext.ApplyDefaultParameterBinding(string caller, bool isDynamic, uint currentParameterSetFlag)
             => _defaultParameterValueBinder.ApplyDefaultParameterBinding(caller, isDynamic, currentParameterSetFlag);
 
@@ -334,6 +337,9 @@ namespace System.Management.Automation
         IList<MergedCompiledCommandParameter> IDefaultValueManagerContext.UnboundParameters => UnboundParameters;
 
         Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.BoundArguments => BoundArguments;
+
+        void IDefaultValueManagerContext.ReturnPipelineCpi(CommandParameterInternal cpi)
+            => State.ReturnPipelineCpi(cpi);
 
         Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.DefaultParameterValues
             => State.DefaultParameterValues;

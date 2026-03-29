@@ -161,6 +161,42 @@ namespace System.Management.Automation
             }
         }
 
+        /// <summary>
+        /// Resets all fields to their default state so this instance can be reused from a pool.
+        /// </summary>
+        internal void Reset()
+        {
+            _parameterAst = null;
+            _parameterName = null;
+            _parameterText = null;
+            _hasParameter = false;
+            _argumentAst = null;
+            _argumentValue = null;
+            _argumentSplatted = false;
+            _hasArgument = false;
+            _spaceAfterParameter = false;
+            _fromHashtableSplatting = false;
+        }
+
+        /// <summary>
+        /// Initializes this instance as a parameter-with-argument for reuse from the pipeline CPI pool.
+        /// Equivalent to <see cref="CreateParameterWithArgument"/> but avoids allocation.
+        /// </summary>
+        internal void InitializeAsParameterWithArgument(
+            Ast parameterAst, string parameterName, string parameterText,
+            Ast argumentAst, object value, bool spaceAfterParameter)
+        {
+            _parameterAst = parameterAst;
+            _parameterName = parameterName;
+            _parameterText = parameterText;
+            _hasParameter = true;
+            _argumentAst = argumentAst;
+            _argumentValue = value;
+            _hasArgument = true;
+            _spaceAfterParameter = spaceAfterParameter;
+            // _argumentSplatted/_fromHashtableSplatting remain false — pipeline CPIs are never splatted
+        }
+
         #region ctor
 
         /// <summary>

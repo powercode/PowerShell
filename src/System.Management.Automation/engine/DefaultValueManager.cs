@@ -35,6 +35,9 @@ internal interface IDefaultValueManagerContext
     /// <summary>Arguments already matched to a parameter, keyed by parameter name.</summary>
     Dictionary<string, CommandParameterInternal> BoundArguments { get; }
 
+    /// <summary>Returns a pipeline CPI to the pool after it is removed from BoundArguments.</summary>
+    void ReturnPipelineCpi(CommandParameterInternal cpi);
+
     /// <summary>Saved default values for restoration after each pipeline object is processed.</summary>
     Dictionary<string, CommandParameterInternal> DefaultParameterValues { get; }
 }
@@ -158,7 +161,10 @@ internal sealed class DefaultValueManager
                     _context.UnboundParameters.Add(parameter);
                 }
 
-                _context.BoundArguments.Remove(parameter.Parameter.Name);
+                if (_context.BoundArguments.Remove(parameter.Parameter.Name, out CommandParameterInternal? removedCpi))
+                {
+                    _context.ReturnPipelineCpi(removedCpi);
+                }
             }
             else
             {

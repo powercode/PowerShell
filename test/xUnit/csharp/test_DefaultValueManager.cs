@@ -50,6 +50,8 @@ namespace PSTests.Parallel
             RestoreCalls.Add((argument, parameter));
             return true;
         }
+
+        public void ReturnPipelineCpi(CommandParameterInternal cpi) { /* no-op in tests */ }
     }
 
     internal static class DefaultValueManagerTestHelper
