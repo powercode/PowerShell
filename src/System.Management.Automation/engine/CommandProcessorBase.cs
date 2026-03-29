@@ -1014,6 +1014,19 @@ namespace System.Management.Automation
                 return;
             }
 
+            Dispose(disposing, out _);
+            _disposed = true;
+        }
+
+        /// <summary>
+        /// Override in derived classes to add disposal logic while benefiting from the
+        /// base-class <see cref="IDisposable"/> guard.  Call <c>base.Dispose(disposing, out var _)</c>
+        /// to run base cleanup first.
+        /// </summary>
+        protected virtual void Dispose(bool disposing, out bool markedDisposed)
+        {
+            markedDisposed = true;
+
             if (disposing)
             {
                 if (UseLocalScope)
@@ -1035,8 +1048,6 @@ namespace System.Management.Automation
                     id.Dispose();
                 }
             }
-
-            _disposed = true;
         }
 
         #endregion IDispose
