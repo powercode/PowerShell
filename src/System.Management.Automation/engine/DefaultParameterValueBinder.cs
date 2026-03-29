@@ -37,6 +37,18 @@ internal interface IDefaultParameterBindingContext
 
     /// <summary>Copy of bound positional parameter names from the default binder.</summary>
     HashSet<string> CopyBoundPositionalParameters();
+
+    /// <summary>Alias list for the current cmdlet (cached per invocation).</summary>
+    List<string>? DefaultParameterAliasList { get; set; }
+
+    /// <summary>Set of warning keys already emitted for default-binding failures (prevents duplicates).</summary>
+    HashSet<string> DefaultParameterWarningSet { get; }
+
+    /// <summary>Cached result of the last successful <c>GetDefaultParameterValuePairs</c> call.</summary>
+    Dictionary<MergedCompiledCommandParameter, object>? AllDefaultParameterValuePairs { get; set; }
+
+    /// <summary>Whether default parameter binding should be attempted for the current invocation.</summary>
+    bool UseDefaultParameterBinding { get; set; }
 }
 
 /// <summary>
@@ -62,11 +74,6 @@ internal sealed class DefaultParameterValueBinder
     private readonly MergedCommandParameterMetadata _bindableParameters;
     private readonly IDefaultParameterBindingContext _bindingContext;
 
-    private List<string>? _aliasList;
-    private readonly HashSet<string> _warningSet = new HashSet<string>();
-    private Dictionary<MergedCompiledCommandParameter, object>? _allDefaultParameterValuePairs;
-    private bool _useDefaultParameterBinding = true;
-
     internal DefaultParameterValueBinder(
         CommandMetadata commandMetadata,
         MshCommandRuntime commandRuntime,
@@ -88,7 +95,7 @@ internal sealed class DefaultParameterValueBinder
     {
         get
         {
-            int pairCount = _allDefaultParameterValuePairs?.Count ?? 0;
+            int pairCount = _bindingContext.AllDefaultParameterValuePairs?.Count ?? 0;
             return $"DefaultValueBinder: InUse={DefaultParameterBindingInUse}, Pairs={pairCount}";
         }
     }
@@ -98,9 +105,9 @@ internal sealed class DefaultParameterValueBinder
 
     internal void ResetForNewBinding()
     {
-        _warningSet.Clear();
+        _bindingContext.DefaultParameterWarningSet.Clear();
         DefaultParameterBindingInUse = false;
-        _useDefaultParameterBinding = true;
+        _bindingContext.UseDefaultParameterBinding = true;
     }
 
     /// <summary>
@@ -108,7 +115,7 @@ internal sealed class DefaultParameterValueBinder
     /// </summary>
     internal bool ApplyDefaultParameterBinding(string bindingStage, bool isDynamic, uint currentParameterSetFlag)
     {
-        if (!_useDefaultParameterBinding)
+        if (!_bindingContext.UseDefaultParameterBinding)
         {
             return false;
         }
@@ -117,10 +124,10 @@ internal sealed class DefaultParameterValueBinder
         {
             // Get user-defined default parameter value pairs again so that dynamic
             // parameter value pairs are included.
-            _allDefaultParameterValuePairs = GetDefaultParameterValuePairs(false);
+            _bindingContext.AllDefaultParameterValuePairs = GetDefaultParameterValuePairs(false);
         }
 
-        Dictionary<MergedCompiledCommandParameter, object>? qualifiedParameterValuePairs = GetQualifiedParameterValuePairs(currentParameterSetFlag, _allDefaultParameterValuePairs);
+        Dictionary<MergedCompiledCommandParameter, object>? qualifiedParameterValuePairs = GetQualifiedParameterValuePairs(currentParameterSetFlag, _bindingContext.AllDefaultParameterValuePairs);
 
         if (qualifiedParameterValuePairs == null)
         {
@@ -201,7 +208,7 @@ internal sealed class DefaultParameterValueBinder
             catch (ParameterBindingException ex)
             {
                 // Failures in default binding should not affect command-line binding.
-                if (!_warningSet.Contains(_commandMetadata.Name + Separator + parameterName))
+                if (!_bindingContext.DefaultParameterWarningSet.Contains(_commandMetadata.Name + Separator + parameterName))
                 {
                     string message = string.Format(
                         CultureInfo.InvariantCulture,
@@ -210,7 +217,7 @@ internal sealed class DefaultParameterValueBinder
                         parameterName,
                         ex.Message);
                     _commandRuntime.WriteWarning(message);
-                    _warningSet.Add(_commandMetadata.Name + Separator + parameterName);
+                    _bindingContext.DefaultParameterWarningSet.Add(_commandMetadata.Name + Separator + parameterName);
                 }
             }
         }
@@ -304,13 +311,13 @@ internal sealed class DefaultParameterValueBinder
     /// </summary>
     private bool MatchAnyAlias(string aliasName)
     {
-        if (_aliasList == null)
+        if (_bindingContext.DefaultParameterAliasList == null)
         {
             return false;
         }
 
         WildcardPattern aliasPattern = WildcardPattern.Get(aliasName, WildcardOptions.IgnoreCase);
-        foreach (string alias in _aliasList)
+        foreach (string alias in _bindingContext.DefaultParameterAliasList)
         {
             if (aliasPattern.IsMatch(alias))
             {
@@ -329,8 +336,8 @@ internal sealed class DefaultParameterValueBinder
     {
         if (DefaultParameterValues == null)
         {
-            _useDefaultParameterBinding = false;
-            _allDefaultParameterValuePairs = null;
+            _bindingContext.UseDefaultParameterBinding = false;
+            _bindingContext.AllDefaultParameterValuePairs = null;
             return null;
         }
 
@@ -338,11 +345,11 @@ internal sealed class DefaultParameterValueBinder
 
         if (needToGetAlias && DefaultParameterValues.Count > 0)
         {
-            _aliasList = GetAliasOfCurrentCmdlet();
+            _bindingContext.DefaultParameterAliasList = GetAliasOfCurrentCmdlet();
         }
 
         // Reset to enabled by default for each parse pass.
-        _useDefaultParameterBinding = true;
+        _bindingContext.UseDefaultParameterBinding = true;
 
         string currentCmdletName = _commandMetadata.Name;
 
@@ -369,8 +376,8 @@ internal sealed class DefaultParameterValueBinder
             {
                 if (key.Equals("Disabled", StringComparison.OrdinalIgnoreCase) && LanguagePrimitives.IsTrue(entry.Value))
                 {
-                    _useDefaultParameterBinding = false;
-                    _allDefaultParameterValuePairs = null;
+                    _bindingContext.UseDefaultParameterBinding = false;
+                    _bindingContext.AllDefaultParameterValuePairs = null;
                     return null;
                 }
 
@@ -454,14 +461,14 @@ internal sealed class DefaultParameterValueBinder
 
             if (matches.Count > 1)
             {
-                if (!_warningSet.Contains(cmdletName + Separator + parameterName))
+                if (!_bindingContext.DefaultParameterWarningSet.Contains(cmdletName + Separator + parameterName))
                 {
                     _commandRuntime.WriteWarning(
                         string.Format(
                             CultureInfo.InvariantCulture,
                             ParameterBinderStrings.MultipleParametersMatched,
                             parameterName));
-                    _warningSet.Add(cmdletName + Separator + parameterName);
+                    _bindingContext.DefaultParameterWarningSet.Add(cmdletName + Separator + parameterName);
                 }
 
                 continue;
@@ -477,14 +484,14 @@ internal sealed class DefaultParameterValueBinder
 
                 if (!wildcard.Value.Equals(availablePairs[matches[0]]))
                 {
-                    if (!_warningSet.Contains(cmdletName + Separator + parameterName))
+                    if (!_bindingContext.DefaultParameterWarningSet.Contains(cmdletName + Separator + parameterName))
                     {
                         _commandRuntime.WriteWarning(
                             string.Format(
                                 CultureInfo.InvariantCulture,
                                 ParameterBinderStrings.DifferentValuesAssignedToSingleParameter,
                                 parameterName));
-                        _warningSet.Add(cmdletName + Separator + parameterName);
+                        _bindingContext.DefaultParameterWarningSet.Add(cmdletName + Separator + parameterName);
                     }
 
                     parametersToRemove.Add(matches[0]);
@@ -519,8 +526,8 @@ internal sealed class DefaultParameterValueBinder
             availablePairs.Remove(parameter);
         }
 
-        _allDefaultParameterValuePairs = availablePairs.Count > 0 ? availablePairs : null;
-        return _allDefaultParameterValuePairs;
+        _bindingContext.AllDefaultParameterValuePairs = availablePairs.Count > 0 ? availablePairs : null;
+        return _bindingContext.AllDefaultParameterValuePairs;
     }
 
     /// <summary>
@@ -554,10 +561,10 @@ internal sealed class DefaultParameterValueBinder
             }
         }
 
-        if (writeWarning && !_warningSet.Contains(cmdletName + Separator + paramName))
+        if (writeWarning && !_bindingContext.DefaultParameterWarningSet.Contains(cmdletName + Separator + paramName))
         {
             _commandRuntime.WriteWarning(string.Format(CultureInfo.InvariantCulture, ParameterBinderStrings.DifferentValuesAssignedToSingleParameter, paramName));
-            _warningSet.Add(cmdletName + Separator + paramName);
+            _bindingContext.DefaultParameterWarningSet.Add(cmdletName + Separator + paramName);
         }
     }
 }

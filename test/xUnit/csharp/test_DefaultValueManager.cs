@@ -28,6 +28,9 @@ namespace PSTests.Parallel
         public Dictionary<string, CommandParameterInternal> BoundArguments { get; set; } =
             new(StringComparer.OrdinalIgnoreCase);
 
+        public Dictionary<string, CommandParameterInternal> DefaultParameterValues { get; } =
+            new(StringComparer.OrdinalIgnoreCase);
+
         /// <summary>Values the stub returns from <see cref="GetDefaultParameterValue"/>.</summary>
         public Dictionary<string, object> DefaultValues { get; } = new(StringComparer.OrdinalIgnoreCase);
 
