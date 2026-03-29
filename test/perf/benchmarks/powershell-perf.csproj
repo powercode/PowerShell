@@ -32,11 +32,14 @@
     <PerfTargetVersion Condition="'$(PerfTargetVersion)' == '' AND '$(TargetFramework)' == 'net5.0'">7.1.3</PerfTargetVersion>    
     <PerfTargetVersion Condition="'$(PerfTargetVersion)' == '' AND '$(TargetFramework)' == 'net11.0'">7.6.0</PerfTargetVersion>    
 
-    <!-- SOURCE_BUILD is defined when PerfTargetVersion is empty, which means ProjectReferences (source)
-         are used instead of NuGet packages. Isolation benchmarks that use internal SMA APIs
-         (BindingState, CmdletParameterBinderController, etc.) are guarded with #if SOURCE_BUILD
+    <!-- SOURCE_BUILD is defined when PERF_TARGET_VERSION env var is NOT set, which means ProjectReferences
+         (source tree) are used instead of NuGet packages. We check the env var directly rather than
+         $(PerfTargetVersion) because the fallback assignments above set PerfTargetVersion to a non-empty
+         value (e.g. 7.6.0) even in source-build mode when 'dotnet run -f net11.0' is used, which would
+         incorrectly prevent SOURCE_BUILD from being defined. Isolation benchmarks that use internal SMA
+         APIs (BindingState, CmdletParameterBinderController, etc.) are guarded with #if SOURCE_BUILD
          so the project compiles cleanly against both the source tree and NuGet SDK packages. -->
-    <DefineConstants Condition="'$(PerfTargetVersion)' == ''">$(DefineConstants);SOURCE_BUILD</DefineConstants>
+    <DefineConstants Condition="'$(PERF_TARGET_VERSION)' == ''">$(DefineConstants);SOURCE_BUILD</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -49,13 +52,13 @@
     <ProjectReference Include="../dotnet-tools/BenchmarkDotNet.Extensions/BenchmarkDotNet.Extensions.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(PerfTargetVersion)' == ''">
+  <ItemGroup Condition="'$(PERF_TARGET_VERSION)' == ''">
     <ProjectReference Include="../../../src/Microsoft.PowerShell.SDK/Microsoft.PowerShell.SDK.csproj" />
     <ProjectReference Include="../../../src/Microsoft.PowerShell.Commands.Diagnostics/Microsoft.PowerShell.Commands.Diagnostics.csproj" />
     <ProjectReference Include="../../../src/Microsoft.WSMan.Management/Microsoft.WSMan.Management.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(PerfTargetVersion)' != ''">
+  <ItemGroup Condition="'$(PERF_TARGET_VERSION)' != ''">
     <!-- We have to specify all package references explicitly due to a .NET SDK bug: https://github.com/dotnet/sdk/issues/17013
       If the project references project A which references project B and we want to reference their packages for different TFMs,
       we have to explicitly reference package A and B. -->
