@@ -153,7 +153,7 @@ internal sealed class DefaultValueManager
 
                 _context.BoundParameters.Remove(parameter.Parameter.Name);
 
-                if (!_context.UnboundParameters.Contains(parameter))
+                if (_context.UnboundParameters.IndexOf(parameter) < 0)
                 {
                     _context.UnboundParameters.Add(parameter);
                 }
@@ -173,7 +173,7 @@ internal sealed class DefaultValueManager
 
                 // Ensure the parameter is not in the unboundParameters list
 
-                _context.UnboundParameters.Remove(parameter);
+                BindingState.SwapRemove(_context.UnboundParameters, parameter);
             }
         }
     }
