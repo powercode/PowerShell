@@ -680,146 +680,141 @@ namespace System.Management.Automation
         /// or
         /// If the binding to the parameter fails.
         /// </exception>
-        internal Collection<CommandParameterInternal> BindPositionalParameters(
+        internal void BindPositionalParameters(
             Collection<CommandParameterInternal> unboundArguments,
             uint validParameterSets,
             uint defaultParameterSet,
             out ParameterBindingException? outgoingBindingException
             )
         {
-            Collection<CommandParameterInternal> result = new();
             outgoingBindingException = null;
 
-            if (unboundArguments.Count > 0)
+            if (unboundArguments.Count == 0)
             {
-                // Create a new collection to iterate over so that we can remove
-                // unbound arguments while binding them.
+                return;
+            }
 
-                List<CommandParameterInternal> unboundArgumentsCollection = new(unboundArguments);
+            // Create a snapshot to iterate over so that we can repopulate unboundArguments in-place.
 
-                // Get a sorted dictionary of the positional parameters with the position
-                // as the key
+            List<CommandParameterInternal> unboundArgumentsCollection = new(unboundArguments);
 
-                SortedDictionary<int, Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter>> positionalParameterDictionary;
+            // Get a sorted dictionary of the positional parameters with the position
+            // as the key
 
-                try
+            SortedDictionary<int, Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter>> positionalParameterDictionary;
+
+            try
+            {
+                positionalParameterDictionary =
+                    EvaluateUnboundPositionalParameters(UnboundParameters, ParameterSetResolver.CurrentParameterSetFlag);
+            }
+            catch (InvalidOperationException)
+            {
+                // The parameter set declaration is ambiguous so
+                // throw an exception.
+
+                // This exception is thrown because the binder found two positional parameters
+                // from the same parameter set with the same position defined. This is not caused
+                // by introducing the default parameter binding.
+                throw ParameterBindingException.NewAmbiguousPositionalParameterNoName(InvocationInfo);
+            }
+
+            if (positionalParameterDictionary.Count == 0)
+            {
+                // Since no positional parameters were found, unboundArguments is unchanged.
+                return;
+            }
+
+            unboundArguments.Clear();
+            int unboundArgumentsIndex = 0;
+
+            foreach (Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter> nextPositionalParameters in positionalParameterDictionary.Values)
+            {
+                // Only continue if there are parameters at the specified position. Parameters
+                // can be removed as the parameter set gets narrowed down.
+
+                if (nextPositionalParameters.Count == 0)
                 {
-                    positionalParameterDictionary =
-                        EvaluateUnboundPositionalParameters(UnboundParameters, ParameterSetResolver.CurrentParameterSetFlag);
+                    continue;
                 }
-                catch (InvalidOperationException)
-                {
-                    // The parameter set declaration is ambiguous so
-                    // throw an exception.
 
-                    // This exception is thrown because the binder found two positional parameters
-                    // from the same parameter set with the same position defined. This is not caused
-                    // by introducing the default parameter binding.
-                    throw ParameterBindingException.NewAmbiguousPositionalParameterNoName(InvocationInfo);
+                CommandParameterInternal? argument = GetNextPositionalArgument(unboundArgumentsCollection, unboundArguments, ref unboundArgumentsIndex);
+
+                if (argument == null)
+                {
+                    break;
                 }
 
-                if (positionalParameterDictionary.Count > 0)
+                // Bind first to defaultParameterSet without type coercion, then to
+                // other sets without type coercion, then to the defaultParameterSet with
+                // type coercion and finally to the other sets with type coercion.
+
+                bool aParameterWasBound = false;
+                if (defaultParameterSet != 0 && (validParameterSets & defaultParameterSet) != 0)
                 {
-                    int unboundArgumentsIndex = 0;
+                    // Favor the default parameter set.
+                    // First try without type coercion
 
-                    foreach (Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter> nextPositionalParameters in positionalParameterDictionary.Values)
+                    aParameterWasBound =
+                        BindPositionalParametersInSet(defaultParameterSet, nextPositionalParameters, argument, ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
+                }
+
+                if (!aParameterWasBound)
+                {
+                    // Try the non-default parameter sets
+                    // without type coercion.
+
+                    aParameterWasBound =
+                        BindPositionalParametersInSet(validParameterSets, nextPositionalParameters, argument, ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
+                }
+
+                if (!aParameterWasBound)
+                {
+                    // Now try the default parameter set with type coercion
+                    if (defaultParameterSet != 0 && (validParameterSets & defaultParameterSet) != 0)
                     {
-                        // Only continue if there are parameters at the specified position. Parameters
-                        // can be removed as the parameter set gets narrowed down.
+                        // Favor the default parameter set.
+                        // First try without type coercion
 
-                        if (nextPositionalParameters.Count == 0)
-                        {
-                            continue;
-                        }
-
-                        CommandParameterInternal? argument = GetNextPositionalArgument(unboundArgumentsCollection, result, ref unboundArgumentsIndex);
-
-                        if (argument == null)
-                        {
-                            break;
-                        }
-
-                        // Bind first to defaultParameterSet without type coercion, then to
-                        // other sets without type coercion, then to the defaultParameterSet with
-                        // type coercion and finally to the other sets with type coercion.
-
-                        bool aParameterWasBound = false;
-                        if (defaultParameterSet != 0 && (validParameterSets & defaultParameterSet) != 0)
-                        {
-                            // Favor the default parameter set.
-                            // First try without type coercion
-
-                            aParameterWasBound =
-                                BindPositionalParametersInSet(defaultParameterSet, nextPositionalParameters, argument, ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
-                        }
-
-                        if (!aParameterWasBound)
-                        {
-                            // Try the non-default parameter sets
-                            // without type coercion.
-
-                            aParameterWasBound =
-                                BindPositionalParametersInSet(validParameterSets, nextPositionalParameters, argument, ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
-                        }
-
-                        if (!aParameterWasBound)
-                        {
-                            // Now try the default parameter set with type coercion
-                            if (defaultParameterSet != 0 && (validParameterSets & defaultParameterSet) != 0)
-                            {
-                                // Favor the default parameter set.
-                                // First try without type coercion
-
-                                aParameterWasBound =
-                                    BindPositionalParametersInSet(defaultParameterSet, nextPositionalParameters, argument, 
-                                        ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
-                            }
-                        }
-
-                        if (!aParameterWasBound)
-                        {
-                            // Try the non-default parameter sets
-                            // with type coercion.
-
-                            aParameterWasBound =
-                                BindPositionalParametersInSet(validParameterSets, nextPositionalParameters, argument,
-                                    ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
-                        }
-
-                        if (!aParameterWasBound)
-                        {
-                            // Add the unprocessed argument to the results and continue
-                            result.Add(argument);
-                        }
-                        else
-                        {
-                            // Update the parameter sets if necessary
-                            if (validParameterSets != ParameterSetResolver.CurrentParameterSetFlag)
-                            {
-                                validParameterSets = ParameterSetResolver.CurrentParameterSetFlag;
-                                UpdatePositionalDictionary(positionalParameterDictionary, validParameterSets);
-                            }
-                        }
+                        aParameterWasBound =
+                            BindPositionalParametersInSet(defaultParameterSet, nextPositionalParameters, argument, 
+                                ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
                     }
+                }
 
-                    // Now for any arguments that were not processed, add them to
-                    // the result
+                if (!aParameterWasBound)
+                {
+                    // Try the non-default parameter sets
+                    // with type coercion.
 
-                    for (int index = unboundArgumentsIndex; index < unboundArgumentsCollection.Count; ++index)
-                    {
-                        result.Add(unboundArgumentsCollection[index]);
-                    }
+                    aParameterWasBound =
+                        BindPositionalParametersInSet(validParameterSets, nextPositionalParameters, argument,
+                            ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
+                }
+
+                if (!aParameterWasBound)
+                {
+                    // Add the unprocessed argument to the results and continue
+                    unboundArguments.Add(argument);
                 }
                 else
                 {
-                    // Since no positional parameters were found, add the arguments
-                    // to the result
-
-                    result = unboundArguments;
+                    // Update the parameter sets if necessary
+                    if (validParameterSets != ParameterSetResolver.CurrentParameterSetFlag)
+                    {
+                        validParameterSets = ParameterSetResolver.CurrentParameterSetFlag;
+                        UpdatePositionalDictionary(positionalParameterDictionary, validParameterSets);
+                    }
                 }
             }
 
-            return result;
+            // Now for any arguments that were not processed, add them to
+            // the result
+
+            for (int index = unboundArgumentsIndex; index < unboundArgumentsCollection.Count; ++index)
+            {
+                unboundArguments.Add(unboundArgumentsCollection[index]);
+            }
         }
 
         /// <summary>

@@ -55,7 +55,7 @@ internal interface IDynamicParameterHandlerContext
     void BindNamedParameters(uint parameterSetFlag, Collection<CommandParameterInternal> args);
 
     /// <summary>Binds positional parameters from <paramref name="args"/>.</summary>
-    Collection<CommandParameterInternal> BindPositionalParameters(
+    void BindPositionalParameters(
         Collection<CommandParameterInternal> args,
         uint currentParameterSetFlag,
         uint defaultParameterSetFlag,
@@ -197,7 +197,7 @@ internal sealed class DynamicParameterHandler
 
                     using (ParameterBinderBase.bindingTracer.TraceScope("BIND POSITIONAL args to DYNAMIC parameters"))
                     {
-                        _context.UnboundArguments = _context.BindPositionalParameters(
+                        _context.BindPositionalParameters(
                             _context.UnboundArguments,
                             _context.CurrentParameterSetFlag,
                             _context.DefaultParameterSetFlag,
