@@ -59,6 +59,8 @@ Get-ChildItem @parameters
         private ScriptBlock vraScript;
         private ScriptBlock defaultParameterValuesScript;
         private ScriptBlock pipelineTypeCoercionScript;
+        private ScriptBlock highVolumePipelineBindingScript;
+        private ScriptBlock highVolumePipelineByPropertyNameBindingScript;
 
         [GlobalSetup]
         public void GlobalSetup()
@@ -332,6 +334,11 @@ finally {
 }
 ");
 
+            // Pre-create the 100 000-element input arrays once so that each benchmark iteration
+            // measures only the pipeline binding loop, not object construction.
+            ScriptBlock.Create("$global:_bench100kInts = [int[]](1..100000)").Invoke();
+            ScriptBlock.Create("$global:_bench100kObjs = [object[]](1..100000 | ForEach-Object { [pscustomobject]@{ Name = 'item'; Count = $_ } })").Invoke();
+
             pipelineTypeCoercionScript = ScriptBlock.Create(@"
 function Test-PipelineCoercion {
     [CmdletBinding()]
@@ -346,6 +353,32 @@ function Test-PipelineCoercion {
 }
 
 1..100 | ForEach-Object { $_.ToString() } | Test-PipelineCoercion | Out-Null
+");
+
+            highVolumePipelineBindingScript = ScriptBlock.Create(@"
+function Test-HighVolumePipeline {
+    [CmdletBinding()]
+    param(
+        [Parameter(ValueFromPipeline)]
+        [int]$Value
+    )
+    process { }
+}
+$global:_bench100kInts | Test-HighVolumePipeline | Out-Null
+");
+
+            highVolumePipelineByPropertyNameBindingScript = ScriptBlock.Create(@"
+function Test-HighVolumePipelineByPropertyName {
+    [CmdletBinding()]
+    param(
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [string]$Name,
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [int]$Count
+    )
+    process { }
+}
+$global:_bench100kObjs | Test-HighVolumePipelineByPropertyName | Out-Null
 ");
 
             // Warm all scripts once to avoid startup and first-JIT noise in benchmark iterations.
@@ -365,6 +398,8 @@ function Test-PipelineCoercion {
             ValueFromRemainingArgumentsBinding();
             DefaultParameterValuesBinding();
             PipelineWithTypeCoercionBinding();
+            HighVolumePipelineBinding();
+            HighVolumePipelineByPropertyNameBinding();
         }
 
         private static ScriptBlock CreateScriptBlockWithRootPath(string scriptTemplate, string escapedRootPath)
@@ -444,6 +479,22 @@ function Test-PipelineCoercion {
 
         [Benchmark]
         public Collection<PSObject> PipelineWithTypeCoercionBinding() => pipelineTypeCoercionScript.Invoke();
+
+        /// <summary>
+        /// Pipes 100 000 pre-created integers to a function with a single
+        /// <c>[Parameter(ValueFromPipeline)]</c> parameter.
+        /// Measures per-element pipeline binding overhead at high volume.
+        /// </summary>
+        [Benchmark]
+        public Collection<PSObject> HighVolumePipelineBinding() => highVolumePipelineBindingScript.Invoke();
+
+        /// <summary>
+        /// Pipes 100 000 pre-created PSObjects to a function with two
+        /// <c>[Parameter(ValueFromPipelineByPropertyName)]</c> parameters.
+        /// Measures property-name matching and binding overhead at high volume.
+        /// </summary>
+        [Benchmark]
+        public Collection<PSObject> HighVolumePipelineByPropertyNameBinding() => highVolumePipelineByPropertyNameBindingScript.Invoke();
 
         [GlobalCleanup]
         public void GlobalCleanup()
