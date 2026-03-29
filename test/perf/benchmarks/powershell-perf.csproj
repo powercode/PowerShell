@@ -31,6 +31,12 @@
 
     <PerfTargetVersion Condition="'$(PerfTargetVersion)' == '' AND '$(TargetFramework)' == 'net5.0'">7.1.3</PerfTargetVersion>    
     <PerfTargetVersion Condition="'$(PerfTargetVersion)' == '' AND '$(TargetFramework)' == 'net11.0'">7.6.0</PerfTargetVersion>    
+
+    <!-- SOURCE_BUILD is defined when PerfTargetVersion is empty, which means ProjectReferences (source)
+         are used instead of NuGet packages. Isolation benchmarks that use internal SMA APIs
+         (BindingState, CmdletParameterBinderController, etc.) are guarded with #if SOURCE_BUILD
+         so the project compiles cleanly against both the source tree and NuGet SDK packages. -->
+    <DefineConstants Condition="'$(PerfTargetVersion)' == ''">$(DefineConstants);SOURCE_BUILD</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup>
