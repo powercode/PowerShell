@@ -87,9 +87,18 @@ internal sealed class PipelineParameterBinder
 
     private readonly IPipelineParameterBindingContext _context;
 
+    /// <summary>Cached pipeline binding plan established after the first successful pipeline bind.</summary>
+    private PipelineBindingPlan? _cachedPlan;
+
     internal PipelineParameterBinder(IPipelineParameterBindingContext context)
     {
         _context = context;
+    }
+
+    /// <summary>Clears the cached pipeline binding plan.</summary>
+    internal void ResetPipelinePlan()
+    {
+        _cachedPlan = null;
     }
 
     private string DebuggerDisplayValue
@@ -249,6 +258,85 @@ internal sealed class PipelineParameterBinder
 
         _context.ParametersBoundThroughPipelineInput.Clear();
 
+        // --- Fast path: replay cached plan (Tasks 2.2 / 3.1 / 3.2) ---
+        if (_cachedPlan is { } plan)
+        {
+            // Null / AutomationNull input — fall through to slow path (may not bind anything)
+            if (inputToOperateOn == null || inputToOperateOn == AutomationNull.Value)
+            {
+                goto SlowPath;
+            }
+
+            // Type guard for ByPropertyName plans: if the input object type changed since the
+            // plan was established, invalidate and fall through to slow path.
+            if (plan.HasByPropertyName)
+            {
+                var currentType = GetPSObjectTypeName(inputToOperateOn);
+                if (!string.Equals(currentType, plan.FirstObjectTypeName, StringComparison.Ordinal))
+                {
+                    if (ParameterBinderBase.bindingTracer.IsEnabled)
+                    {
+                        ParameterBinderBase.bindingTracer.WriteLine(
+                            "PIPELINE BIND plan invalidated (type changed from '{0}' to '{1}')",
+                            plan.FirstObjectTypeName, currentType);
+                    }
+
+                    _cachedPlan = null;
+                    goto SlowPath;
+                }
+            }
+
+            if (ParameterBinderBase.bindingTracer.IsEnabled)
+            {
+                ParameterBinderBase.bindingTracer.WriteLine(
+                    "PIPELINE BIND via cached plan ({0} entries, set=0x{1:X})",
+                    plan.Count, plan.ResolvedParameterSetFlag);
+            }
+
+            _context.ParameterSetResolver.CurrentParameterSetFlag = plan.ResolvedParameterSetFlag;
+
+            bool fastResult = true;
+            try
+            {
+                for (int fi = 0; fi < plan.Count; fi++)
+                {
+                    ref var entry = ref plan.Entries[fi];
+                    bool bound = entry.IsValueFromPipeline
+                        ? BindValueFromPipeline(inputToOperateOn, entry.Parameter, entry.Flags)
+                        : BindValueFromPipelineByPropertyName(inputToOperateOn, entry.Parameter, entry.Flags);
+
+                    if (!bound)
+                    {
+                        if (ParameterBinderBase.bindingTracer.IsEnabled)
+                        {
+                            ParameterBinderBase.bindingTracer.WriteLine(
+                                "PIPELINE BIND plan invalidated (binding failure on entry {0})", fi);
+                        }
+
+                        fastResult = false;
+                        break;
+                    }
+                }
+            }
+            catch (ParameterBindingException)
+            {
+                fastResult = false;
+            }
+
+            if (fastResult)
+            {
+                // Fast path succeeded — skip ValidateParameterSets and ApplyDefaultParameterBinding.
+                return true;
+            }
+
+            // Fast path failed — invalidate plan, undo partial binds, fall through to slow path.
+            _cachedPlan = null;
+            _context.RestoreDefaultParameterValues(_context.ParametersBoundThroughPipelineInput);
+            _context.ParametersBoundThroughPipelineInput.Clear();
+        }
+
+        SlowPath:
+
         // Now restore the parameter set flags
 
         _context.ParameterSetResolver.CurrentParameterSetFlag = _context.ParameterSetResolver.PrePipelineProcessingParameterSetFlags;
@@ -320,8 +408,83 @@ internal sealed class PipelineParameterBinder
             }
         }
 
+        // Capture binding plan after the first successful slow-path bind (Task 2.1 / 4.2)
+        if (result && _cachedPlan == null)
+        {
+            uint resolvedFlag = _context.ParameterSetResolver.CurrentParameterSetFlag;
+            // Only cache when fully resolved to a single parameter set (single bit set)
+            if (resolvedFlag != 0 && (resolvedFlag & (resolvedFlag - 1)) == 0)
+            {
+                var pipelineBound = _context.ParametersBoundThroughPipelineInput;
+                int count = pipelineBound.Count;
+                if (count > 0)
+                {
+                    bool hasByPropName = false;
+                    var entries = new PipelineBindingPlan.Entry[count];
+                    for (int i = 0; i < count; i++)
+                    {
+                        var param = pipelineBound[i];
+                        bool isVfp = false;
+                        foreach (ParameterSetSpecificMetadata meta in param.Parameter.GetMatchingParameterSetData(resolvedFlag))
+                        {
+                            if (meta.ValueFromPipeline)
+                            {
+                                isVfp = true;
+                                break;
+                            }
+
+                            if (meta.ValueFromPipelineByPropertyName)
+                            {
+                                hasByPropName = true;
+                                break;
+                            }
+                        }
+
+                        entries[i] = new PipelineBindingPlan.Entry
+                        {
+                            Parameter = param,
+                            IsValueFromPipeline = isVfp,
+                            Flags = ParameterBindingFlags.None,
+                        };
+                    }
+
+                    var newPlan = new PipelineBindingPlan
+                    {
+                        Entries = entries,
+                        Count = count,
+                        ResolvedParameterSetFlag = resolvedFlag,
+                        DefaultParameterBindingApplied = _context.DefaultParameterBindingInUse,
+                        HasByPropertyName = hasByPropName,
+                        FirstObjectTypeName = hasByPropName ? GetPSObjectTypeName(inputToOperateOn) : null,
+                    };
+
+                    if (ParameterBinderBase.bindingTracer.IsEnabled)
+                    {
+                        ParameterBinderBase.bindingTracer.WriteLine(
+                            "PIPELINE BIND plan created ({0} entries, set=0x{1:X}, hasByPropName={2})",
+                            count, resolvedFlag, hasByPropName);
+                    }
+
+                    _cachedPlan = newPlan;
+                }
+            }
+        }
+
         return result;
     }
+
+#nullable enable
+    /// <summary>
+    /// Returns the first PS type name for <paramref name="pso"/>, used for fast-path type-guard validation.
+    /// </summary>
+    private static string? GetPSObjectTypeName(PSObject? pso)
+    {
+        if (pso == null || pso == AutomationNull.Value) return null;
+        var typeNames = pso.InternalTypeNames;
+        if (typeNames.Count > 0 && typeNames[0] != null) return typeNames[0];
+        return pso.BaseObject.GetType().FullName;
+    }
+#nullable restore
 
     private bool BindUnboundParametersForBindingState(
         PSObject inputToOperateOn,
