@@ -43,6 +43,7 @@ namespace System.Management.Automation
             }
 
             this.Name = runtimeDefinedParameter.Name;
+            this.ParameterText = string.Concat("-", this.Name, ":");
             this.Type = runtimeDefinedParameter.ParameterType;
             this.IsDynamic = processingDynamicParameters;
 
@@ -129,6 +130,7 @@ namespace System.Management.Automation
             }
 
             this.Name = member.Name;
+            this.ParameterText = string.Concat("-", this.Name, ":");
             this.DeclaringType = member.DeclaringType;
             this.IsDynamic = processingDynamicParameters;
 
@@ -196,6 +198,11 @@ namespace System.Management.Automation
         /// Gets the name of the parameter.
         /// </summary>
         internal string Name { get; }
+
+        /// <summary>
+        /// Gets the formatted parameter text in the form "-Name:" for use in binding operations.
+        /// </summary>
+        internal string ParameterText { get; }
 
         /// <summary>
         /// The PSTypeName from a PSTypeNameAttribute.

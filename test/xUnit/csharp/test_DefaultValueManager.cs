@@ -77,7 +77,7 @@ namespace PSTests.Parallel
             var mgr = new DefaultValueManager(ctx);
             var param = DefaultValueManagerTestHelper.MakeParameter("Label");
 
-            mgr.SaveScriptParameterValue("Label", "default-label");
+            mgr.SaveScriptParameterValue("Label", "-Label:", "default-label");
 
             // Simulate the parameter being bound (so Restore moves it to unbound).
             ctx.BoundParameters["Label"] = param;
@@ -118,7 +118,7 @@ namespace PSTests.Parallel
             var param = DefaultValueManagerTestHelper.MakeParameter("Label");
 
             // SaveScriptParameterValue takes priority.
-            mgr.SaveScriptParameterValue("Label", "from-save");
+            mgr.SaveScriptParameterValue("Label", "-Label:", "from-save");
             mgr.Backup(param);
 
             ctx.BoundParameters["Label"] = param;
@@ -136,7 +136,7 @@ namespace PSTests.Parallel
             var mgr = new DefaultValueManager(ctx);
             var param = DefaultValueManagerTestHelper.MakeParameter("Name");
 
-            mgr.SaveScriptParameterValue("Name", "default");
+            mgr.SaveScriptParameterValue("Name", "-Name:", "default");
             ctx.BoundParameters["Name"] = param;
 
             mgr.Restore(new[] { param });
@@ -178,7 +178,7 @@ namespace PSTests.Parallel
             var mgr = new DefaultValueManager(ctx);
             var param = DefaultValueManagerTestHelper.MakeParameter("OK");
 
-            mgr.SaveScriptParameterValue("OK", "val");
+            mgr.SaveScriptParameterValue("OK", "-OK:", "val");
             ctx.BoundParameters["OK"] = param;
 
             // null entry should be silently skipped.

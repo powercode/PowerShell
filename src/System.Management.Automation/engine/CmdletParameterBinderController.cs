@@ -1261,8 +1261,8 @@ namespace System.Management.Automation
 
         #endregion private_members
 
-        protected override void SaveDefaultScriptParameterValue(string name, object value)
-            => _defaultValueManager.SaveScriptParameterValue(name, value);
+        protected override void SaveDefaultScriptParameterValue(string name, string parameterText, object value)
+            => _defaultValueManager.SaveScriptParameterValue(name, parameterText, value);
 
     }
 
