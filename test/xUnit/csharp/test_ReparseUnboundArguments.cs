@@ -12,6 +12,7 @@ namespace PSTests.Parallel
     /// "argument looks like a parameter" heuristic. All tests use <see cref="PowerShell.Create"/>.
     /// </summary>
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class ReparseUnboundArgumentsTests
     {
         [Fact]

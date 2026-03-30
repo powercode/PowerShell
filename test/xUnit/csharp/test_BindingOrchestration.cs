@@ -14,6 +14,7 @@ namespace PSTests.Parallel
     /// <c>DynamicParameterHandler</c>. All tests use <see cref="PowerShell.Create"/>.
     /// </summary>
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class BindingOrchestrationTests
     {
         [Fact]

@@ -12,6 +12,7 @@ namespace PSTests.Parallel
     /// explicit-parameter-supersedes-splatted rule. All tests use <see cref="PowerShell.Create"/>.
     /// </summary>
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class SplattingTests
     {
         [Fact]

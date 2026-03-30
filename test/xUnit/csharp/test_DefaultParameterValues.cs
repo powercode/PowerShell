@@ -8,6 +8,7 @@ using Xunit;
 namespace PSTests.Parallel
 {
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class DefaultParameterValuesTests
     {
         [Fact]

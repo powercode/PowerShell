@@ -12,6 +12,7 @@ namespace PSTests.Parallel
     /// produce a <see cref="ParameterBindingException"/> error rather than prompting the user.
     /// </summary>
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class MandatoryParameterBindingTests
     {
         [Fact]

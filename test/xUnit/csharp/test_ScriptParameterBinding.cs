@@ -14,6 +14,7 @@ namespace PSTests.Parallel
     /// <see cref="PowerShell.Create"/>.
     /// </summary>
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class ScriptParameterBindingTests
     {
         [Fact]

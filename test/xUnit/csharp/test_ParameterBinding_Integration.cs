@@ -9,6 +9,7 @@ using Xunit;
 namespace PSTests.Parallel
 {
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class ParameterBindingIntegrationTests
     {
         [Fact]
@@ -188,6 +189,7 @@ namespace PSTests.Parallel
     }
 
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class PositionalBindingIntegrationTests
     {
         [Fact]
@@ -366,6 +368,7 @@ namespace PSTests.Parallel
     }
 
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class ArgumentReparsingIntegrationTests
     {
         [Fact]
@@ -486,6 +489,7 @@ namespace PSTests.Parallel
     }
 
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class TypeCoercionIntegrationTests
     {
         [Fact]
@@ -592,6 +596,7 @@ namespace PSTests.Parallel
     // PowerShell parameter binding pipeline.
     // -----------------------------------------------------------------------
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class ValidationIntegrationTests
     {
         [Fact]
@@ -726,6 +731,7 @@ namespace PSTests.Parallel
     }
 
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class ConstrainedLanguageBindingTests
     {
         [Fact]
@@ -802,6 +808,7 @@ namespace PSTests.Parallel
     }
 
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class ArrayParameterBindingTests
     {
         [Fact]
@@ -850,6 +857,7 @@ namespace PSTests.Parallel
     }
 
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class PipelineVariableTests
     {
         [Fact]

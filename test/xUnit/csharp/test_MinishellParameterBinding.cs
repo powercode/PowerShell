@@ -11,19 +11,11 @@ using Xunit;
 
 namespace PSTests.Parallel
 {
-    /// <summary>
-    /// Tests for <c>MinishellParameterBinderController</c> and the subset of
-    /// <c>CommandLineParameterParser</c> that handles minishell invocations
-    /// (<c>-Command</c>, <c>-OutputFormat</c>, <c>-InputFormat</c>, <c>-NonInteractive</c>).
-    /// Process-spawning tests use <see cref="SkippableFactAttribute"/> so they are skipped
-    /// automatically when a <c>pwsh</c> executable is not discoverable in PATH.
-    /// </summary>
-    [Trait("Category", "ParameterBinding")]
-    public class MinishellParameterBindingTests
+    internal static class MinishellTestHelpers
     {
         // Finds the first pwsh / pwsh.exe in the system PATH.
         // Returns null when not found so callers can skip with Skip.If.
-        private static string? FindPwshInPath()
+        internal static string? FindPwshInPath()
         {
             string exe = System.Runtime.InteropServices.RuntimeInformation
                 .IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows)
@@ -41,7 +33,7 @@ namespace PSTests.Parallel
         }
 
         // Runs pwsh with the given arguments and returns (stdout, exitCode).
-        private static (string stdout, int exitCode) RunPwsh(string pwshPath, string args)
+        internal static (string stdout, int exitCode) RunPwsh(string pwshPath, string args)
         {
             var info = new ProcessStartInfo
             {
@@ -56,8 +48,15 @@ namespace PSTests.Parallel
             proc.WaitForExit();
             return (output, proc.ExitCode);
         }
+    }
 
-        // ── Parsing-level tests (no process spawn required) ─────────────────────────
+    /// <summary>
+    /// Parsing-only unit tests for minishell command-line parameters.
+    /// </summary>
+    [Trait("Category", "ParameterBinding")]
+    public class MinishellParameterParsingUnitTests
+    {
+        // Parsing-level tests (no process spawn required)
 
         [Fact]
         public void Minishell_CommandParameter_ParsedAndStored()
@@ -104,16 +103,27 @@ namespace PSTests.Parallel
             Assert.Null(cpp.ErrorMessage);
         }
 
-        // ── Process-level tests (skip when pwsh not in PATH) ────────────────────────
+    }
+
+    /// <summary>
+    /// Process-level integration tests for minishell behavior.
+    /// </summary>
+    [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
+    public class MinishellParameterBindingIntegrationTests
+    {
+        // Process-level tests (skip when pwsh not in PATH)
 
         [SkippableFact]
         public void Minishell_CommandParameter_ExecutesAndReturnsOutput()
         {
             // pwsh -Command "1+1" must print "2" to stdout and exit with 0.
-            string? pwsh = FindPwshInPath();
+            string? pwsh = MinishellTestHelpers.FindPwshInPath();
             Skip.If(pwsh is null, "pwsh not found in PATH");
 
-            var (stdout, exitCode) = RunPwsh(pwsh!, "-NoProfile -NonInteractive -Command \"Write-Output (1+1)\"");
+            var (stdout, exitCode) = MinishellTestHelpers.RunPwsh(
+                pwsh!,
+                "-NoProfile -NonInteractive -Command \"Write-Output (1+1)\"");
             Assert.Equal(0, exitCode);
             Assert.Equal("2", stdout);
         }
@@ -123,10 +133,10 @@ namespace PSTests.Parallel
         {
             // In -NonInteractive mode a missing mandatory parameter must not prompt; the
             // host should fail with a non-zero exit code instead.
-            string? pwsh = FindPwshInPath();
+            string? pwsh = MinishellTestHelpers.FindPwshInPath();
             Skip.If(pwsh is null, "pwsh not found in PATH");
 
-            var (_, exitCode) = RunPwsh(
+            var (_, exitCode) = MinishellTestHelpers.RunPwsh(
                 pwsh!,
                 "-NoProfile -NonInteractive -Command \"& { param([Parameter(Mandatory)][string]$X) $X }\"");
             Assert.NotEqual(0, exitCode);
