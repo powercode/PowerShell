@@ -14,44 +14,6 @@ using System.Text;
 namespace System.Management.Automation;
 
 /// <summary>
-/// Provides the binding context that <see cref="DefaultParameterValueBinder"/> needs
-/// from its owning parameter binder controller.
-/// </summary>
-internal interface IDefaultParameterBindingContext
-{
-    /// <summary>Dispatches a bind call to the appropriate sub-binder.</summary>
-    bool DispatchBindToSubBinder(
-        uint validParameterSetFlag,
-        CommandParameterInternal argument,
-        MergedCompiledCommandParameter parameter,
-        ParameterBindingFlags flags);
-
-    /// <summary>Arguments already bound, keyed by parameter name.</summary>
-    Dictionary<string, CommandParameterInternal> BoundArguments { get; }
-
-    /// <summary>Parameters already bound to a value, keyed by name.</summary>
-    Dictionary<string, MergedCompiledCommandParameter> BoundParameters { get; }
-
-    /// <summary>Names of parameters bound via $PSDefaultParameterValues.</summary>
-    List<string> BoundDefaultParameters { get; }
-
-    /// <summary>Copy of bound positional parameter names from the default binder.</summary>
-    HashSet<string> CopyBoundPositionalParameters();
-
-    /// <summary>Alias list for the current cmdlet (cached per invocation).</summary>
-    List<string>? DefaultParameterAliasList { get; set; }
-
-    /// <summary>Set of warning keys already emitted for default-binding failures (prevents duplicates).</summary>
-    HashSet<string> DefaultParameterWarningSet { get; }
-
-    /// <summary>Cached result of the last successful <c>GetDefaultParameterValuePairs</c> call.</summary>
-    Dictionary<MergedCompiledCommandParameter, object>? AllDefaultParameterValuePairs { get; set; }
-
-    /// <summary>Whether default parameter binding should be attempted for the current invocation.</summary>
-    bool UseDefaultParameterBinding { get; set; }
-}
-
-/// <summary>
 /// Encapsulates $PSDefaultParameterValues lookup, qualification, and binding.
 /// </summary>
 [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
@@ -71,20 +33,23 @@ internal sealed class DefaultParameterValueBinder
     private readonly MshCommandRuntime _commandRuntime;
     private readonly ExecutionContext _context;
     private readonly MergedCommandParameterMetadata _bindableParameters;
-    private readonly IDefaultParameterBindingContext _bindingContext;
+    private readonly IBindingStateContext _stateContext;
+    private readonly IBindingOperationsContext _opsContext;
 
     internal DefaultParameterValueBinder(
         CommandMetadata commandMetadata,
         MshCommandRuntime commandRuntime,
         ExecutionContext context,
         MergedCommandParameterMetadata bindableParameters,
-        IDefaultParameterBindingContext bindingContext)
+        IBindingStateContext stateContext,
+        IBindingOperationsContext opsContext)
     {
         _commandMetadata = commandMetadata;
         _commandRuntime = commandRuntime;
         _context = context;
         _bindableParameters = bindableParameters;
-        _bindingContext = bindingContext;
+        _stateContext = stateContext;
+        _opsContext = opsContext;
     }
 
     /// <summary>Whether default parameter binding has successfully bound at least one parameter.</summary>
@@ -94,7 +59,7 @@ internal sealed class DefaultParameterValueBinder
     {
         get
         {
-            int pairCount = _bindingContext.AllDefaultParameterValuePairs?.Count ?? 0;
+            int pairCount = _stateContext.AllDefaultParameterValuePairs?.Count ?? 0;
             return $"DefaultValueBinder: InUse={DefaultParameterBindingInUse}, Pairs={pairCount}";
         }
     }
@@ -104,9 +69,9 @@ internal sealed class DefaultParameterValueBinder
 
     internal void ResetForNewBinding()
     {
-        _bindingContext.DefaultParameterWarningSet.Clear();
+        _stateContext.DefaultParameterWarningSet.Clear();
         DefaultParameterBindingInUse = false;
-        _bindingContext.UseDefaultParameterBinding = true;
+        _stateContext.UseDefaultParameterBinding = true;
     }
 
     /// <summary>
@@ -114,7 +79,7 @@ internal sealed class DefaultParameterValueBinder
     /// </summary>
     internal bool ApplyDefaultParameterBinding(string bindingStage, bool isDynamic, uint currentParameterSetFlag)
     {
-        if (!_bindingContext.UseDefaultParameterBinding)
+        if (!_stateContext.UseDefaultParameterBinding)
         {
             return false;
         }
@@ -123,10 +88,10 @@ internal sealed class DefaultParameterValueBinder
         {
             // Get user-defined default parameter value pairs again so that dynamic
             // parameter value pairs are included.
-            _bindingContext.AllDefaultParameterValuePairs = GetDefaultParameterValuePairs(false);
+            _stateContext.AllDefaultParameterValuePairs = GetDefaultParameterValuePairs(false);
         }
 
-        Dictionary<MergedCompiledCommandParameter, object>? qualifiedParameterValuePairs = GetQualifiedParameterValuePairs(currentParameterSetFlag, _bindingContext.AllDefaultParameterValuePairs);
+        Dictionary<MergedCompiledCommandParameter, object>? qualifiedParameterValuePairs = GetQualifiedParameterValuePairs(currentParameterSetFlag, _stateContext.AllDefaultParameterValuePairs);
 
         if (qualifiedParameterValuePairs == null)
         {
@@ -158,6 +123,7 @@ internal sealed class DefaultParameterValueBinder
         Dictionary<MergedCompiledCommandParameter, object> defaultParameterValues)
     {
         bool ret = false;
+        var warningSet = _stateContext.DefaultParameterWarningSet;
         foreach (var pair in defaultParameterValues)
         {
             MergedCompiledCommandParameter parameter = pair.Key;
@@ -182,7 +148,7 @@ internal sealed class DefaultParameterValueBinder
                 CommandParameterInternal bindableArgument =
                     CommandParameterInternal.CreateParameterWithArgument(parameterAst: null, parameterName, $"-{parameterName}:", argumentAst: null, argumentValue, false);
 
-                bool bindResult = _bindingContext.DispatchBindToSubBinder(validParameterSetFlag, bindableArgument, parameter,
+                bool bindResult = _opsContext.DispatchBindToSubBinder(validParameterSetFlag, bindableArgument, parameter,
                     ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock);
 
                 if (bindResult && !ret)
@@ -192,13 +158,13 @@ internal sealed class DefaultParameterValueBinder
 
                 if (bindResult)
                 {
-                    _bindingContext.BoundDefaultParameters.Add(parameterName);
+                    _stateContext.BoundDefaultParameters.Add(parameterName);
                 }
             }
             catch (ParameterBindingException ex)
             {
                 // Failures in default binding should not affect command-line binding.
-                if (!_bindingContext.DefaultParameterWarningSet.Contains(_commandMetadata.Name + Separator + parameterName))
+                if (!warningSet.Contains(_commandMetadata.Name + Separator + parameterName))
                 {
                     string message = string.Format(
                         CultureInfo.InvariantCulture,
@@ -207,7 +173,7 @@ internal sealed class DefaultParameterValueBinder
                         parameterName,
                         ex.Message);
                     _commandRuntime.WriteWarning(message);
-                    _bindingContext.DefaultParameterWarningSet.Add(_commandMetadata.Name + Separator + parameterName);
+                    warningSet.Add(_commandMetadata.Name + Separator + parameterName);
                 }
             }
         }
@@ -220,16 +186,17 @@ internal sealed class DefaultParameterValueBinder
     /// </summary>
     private PSObject WrapBindingState()
     {
-        HashSet<string> boundParameterNames = new(_bindingContext.BoundParameters.Count, StringComparer.OrdinalIgnoreCase);
-        HashSet<string> boundPositionalParameterNames = _bindingContext.CopyBoundPositionalParameters();
-        HashSet<string> boundDefaultParameterNames = new(_bindingContext.BoundParameters.Count, StringComparer.OrdinalIgnoreCase);
+        var boundParameters = _stateContext.BoundParameters;
+        HashSet<string> boundParameterNames = new(boundParameters.Count, StringComparer.OrdinalIgnoreCase);
+        HashSet<string> boundPositionalParameterNames = _opsContext.CopyBoundPositionalParameters();
+        HashSet<string> boundDefaultParameterNames = new(boundParameters.Count, StringComparer.OrdinalIgnoreCase);
 
-        foreach (string paramName in _bindingContext.BoundParameters.Keys)
+        foreach (string paramName in boundParameters.Keys)
         {
             boundParameterNames.Add(paramName);
         }
 
-        foreach (string paramName in _bindingContext.BoundDefaultParameters)
+        foreach (string paramName in _stateContext.BoundDefaultParameters)
         {
             boundDefaultParameterNames.Add(paramName);
         }
@@ -266,7 +233,7 @@ internal sealed class DefaultParameterValueBinder
                 continue;
             }
 
-            if (_bindingContext.BoundArguments.ContainsKey(parameter.Parameter.Name))
+            if (_stateContext.BoundArguments.ContainsKey(parameter.Parameter.Name))
             {
                 continue;
             }
@@ -301,13 +268,13 @@ internal sealed class DefaultParameterValueBinder
     /// </summary>
     private bool MatchAnyAlias(string aliasName)
     {
-        if (_bindingContext.DefaultParameterAliasList == null)
+        if (_stateContext.DefaultParameterAliasList == null)
         {
             return false;
         }
 
         WildcardPattern aliasPattern = WildcardPattern.Get(aliasName, WildcardOptions.IgnoreCase);
-        foreach (string alias in _bindingContext.DefaultParameterAliasList)
+        foreach (string alias in _stateContext.DefaultParameterAliasList)
         {
             if (aliasPattern.IsMatch(alias))
             {
@@ -326,8 +293,8 @@ internal sealed class DefaultParameterValueBinder
     {
         if (DefaultParameterValues == null)
         {
-            _bindingContext.UseDefaultParameterBinding = false;
-            _bindingContext.AllDefaultParameterValuePairs = null;
+            _stateContext.UseDefaultParameterBinding = false;
+            _stateContext.AllDefaultParameterValuePairs = null;
             return null;
         }
 
@@ -335,11 +302,11 @@ internal sealed class DefaultParameterValueBinder
 
         if (needToGetAlias && DefaultParameterValues.Count > 0)
         {
-            _bindingContext.DefaultParameterAliasList = GetAliasOfCurrentCmdlet();
+            _stateContext.DefaultParameterAliasList = GetAliasOfCurrentCmdlet();
         }
 
         // Reset to enabled by default for each parse pass.
-        _bindingContext.UseDefaultParameterBinding = true;
+        _stateContext.UseDefaultParameterBinding = true;
 
         string currentCmdletName = _commandMetadata.Name;
 
@@ -366,8 +333,8 @@ internal sealed class DefaultParameterValueBinder
             {
                 if (key.Equals("Disabled", StringComparison.OrdinalIgnoreCase) && LanguagePrimitives.IsTrue(entry.Value))
                 {
-                    _bindingContext.UseDefaultParameterBinding = false;
-                    _bindingContext.AllDefaultParameterValuePairs = null;
+                    _stateContext.UseDefaultParameterBinding = false;
+                    _stateContext.AllDefaultParameterValuePairs = null;
                     return null;
                 }
 
@@ -451,14 +418,14 @@ internal sealed class DefaultParameterValueBinder
 
             if (matches.Count > 1)
             {
-                if (!_bindingContext.DefaultParameterWarningSet.Contains(cmdletName + Separator + parameterName))
+                if (!_stateContext.DefaultParameterWarningSet.Contains(cmdletName + Separator + parameterName))
                 {
                     _commandRuntime.WriteWarning(
                         string.Format(
                             CultureInfo.InvariantCulture,
                             ParameterBinderStrings.MultipleParametersMatched,
                             parameterName));
-                    _bindingContext.DefaultParameterWarningSet.Add(cmdletName + Separator + parameterName);
+                    _stateContext.DefaultParameterWarningSet.Add(cmdletName + Separator + parameterName);
                 }
 
                 continue;
@@ -474,14 +441,14 @@ internal sealed class DefaultParameterValueBinder
 
                 if (!wildcard.Value.Equals(availablePairs[matches[0]]))
                 {
-                    if (!_bindingContext.DefaultParameterWarningSet.Contains(cmdletName + Separator + parameterName))
+                    if (!_stateContext.DefaultParameterWarningSet.Contains(cmdletName + Separator + parameterName))
                     {
                         _commandRuntime.WriteWarning(
                             string.Format(
                                 CultureInfo.InvariantCulture,
                                 ParameterBinderStrings.DifferentValuesAssignedToSingleParameter,
                                 parameterName));
-                        _bindingContext.DefaultParameterWarningSet.Add(cmdletName + Separator + parameterName);
+                        _stateContext.DefaultParameterWarningSet.Add(cmdletName + Separator + parameterName);
                     }
 
                     parametersToRemove.Add(matches[0]);
@@ -516,8 +483,8 @@ internal sealed class DefaultParameterValueBinder
             availablePairs.Remove(parameter);
         }
 
-        _bindingContext.AllDefaultParameterValuePairs = availablePairs.Count > 0 ? availablePairs : null;
-        return _bindingContext.AllDefaultParameterValuePairs;
+        _stateContext.AllDefaultParameterValuePairs = availablePairs.Count > 0 ? availablePairs : null;
+        return _stateContext.AllDefaultParameterValuePairs;
     }
 
     /// <summary>
@@ -551,10 +518,10 @@ internal sealed class DefaultParameterValueBinder
             }
         }
 
-        if (writeWarning && !_bindingContext.DefaultParameterWarningSet.Contains(cmdletName + Separator + paramName))
+        if (writeWarning && !_stateContext.DefaultParameterWarningSet.Contains(cmdletName + Separator + paramName))
         {
             _commandRuntime.WriteWarning(string.Format(CultureInfo.InvariantCulture, ParameterBinderStrings.DifferentValuesAssignedToSingleParameter, paramName));
-            _bindingContext.DefaultParameterWarningSet.Add(cmdletName + Separator + paramName);
+            _stateContext.DefaultParameterWarningSet.Add(cmdletName + Separator + paramName);
         }
     }
 }

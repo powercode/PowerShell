@@ -1,73 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Management.Automation.Internal;
 using System.Management.Automation.Runspaces;
 
 namespace System.Management.Automation;
-
-/// <summary>
-/// Provides the binding context that <see cref="PipelineParameterBinder"/> needs
-/// from its owning parameter binder controller.
-/// </summary>
-internal interface IPipelineParameterBindingContext
-{
-    /// <summary>Parameters not yet bound to a value.</summary>
-    IList<MergedCompiledCommandParameter> UnboundParameters { get; }
-
-    /// <summary>Parameters bound through pipeline input in the current pipeline iteration.</summary>
-    List<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput { get; }
-
-    /// <summary>The parameter-set resolver for the current command.</summary>
-    ParameterSetResolver ParameterSetResolver { get; }
-
-    /// <summary>Whether $PSDefaultParameterValues binding is currently in use.</summary>
-    bool DefaultParameterBindingInUse { get; set; }
-
-    /// <summary>The default parameter set flag from the command metadata.</summary>
-    uint DefaultParameterSetFlag { get; }
-
-    /// <summary>The name of the command being bound (for tracing).</summary>
-    string CommandName { get; }
-
-    /// <summary>
-    /// Invokes any delay-bind ScriptBlocks and binds the evaluated result.
-    /// </summary>
-    bool InvokeAndBindDelayBindScriptBlock(PSObject inputToOperateOn, out bool thereWasSomethingToBind);
-
-    /// <summary>
-    /// Backs up the default value of <paramref name="parameter"/> before pipeline binding overwrites it.
-    /// </summary>
-    void BackupDefaultParameter(MergedCompiledCommandParameter parameter);
-
-    /// <summary>
-    /// Restores the default values of <paramref name="parameters"/> that were overwritten during pipeline binding.
-    /// </summary>
-    void RestoreDefaultParameterValues(IEnumerable<MergedCompiledCommandParameter> parameters);
-
-    /// <summary>Rents a <see cref="CommandParameterInternal"/> from the pipeline CPI pool.</summary>
-    CommandParameterInternal RentPipelineCpi();
-
-    /// <summary>Dispatches a parameter bind call to the appropriate sub-binder.</summary>
-    bool DispatchBindToSubBinder(
-        uint validParameterSetFlag,
-        CommandParameterInternal argument,
-        MergedCompiledCommandParameter parameter,
-        ParameterBindingFlags flags);
-
-    /// <summary>Throws or elaborates a parameter binding exception.</summary>
-    [DoesNotReturn]
-    void ThrowOrElaborateBindingException(ParameterBindingException ex);
-
-    /// <summary>
-    /// Attempts to apply $PSDefaultParameterValues bindings for any yet-unbound parameters.
-    /// </summary>
-    bool ApplyDefaultParameterBinding(string caller, bool isDynamic, uint currentParameterSetFlag);
-}
 
 /// <summary>
 /// Encapsulates the pipeline-input parameter binding state-machine.
@@ -81,14 +19,16 @@ internal sealed class PipelineParameterBinder
             "ParameterBinderController",
             "Controls the interaction between the command processor and the parameter binder(s).");
 
-    private readonly IPipelineParameterBindingContext _context;
+    private readonly IBindingStateContext _stateContext;
+    private readonly IBindingOperationsContext _opsContext;
 
     /// <summary>Cached pipeline binding plan established after the first successful pipeline bind.</summary>
     private PipelineBindingPlan? _cachedPlan;
 
-    internal PipelineParameterBinder(IPipelineParameterBindingContext context)
+    internal PipelineParameterBinder(IBindingStateContext stateContext, IBindingOperationsContext opsContext)
     {
-        _context = context;
+        _stateContext = stateContext;
+        _opsContext = opsContext;
     }
 
     /// <summary>Clears the cached pipeline binding plan.</summary>
@@ -98,7 +38,7 @@ internal sealed class PipelineParameterBinder
     }
 
     private string DebuggerDisplayValue
-        => $"PipelineParameterBinder: UnboundCount={_context.UnboundParameters.Count}";
+        => $"PipelineParameterBinder: UnboundCount={_stateContext.UnboundParameters.Count}";
 
     /// <summary>Used for defining the state of the binding state machine.</summary>
     private enum CurrentlyBinding
@@ -126,15 +66,12 @@ internal sealed class PipelineParameterBinder
 
         try
         {
-            using (ParameterBinderBase.bindingTracer.TraceScope(
-                "BIND PIPELINE object to parameters: [{0}]",
-                _context.CommandName))
+            using (ParameterBinderBase.bindingTracer.TraceScope("BIND PIPELINE object to parameters: [{0}]", _stateContext.CommandName))
             {
                 // First run any of the delay bind ScriptBlocks and bind the
                 // result to the appropriate parameter.
 
-                bool thereWasSomethingToBind;
-                bool invokeScriptResult = _context.InvokeAndBindDelayBindScriptBlock(inputToOperateOn, out thereWasSomethingToBind);
+                bool invokeScriptResult = _opsContext.InvokeAndBindDelayBindScriptBlock(inputToOperateOn, out bool thereWasSomethingToBind);
 
                 bool continueBindingAfterScriptBlockProcessing = !thereWasSomethingToBind || invokeScriptResult;
 
@@ -143,14 +80,14 @@ internal sealed class PipelineParameterBinder
                 if (continueBindingAfterScriptBlockProcessing)
                 {
                     // If any of the parameters in the parameter set which are not yet bound
-                    // accept pipeline input, process the input object and bind to those
+                    // except pipeline input, process the input object and bind to those
                     // parameters
 
                     bindPipelineParametersResult = BindPipelineParametersPrivate(inputToOperateOn);
                 }
 
                 // We are successful at binding the pipeline input if there was a ScriptBlock to
-                // run and it ran successfully or if we successfully bound a parameter based on
+                // run, and it ran successfully or if we successfully bound a parameter based on
                 // the pipeline input.
 
                 result = (thereWasSomethingToBind && invokeScriptResult) || bindPipelineParametersResult;
@@ -161,7 +98,7 @@ internal sealed class PipelineParameterBinder
             // Reset the default values
             // This prevents the last pipeline object from being bound during EndProcessing
             // if it failed some post binding verification step.
-            _context.RestoreDefaultParameterValues(_context.ParametersBoundThroughPipelineInput);
+            _opsContext.RestoreDefaultParameterValues(_stateContext.ParametersBoundThroughPipelineInput);
 
             // Let the parameter binding errors propagate out
             throw;
@@ -170,14 +107,14 @@ internal sealed class PipelineParameterBinder
         try
         {
             // Now make sure we have latched on to a single parameter set.
-            _context.ParameterSetResolver.VerifyParameterSetSelected();
+            _stateContext.ParameterSetResolver.VerifyParameterSetSelected();
         }
         catch (ParameterBindingException)
         {
             // Reset the default values
             // This prevents the last pipeline object from being bound during EndProcessing
             // if it failed some post binding verification step.
-            _context.RestoreDefaultParameterValues(_context.ParametersBoundThroughPipelineInput);
+            _opsContext.RestoreDefaultParameterValues(_stateContext.ParametersBoundThroughPipelineInput);
 
             throw;
         }
@@ -187,7 +124,7 @@ internal sealed class PipelineParameterBinder
             // Reset the default values
             // This prevents the last pipeline object from being bound during EndProcessing
             // if it failed some post binding verification step.
-            _context.RestoreDefaultParameterValues(_context.ParametersBoundThroughPipelineInput);
+            _opsContext.RestoreDefaultParameterValues(_stateContext.ParametersBoundThroughPipelineInput);
         }
 
         return result;
@@ -233,14 +170,13 @@ internal sealed class PipelineParameterBinder
         if (ParameterBinderBase.bindingTracer.IsEnabled)
         {
             ConsolidatedString dontuseInternalTypeNames;
-            ParameterBinderBase.bindingTracer.WriteLine(
-                "PIPELINE object TYPE = [{0}]",
-                inputToOperateOn == null || inputToOperateOn == AutomationNull.Value
-                    ? "null"
-                    : ((dontuseInternalTypeNames = inputToOperateOn.InternalTypeNames).Count > 0 && dontuseInternalTypeNames[0] != null)
-                          ? dontuseInternalTypeNames[0]
-                          : inputToOperateOn.BaseObject.GetType().FullName);
-
+            string dontuseInternalTypeName = inputToOperateOn == null || inputToOperateOn == AutomationNull.Value
+                ? "null"
+                : (dontuseInternalTypeNames = inputToOperateOn.InternalTypeNames).Count > 0 && dontuseInternalTypeNames[0] != null
+                    ? dontuseInternalTypeNames[0]
+                    : inputToOperateOn.BaseObject.GetType().FullName;
+            
+            ParameterBinderBase.bindingTracer.WriteLine("PIPELINE object TYPE = [{0}]", dontuseInternalTypeName);
             ParameterBinderBase.bindingTracer.WriteLine("RESTORING pipeline parameter's original values");
         }
 
@@ -248,11 +184,11 @@ internal sealed class PipelineParameterBinder
 
         // Reset the default values
 
-        _context.RestoreDefaultParameterValues(_context.ParametersBoundThroughPipelineInput);
+        _opsContext.RestoreDefaultParameterValues(_stateContext.ParametersBoundThroughPipelineInput);
 
         // Now clear the parameter names from the previous pipeline input
 
-        _context.ParametersBoundThroughPipelineInput.Clear();
+        _stateContext.ParametersBoundThroughPipelineInput.Clear();
 
         // --- Fast path: replay cached plan (Tasks 2.2 / 3.1 / 3.2) ---
         if (_cachedPlan is { } plan)
@@ -272,9 +208,7 @@ internal sealed class PipelineParameterBinder
                 {
                     if (ParameterBinderBase.bindingTracer.IsEnabled)
                     {
-                        ParameterBinderBase.bindingTracer.WriteLine(
-                            "PIPELINE BIND plan invalidated (type changed from '{0}' to '{1}')",
-                            plan.FirstObjectTypeName, currentType);
+                        ParameterBinderBase.bindingTracer.WriteLine("PIPELINE BIND plan invalidated (type changed from '{0}' to '{1}')", plan.FirstObjectTypeName, currentType);
                     }
 
                     _cachedPlan = null;
@@ -284,12 +218,10 @@ internal sealed class PipelineParameterBinder
 
             if (ParameterBinderBase.bindingTracer.IsEnabled)
             {
-                ParameterBinderBase.bindingTracer.WriteLine(
-                    "PIPELINE BIND via cached plan ({0} entries, set=0x{1:X})",
-                    plan.Count, plan.ResolvedParameterSetFlag);
+                ParameterBinderBase.bindingTracer.WriteLine("PIPELINE BIND via cached plan ({0} entries, set=0x{1:X})", plan.Count, plan.ResolvedParameterSetFlag);
             }
 
-            _context.ParameterSetResolver.CurrentParameterSetFlag = plan.ResolvedParameterSetFlag;
+            _stateContext.ParameterSetResolver.CurrentParameterSetFlag = plan.ResolvedParameterSetFlag;
 
             bool fastResult = true;
             try
@@ -305,8 +237,7 @@ internal sealed class PipelineParameterBinder
                     {
                         if (ParameterBinderBase.bindingTracer.IsEnabled)
                         {
-                            ParameterBinderBase.bindingTracer.WriteLine(
-                                "PIPELINE BIND plan invalidated (binding failure on entry {0})", fi);
+                            ParameterBinderBase.bindingTracer.WriteLine("PIPELINE BIND plan invalidated (binding failure on entry {0})", fi);
                         }
 
                         fastResult = false;
@@ -327,25 +258,26 @@ internal sealed class PipelineParameterBinder
 
             // Fast path failed — invalidate plan, undo partial binds, fall through to slow path.
             _cachedPlan = null;
-            _context.RestoreDefaultParameterValues(_context.ParametersBoundThroughPipelineInput);
-            _context.ParametersBoundThroughPipelineInput.Clear();
+            _opsContext.RestoreDefaultParameterValues(_stateContext.ParametersBoundThroughPipelineInput);
+            _stateContext.ParametersBoundThroughPipelineInput.Clear();
         }
 
         SlowPath:
 
         // Now restore the parameter set flags
 
-        _context.ParameterSetResolver.CurrentParameterSetFlag = _context.ParameterSetResolver.PrePipelineProcessingParameterSetFlags;
-        uint validParameterSets = _context.ParameterSetResolver.CurrentParameterSetFlag;
-        bool needToPrioritizeOneSpecificParameterSet = _context.ParameterSetResolver.ParameterSetToBePrioritizedInPipelineBinding != 0;
+        _stateContext.ParameterSetResolver.CurrentParameterSetFlag = _stateContext.ParameterSetResolver.PrePipelineProcessingParameterSetFlags;
+        uint validParameterSets = _stateContext.ParameterSetResolver.CurrentParameterSetFlag;
+        bool needToPrioritizeOneSpecificParameterSet = _stateContext.ParameterSetResolver.ParameterSetToBePrioritizedInPipelineBinding != 0;
         int steps = needToPrioritizeOneSpecificParameterSet ? 2 : 1;
 
         if (needToPrioritizeOneSpecificParameterSet)
         {
             // ParameterSetResolver.ParameterSetToBePrioritizedInPipelineBinding is set, so we are certain that the specified parameter set must be valid,
             // and it's not the only valid parameter set.
-            Diagnostics.Assert((_context.ParameterSetResolver.CurrentParameterSetFlag & _context.ParameterSetResolver.ParameterSetToBePrioritizedInPipelineBinding) != 0, "ParameterSetResolver.ParameterSetToBePrioritizedInPipelineBinding should be valid if it's set");
-            validParameterSets = _context.ParameterSetResolver.ParameterSetToBePrioritizedInPipelineBinding;
+            Diagnostics.Assert((_stateContext.ParameterSetResolver.CurrentParameterSetFlag & _stateContext.ParameterSetResolver.ParameterSetToBePrioritizedInPipelineBinding) != 0, 
+                "ParameterSetResolver.ParameterSetToBePrioritizedInPipelineBinding should be valid if it's set");
+            validParameterSets = _stateContext.ParameterSetResolver.ParameterSetToBePrioritizedInPipelineBinding;
         }
 
         for (int i = 0; i < steps; i++)
@@ -367,8 +299,8 @@ internal sealed class PipelineParameterBinder
                     // must be equal to the specific prioritized parameter set.
                     if (!needToPrioritizeOneSpecificParameterSet || i == 1)
                     {
-                        _context.ParameterSetResolver.ValidateParameterSets(true, true, _context.ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
-                        validParameterSets = _context.ParameterSetResolver.CurrentParameterSetFlag;
+                        _stateContext.ParameterSetResolver.ValidateParameterSets(true, true, _stateContext.ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
+                        validParameterSets = _stateContext.ParameterSetResolver.CurrentParameterSetFlag;
                     }
 
                     result = true;
@@ -379,39 +311,39 @@ internal sealed class PipelineParameterBinder
             if (needToPrioritizeOneSpecificParameterSet && i == 0)
             {
                 // If the prioritized set can be bound successfully, there is no need to do the second round binding
-                if (_context.ParameterSetResolver.CurrentParameterSetFlag == _context.ParameterSetResolver.ParameterSetToBePrioritizedInPipelineBinding)
+                if (_stateContext.ParameterSetResolver.CurrentParameterSetFlag == _stateContext.ParameterSetResolver.ParameterSetToBePrioritizedInPipelineBinding)
                 {
                     break;
                 }
 
-                validParameterSets = _context.ParameterSetResolver.CurrentParameterSetFlag & (~_context.ParameterSetResolver.ParameterSetToBePrioritizedInPipelineBinding);
+                validParameterSets = _stateContext.ParameterSetResolver.CurrentParameterSetFlag & (~_stateContext.ParameterSetResolver.ParameterSetToBePrioritizedInPipelineBinding);
             }
         }
 
         // Now make sure we only have one valid parameter set
         // Note, this will throw if we have more than one.
 
-        _context.ParameterSetResolver.ValidateParameterSets(false, true, _context.ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
+        _stateContext.ParameterSetResolver.ValidateParameterSets(false, true, _stateContext.ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
 
-        if (!_context.DefaultParameterBindingInUse)
+        if (!_stateContext.DefaultParameterBindingInUse)
         {
-            if (_context.ApplyDefaultParameterBinding(
+            if (_opsContext.ApplyDefaultParameterBinding(
                 "PIPELINE BIND",
                 isDynamic: false,
-                currentParameterSetFlag: _context.ParameterSetResolver.CurrentParameterSetFlag))
+                currentParameterSetFlag: _stateContext.ParameterSetResolver.CurrentParameterSetFlag))
             {
-                _context.DefaultParameterBindingInUse = true;
+                _stateContext.DefaultParameterBindingInUse = true;
             }
         }
 
         // Capture binding plan after the first successful slow-path bind (Task 2.1 / 4.2)
         if (result && _cachedPlan == null)
         {
-            uint resolvedFlag = _context.ParameterSetResolver.CurrentParameterSetFlag;
+            uint resolvedFlag = _stateContext.ParameterSetResolver.CurrentParameterSetFlag;
             // Only cache when fully resolved to a single parameter set (single bit set)
             if (resolvedFlag != 0 && (resolvedFlag & (resolvedFlag - 1)) == 0)
             {
-                var pipelineBound = _context.ParametersBoundThroughPipelineInput;
+                var pipelineBound = _stateContext.ParametersBoundThroughPipelineInput;
                 int count = pipelineBound.Count;
                 if (count > 0)
                 {
@@ -449,16 +381,14 @@ internal sealed class PipelineParameterBinder
                         Entries = entries,
                         Count = count,
                         ResolvedParameterSetFlag = resolvedFlag,
-                        DefaultParameterBindingApplied = _context.DefaultParameterBindingInUse,
+                        DefaultParameterBindingApplied = _stateContext.DefaultParameterBindingInUse,
                         HasByPropertyName = hasByPropName,
                         FirstObjectTypeName = hasByPropName ? GetPSObjectTypeName(inputToOperateOn) : null,
                     };
 
                     if (ParameterBinderBase.bindingTracer.IsEnabled)
                     {
-                        ParameterBinderBase.bindingTracer.WriteLine(
-                            "PIPELINE BIND plan created ({0} entries, set=0x{1:X}, hasByPropName={2})",
-                            count, resolvedFlag, hasByPropName);
+                        ParameterBinderBase.bindingTracer.WriteLine("PIPELINE BIND plan created ({0} entries, set=0x{1:X}, hasByPropName={2})", count, resolvedFlag, hasByPropName);
                     }
 
                     _cachedPlan = newPlan;
@@ -492,18 +422,15 @@ internal sealed class PipelineParameterBinder
         // First check to see if the default parameter set has been defined and if it
         // is still valid.
 
-        uint defaultParameterSetFlag = _context.DefaultParameterSetFlag;
+        uint defaultParameterSetFlag = _stateContext.DefaultParameterSetFlag;
 
         if (defaultParameterSetFlag != 0 && (validParameterSets & defaultParameterSetFlag) != 0)
         {
-            // Since we have a default parameter set and it is still valid, give preference to the
+            // Since we have a default parameter set, and it is still valid, give preference to the
             // parameters in the default set.
 
             aParameterWasBound =
-                BindUnboundParametersForBindingStateInParameterSet(
-                    inputToOperateOn,
-                    currentlyBinding,
-                    defaultParameterSetFlag);
+                BindUnboundParametersForBindingStateInParameterSet(inputToOperateOn, currentlyBinding, defaultParameterSetFlag);
 
             if (!aParameterWasBound)
             {
@@ -517,10 +444,7 @@ internal sealed class PipelineParameterBinder
             // the other parameter sets that are still valid.
 
             aParameterWasBound =
-                BindUnboundParametersForBindingStateInParameterSet(
-                    inputToOperateOn,
-                    currentlyBinding,
-                    validParameterSets);
+                BindUnboundParametersForBindingStateInParameterSet(inputToOperateOn, currentlyBinding, validParameterSets);
         }
 
         s_tracer.WriteLine("aParameterWasBound = {0}", aParameterWasBound);
@@ -551,7 +475,7 @@ internal sealed class PipelineParameterBinder
         // one sets got bound, then "parameter set cannot be resolved" error will be thrown,
         // which is expected.
 
-        var unboundParameters = _context.UnboundParameters;
+        var unboundParameters = _stateContext.UnboundParameters;
         for (int i = unboundParameters.Count - 1; i >= 0; i--)
         {
             var parameter = unboundParameters[i];
@@ -641,7 +565,7 @@ internal sealed class PipelineParameterBinder
     {
         bool bindResult = false;
 
-        var messageFormat = ((flags & ParameterBindingFlags.ShouldCoerceType) != 0) ?
+        var messageFormat = (flags & ParameterBindingFlags.ShouldCoerceType) != 0 ?
             "Parameter [{0}] PIPELINE INPUT ValueFromPipelineByPropertyName WITH COERCION" :
             "Parameter [{0}] PIPELINE INPUT ValueFromPipelineByPropertyName NO COERCION";
         ParameterBinderBase.bindingTracer.WriteLine(messageFormat, parameter.Parameter.Name);
@@ -722,7 +646,7 @@ internal sealed class PipelineParameterBinder
 
         if (parameterBindingException != null)
         {
-            _context.ThrowOrElaborateBindingException(parameterBindingException);
+            _opsContext.ThrowOrElaborateBindingException(parameterBindingException);
         }
 
         return bindResult;
@@ -756,27 +680,26 @@ internal sealed class PipelineParameterBinder
 
         if (parameterValue != AutomationNull.Value)
         {
-            s_tracer.WriteLine("Adding PipelineParameter name={0}; value={1}",
-                             parameter.Parameter.Name, parameterValue ?? "null");
+            s_tracer.WriteLine("Adding PipelineParameter name={0}; value={1}", parameter.Parameter.Name, parameterValue ?? "null");
 
             // Backup the default value
-            _context.BackupDefaultParameter(parameter);
+            _opsContext.BackupDefaultParameter(parameter);
 
             // Now bind the new value — rent from the per-invocation CPI pool to avoid allocation
-            CommandParameterInternal param = _context.RentPipelineCpi();
+            CommandParameterInternal param = _opsContext.RentPipelineCpi();
             param.InitializeAsParameterWithArgument(
-                /*parameterAst*/null, parameter.Parameter.Name, parameter.Parameter.ParameterText,
-                /*argumentAst*/null, parameterValue,
+                parameterAst: null, parameter.Parameter.Name, parameter.Parameter.ParameterText,
+                argumentAst: null, parameterValue,
                 false);
 
             flags &= ~ParameterBindingFlags.DelayBindScriptBlock;
-            result = _context.DispatchBindToSubBinder(_context.ParameterSetResolver.CurrentParameterSetFlag, param, parameter, flags);
+            result = _opsContext.DispatchBindToSubBinder(_stateContext.ParameterSetResolver.CurrentParameterSetFlag, param, parameter, flags);
 
             if (result)
             {
                 // Now make sure to remember that the default value needs to be restored
                 // if we get another pipeline object
-                _context.ParametersBoundThroughPipelineInput.Add(parameter);
+                _stateContext.ParametersBoundThroughPipelineInput.Add(parameter);
             }
         }
 
