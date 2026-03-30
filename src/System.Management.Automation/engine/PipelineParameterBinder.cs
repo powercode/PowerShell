@@ -20,7 +20,7 @@ internal interface IPipelineParameterBindingContext
     IList<MergedCompiledCommandParameter> UnboundParameters { get; }
 
     /// <summary>Parameters bound through pipeline input in the current pipeline iteration.</summary>
-    Collection<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput { get; }
+    List<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput { get; }
 
     /// <summary>The parameter-set resolver for the current command.</summary>
     ParameterSetResolver ParameterSetResolver { get; }

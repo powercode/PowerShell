@@ -33,7 +33,7 @@ internal interface IDefaultParameterBindingContext
     Dictionary<string, MergedCompiledCommandParameter> BoundParameters { get; }
 
     /// <summary>Names of parameters bound via $PSDefaultParameterValues.</summary>
-    Collection<string> BoundDefaultParameters { get; }
+    List<string> BoundDefaultParameters { get; }
 
     /// <summary>Copy of bound positional parameter names from the default binder.</summary>
     HashSet<string> CopyBoundPositionalParameters();

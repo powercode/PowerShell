@@ -118,12 +118,12 @@ namespace System.Management.Automation
         /// <summary>
         /// A collection of bound default parameters.
         /// </summary>
-        protected Collection<string> BoundDefaultParameters => State.BoundDefaultParameters;
+        protected List<string> BoundDefaultParameters => State.BoundDefaultParameters;
 
         /// <summary>
         /// A collection of the unbound arguments.
         /// </summary>
-        protected Collection<CommandParameterInternal> UnboundArguments
+        protected List<CommandParameterInternal> UnboundArguments
         {
             get => State.UnboundArguments;
             set => State.UnboundArguments = value;
@@ -273,10 +273,10 @@ namespace System.Management.Automation
             }
         }
 
-        protected void InitUnboundArguments(Collection<CommandParameterInternal> arguments)
+        protected void InitUnboundArguments(List<CommandParameterInternal> arguments)
         {
             // Add the passed in arguments to the unboundArguments collection
-            Collection<CommandParameterInternal>? paramsFromSplatting = null;
+            List<CommandParameterInternal>? paramsFromSplatting = null;
             foreach (CommandParameterInternal argument in arguments)
             {
                 if (argument.FromHashtableSplatting)
@@ -480,7 +480,7 @@ namespace System.Management.Automation
         /// <returns>
         /// The arguments which are still not bound.
         /// </returns>
-        internal virtual Collection<CommandParameterInternal> BindParameters(Collection<CommandParameterInternal> parameters)
+        internal virtual List<CommandParameterInternal> BindParameters(List<CommandParameterInternal> parameters)
         {
             throw new NotImplementedException();
         }
@@ -584,7 +584,7 @@ namespace System.Management.Automation
         /// or
         /// If the binding to the parameter fails.
         /// </exception>
-        protected void BindNamedParameters(uint parameterSets, Collection<CommandParameterInternal> arguments)
+        protected void BindNamedParameters(uint parameterSets, List<CommandParameterInternal> arguments)
         {
             HashSet<string>? boundExplicitNamedParams = null;
 
@@ -695,7 +695,7 @@ namespace System.Management.Automation
         /// If the binding to the parameter fails.
         /// </exception>
         internal void BindPositionalParameters(
-            Collection<CommandParameterInternal> unboundArguments,
+            List<CommandParameterInternal> unboundArguments,
             uint validParameterSets,
             uint defaultParameterSet,
             out ParameterBindingException? outgoingBindingException
@@ -847,7 +847,7 @@ namespace System.Management.Automation
         {
             foreach (Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter> parameterCollection in positionalParameterDictionary.Values)
             {
-                Collection<MergedCompiledCommandParameter> paramToRemove = new Collection<MergedCompiledCommandParameter>();
+                List<MergedCompiledCommandParameter> paramToRemove = new();
 
                 foreach (PositionalCommandParameter positionalParameter in parameterCollection.Values)
                 {
@@ -1023,7 +1023,7 @@ namespace System.Management.Automation
 
         private static CommandParameterInternal? GetNextPositionalArgument(
             List<CommandParameterInternal> unboundArgumentsCollection,
-            Collection<CommandParameterInternal> nonPositionalArguments,
+            List<CommandParameterInternal> nonPositionalArguments,
             ref int unboundArgumentsIndex)
         {
             // Find the next positional argument
@@ -1197,7 +1197,7 @@ namespace System.Management.Automation
         /// Keeps track of the parameters that get bound through pipeline input, so that their
         /// previous values can be restored before the next pipeline input comes.
         /// </summary>
-        internal Collection<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput => State.ParametersBoundThroughPipelineInput;
+        internal List<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput => State.ParametersBoundThroughPipelineInput;
 
         /// <summary>
         /// For any unbound parameters, this method checks to see if the

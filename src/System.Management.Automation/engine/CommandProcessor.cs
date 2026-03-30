@@ -3,6 +3,7 @@
 
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq.Expressions;
@@ -549,7 +550,7 @@ namespace System.Management.Automation
                     continue;
                 }
 
-                Collection<MergedCompiledCommandParameter> missingMandatoryParameters;
+                List<MergedCompiledCommandParameter> missingMandatoryParameters;
 
                 using (ParameterBinderBase.bindingTracer.TraceScope(
                     "MANDATORY PARAMETER CHECK on cmdlet [{0}]",

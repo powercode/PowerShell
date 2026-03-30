@@ -88,7 +88,7 @@ namespace System.Management.Automation
         /// <returns>
         /// True if binding was successful or false otherwise.
         /// </returns>
-        internal void BindCommandLineParameters(Collection<CommandParameterInternal> arguments)
+        internal void BindCommandLineParameters(List<CommandParameterInternal> arguments)
         {
             // Add the passed in arguments to the unboundArguments collection
             InitUnboundArguments(arguments);
@@ -146,7 +146,7 @@ namespace System.Management.Automation
         /// <remarks>
         /// An array containing the values that were bound to $args.
         /// </remarks>
-        private void HandleRemainingArguments(Collection<CommandParameterInternal> arguments)
+        private void HandleRemainingArguments(List<CommandParameterInternal> arguments)
         {
             List<object> args = new(arguments.Count);
 

@@ -34,7 +34,7 @@ internal interface IDynamicParameterHandlerContext
     IList<MergedCompiledCommandParameter> UnboundParameters { get; }
 
     /// <summary>Arguments not yet matched to a parameter.</summary>
-    Collection<CommandParameterInternal> UnboundArguments { get; set; }
+    List<CommandParameterInternal> UnboundArguments { get; set; }
 
     /// <summary>Current valid parameter set flags.</summary>
     uint CurrentParameterSetFlag { get; }
@@ -52,11 +52,11 @@ internal interface IDynamicParameterHandlerContext
     void ReparseUnboundArguments();
 
     /// <summary>Binds named parameters from <paramref name="args"/> against the current parameter set.</summary>
-    void BindNamedParameters(uint parameterSetFlag, Collection<CommandParameterInternal> args);
+    void BindNamedParameters(uint parameterSetFlag, List<CommandParameterInternal> args);
 
     /// <summary>Binds positional parameters from <paramref name="args"/>.</summary>
     void BindPositionalParameters(
-        Collection<CommandParameterInternal> args,
+        List<CommandParameterInternal> args,
         uint currentParameterSetFlag,
         uint defaultParameterSetFlag,
         out ParameterBindingException? outgoingBindingException);
