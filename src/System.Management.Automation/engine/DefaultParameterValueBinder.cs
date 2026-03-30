@@ -53,7 +53,6 @@ internal interface IDefaultParameterBindingContext
 
 /// <summary>
 /// Encapsulates $PSDefaultParameterValues lookup, qualification, and binding.
-/// Extracted from <see cref="CmdletParameterBinderController"/> to satisfy SRP.
 /// </summary>
 [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
 internal sealed class DefaultParameterValueBinder

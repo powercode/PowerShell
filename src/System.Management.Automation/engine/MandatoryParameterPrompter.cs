@@ -26,7 +26,6 @@ internal interface IMandatoryParameterPrompterContext
 
 /// <summary>
 /// Encapsulates mandatory-parameter detection, user prompting, and prompt data structure building.
-/// Extracted from <see cref="CmdletParameterBinderController"/> to satisfy SRP.
 /// </summary>
 [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
 internal sealed class MandatoryParameterPrompter
