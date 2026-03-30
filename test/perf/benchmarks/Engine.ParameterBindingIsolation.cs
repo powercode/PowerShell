@@ -174,9 +174,9 @@ namespace Engine
 
         // ── Pre-built argument collections (avoids measuring arg-construction cost) ──
 
-        private Collection<CommandParameterInternal> _namedArgs3;
-        private Collection<CommandParameterInternal> _positionalArgs3;
-        private Collection<CommandParameterInternal> _namedArgs25;
+        private List<CommandParameterInternal> _namedArgs3;
+        private List<CommandParameterInternal> _positionalArgs3;
+        private List<CommandParameterInternal> _namedArgs25;
 
         // ── High-volume pipeline binding infrastructure ─────────────────────────
 
@@ -219,7 +219,7 @@ namespace Engine
 
             // ── Named 3-param argument list ──────────────────────────────────────
 
-            _namedArgs3 = new Collection<CommandParameterInternal>
+            _namedArgs3 = new List<CommandParameterInternal>
             {
                 CommandParameterInternal.CreateParameterWithArgument(
                     parameterAst: null, parameterName: "Name", parameterText: "-Name:",
@@ -233,7 +233,7 @@ namespace Engine
 
             // ── Positional 3-param argument list ─────────────────────────────────
 
-            _positionalArgs3 = new Collection<CommandParameterInternal>
+            _positionalArgs3 = new List<CommandParameterInternal>
             {
                 CommandParameterInternal.CreateArgument(value: "item"),
                 CommandParameterInternal.CreateArgument(value: 12),
@@ -242,7 +242,7 @@ namespace Engine
 
             // ── Named 25-param argument list ─────────────────────────────────────
 
-            _namedArgs25 = new Collection<CommandParameterInternal>
+            _namedArgs25 = new List<CommandParameterInternal>
             {
                 CommandParameterInternal.CreateParameterWithArgument(
                     null, "Name", "-Name:", null, "item", true),
@@ -272,7 +272,7 @@ namespace Engine
                 // Perform command-line binding with no arguments and pipeline expected.
                 // The MshCommandRuntime.IsClosed defaults to false, so BindCommandLineParameters
                 // treats this as a pipeline-expecting invocation and sets PrePipelineProcessingParameterSetFlags.
-                _pipelineController.BindCommandLineParameters(new Collection<CommandParameterInternal>());
+                _pipelineController.BindCommandLineParameters(new List<CommandParameterInternal>());
 
                 // Pre-build 100k PSObject-wrapped ints for the pipeline loop.
                 _pipeline100kInts = new PSObject[100_000];
@@ -291,7 +291,7 @@ namespace Engine
                 _pipelineByPropNameAllParams = new List<MergedCompiledCommandParameter>(
                     _pipelineByPropNameController.BindableParameters.BindableParameters.Values);
 
-                _pipelineByPropNameController.BindCommandLineParameters(new Collection<CommandParameterInternal>());
+                _pipelineByPropNameController.BindCommandLineParameters(new List<CommandParameterInternal>());
 
                 // Pre-build 100k PSObjects with Name + Count properties.
                 _pipeline100kObjects = new PSObject[100_000];
