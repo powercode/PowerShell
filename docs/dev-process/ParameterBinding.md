@@ -44,7 +44,7 @@ classDiagram
 
     class ParameterBinderBase {
         +CoerceValidateAndBind()
-        +BindParameter()
+        +StoreParameterValue()
     }
     class ReflectionParameterBinder
     class ScriptParameterBinder
@@ -79,15 +79,17 @@ classDiagram
 
     class CommandProcessorBase
     class CommandProcessor
-    class ScriptCommandProcessor
+    class ScriptCommandProcessorBase
+    class DlrScriptCommandProcessor
     class NativeCommandProcessor
 
     CommandProcessorBase <|-- CommandProcessor
-    CommandProcessorBase <|-- ScriptCommandProcessor
+    CommandProcessorBase <|-- ScriptCommandProcessorBase
+    ScriptCommandProcessorBase <|-- DlrScriptCommandProcessor
     CommandProcessorBase <|-- NativeCommandProcessor
 
     CommandProcessor --> CmdletParameterBinderController : creates
-    ScriptCommandProcessor --> ScriptParameterBinderController : creates
+    DlrScriptCommandProcessor --> ScriptParameterBinderController : creates
     NativeCommandProcessor --> NativeCommandParameterBinderController : creates
 
     CmdletParameterBinderController --> ReflectionParameterBinder : uses
@@ -100,7 +102,7 @@ classDiagram
 ```mermaid
 %%{init: {"flowchart": {"wrappingWidth": 400}} }%%
 graph TD
-    Processor["Command Processor (Tier 1)<br/>CommandProcessor · ScriptCommandProcessor · NativeCommandProcessor"]
+    Processor["Command Processor (Tier 1)<br/>CommandProcessor · DlrScriptCommandProcessor · NativeCommandProcessor"]
     Controller["Binder Controller (Tier 2)<br/>CmdletParameterBinderController · ScriptParameterBinderController · NativeCommandParameterBinderController"]
     Binder["Parameter Binder (Tier 3)<br/>ReflectionParameterBinder · ScriptParameterBinder · NativeCommandParameterBinder"]
     Metadata["Metadata Model<br/>MergedCommandParameterMetadata · CompiledCommandParameter · ParameterSetSpecificMetadata"]
@@ -127,11 +129,11 @@ Command processors own the cmdlet/script/native lifecycle. They are responsible 
 - **Role**: Drives cmdlet binding. In `Prepare()` it calls `BindCommandLineParameters()` on the `CmdletParameterBinderController`. In `ProcessRecord()` it calls `PipelineParameterBinder.BindPipelineParameters()` for each incoming pipeline object.
 - **Key methods**: `Prepare()`, `ProcessRecord()`
 
-#### `ScriptCommandProcessor`
+#### `ScriptCommandProcessorBase` / `DlrScriptCommandProcessor`
 
 - **File**: [`src/System.Management.Automation/engine/ScriptCommandProcessor.cs`](../../src/System.Management.Automation/engine/ScriptCommandProcessor.cs)
-- **Role**: Drives script/function binding. Creates a `ScriptParameterBinderController` and calls `BindCommandLineParameters()`. Does not participate in per-object pipeline binding (the script block receives `$input` directly).
-- **Key methods**: `Prepare()`
+- **Role**: Drives script/function binding. `ScriptCommandProcessorBase` is the abstract base; `DlrScriptCommandProcessor` is the sealed concrete implementation. Creates a `ScriptParameterBinderController` and calls `BindCommandLineParameters()`. Does not participate in per-object pipeline binding (the script block receives `$input` directly).
+- **Key methods**: `Prepare()`, `ProcessRecord()`
 
 #### `NativeCommandProcessor`
 
@@ -183,32 +185,32 @@ Parameter binders perform the final write: they receive a typed, validated value
 #### `ParameterBinderBase` (abstract base)
 
 - **File**: [`src/System.Management.Automation/engine/ParameterBinderBase.cs`](../../src/System.Management.Automation/engine/ParameterBinderBase.cs)
-- **Role**: Implements the shared `CoerceValidateAndBind()` method that every parameter bind passes through (transform → coerce → validate → obsolete-warn → dispatch). Declares the abstract `BindParameter()` that concrete binders override.
-- **Key methods**: `CoerceValidateAndBind()`, abstract `BindParameter()`
+- **Role**: Implements the shared `CoerceValidateAndBind()` method that every parameter bind passes through (transform → coerce → validate → obsolete-warn → dispatch). Declares the abstract `StoreParameterValue()` that concrete binders override.
+- **Key methods**: `CoerceValidateAndBind()`, abstract `StoreParameterValue()`
 
 #### `ReflectionParameterBinder`
 
 - **File**: [`src/System.Management.Automation/engine/ReflectionParameterBinder.cs`](../../src/System.Management.Automation/engine/ReflectionParameterBinder.cs)
 - **Role**: Writes values to cmdlet CLR properties via compiled expression delegates (avoids reflection overhead per-call after warm-up). Used for all `[Cmdlet]`-derived classes.
-- **Key methods**: `BindParameter()`, `StoreParameterValue()`
+- **Key methods**: `StoreParameterValue()`
 
 #### `ScriptParameterBinder`
 
 - **File**: [`src/System.Management.Automation/engine/scriptparameterbinder.cs`](../../src/System.Management.Automation/engine/scriptparameterbinder.cs)
 - **Role**: Writes values as `PSVariable` entries in the current `SessionStateScope`. Used for advanced functions and script cmdlets.
-- **Key methods**: `BindParameter()`
+- **Key methods**: `StoreParameterValue()`
 
 #### `RuntimeDefinedParameterBinder`
 
 - **File**: [`src/System.Management.Automation/engine/PseudoParameterBinder.cs`](../../src/System.Management.Automation/engine/PseudoParameterBinder.cs)
 - **Role**: Writes values into a `RuntimeDefinedParameterDictionary` returned by `IDynamicParameters.GetDynamicParameters()`. Used exclusively for dynamic parameters.
-- **Key methods**: `BindParameter()`
+- **Key methods**: `StoreParameterValue()`
 
 #### `NativeCommandParameterBinder`
 
 - **File**: [`src/System.Management.Automation/engine/NativeCommandParameterBinder.cs`](../../src/System.Management.Automation/engine/NativeCommandParameterBinder.cs)
 - **Role**: Appends values to the argument string passed to the external process. Applies platform-specific quoting (needs-quoting logic for Windows vs. POSIX).
-- **Key methods**: `BindParameter()`, `AppendArgument()`
+- **Key methods**: `BindParameters()`, `StoreParameterValue()`, `AppendOneNativeArgument()` (private)
 
 ---
 
@@ -244,7 +246,7 @@ These classes were extracted from the original monolithic `CmdletParameterBinder
 
 - **File**: [`src/System.Management.Automation/engine/DefaultValueManager.cs`](../../src/System.Management.Automation/engine/DefaultValueManager.cs)
 - **Interface**: `IDefaultValueManagerContext`
-- **Role**: Saves a snapshot of each pipeline-bound parameter's default value before the first `ProcessRecord`. Before each subsequent `ProcessRecord` it restores all pipeline parameters to their defaults so that a new pipeline object seeing no matching properties does not inherit values from the previous object.
+- **Role**: Saves a snapshot of each pipeline-bound parameter's default value via `Backup()` before the first `ProcessRecord`. Before each subsequent `ProcessRecord` it restores all pipeline parameters to their defaults via `Restore()` so that a new pipeline object seeing no matching properties does not inherit values from the previous object. Also provides `SaveScriptParameterValue()` for script parameter defaults.
 
 #### `DynamicParameterHandler`
 
@@ -375,7 +377,7 @@ After each successful bind, `CurrentParameterSetFlag` is narrowed.
 
 #### Step 6 — Apply `$PSDefaultParameterValues` (Post-Positional)
 
-**Method**: `DefaultParameterValueBinder.BindDefaultParameterValues()` — `DefaultParameterValueBinder`
+**Method**: `DefaultParameterValueBinder.ApplyDefaultParameterBinding()` — `DefaultParameterValueBinder`
 
 Iterates the default-value pairs collected in Step 2 and binds any whose target parameter is still unbound after Steps 3–5.
 
@@ -397,7 +399,7 @@ If the cmdlet implements `IDynamicParameters`:
 
 #### Step 9 — Apply `$PSDefaultParameterValues` (Post-Dynamic)
 
-**Method**: `DefaultParameterValueBinder.BindDefaultParameterValues()` — `DefaultParameterValueBinder`
+**Method**: `DefaultParameterValueBinder.ApplyDefaultParameterBinding()` — `DefaultParameterValueBinder`
 
 A second pass of default-value injection, now including any newly-added dynamic parameters.
 
@@ -439,7 +441,7 @@ If no pipeline input is expected (i.e., no parameters carry `ValueFromPipeline` 
 
 #### Step 13 — Re-apply Defaults for Mandatory Checking
 
-**Method**: `DefaultParameterValueBinder.BindDefaultParameterValues()` — `DefaultParameterValueBinder`
+**Method**: `DefaultParameterValueBinder.ApplyDefaultParameterBinding()` — `DefaultParameterValueBinder`
 
 If a single parameter set has been resolved, defaults are applied one more time to cover mandatory parameters that might be satisfied by `$PSDefaultParameterValues`.
 
@@ -489,7 +491,7 @@ flowchart TD
     S20["Step 20 — Reset per-object state<br/>(restore defaults, reset set flags)"] --> S21
     S21["Step 21 — 4-Phase Pipeline State Machine<br/>(VFP no-coerce → VFPBPN no-coerce → VFP coerce → VFPBPN coerce)"] --> S22
     S22["Step 22 — Post-pipeline validation<br/>(ValidateParameterSets + VerifySelected + PSDefaultParameterValues)"] --> S23
-    S23["Step 23 — Error recovery (RestoreDefaultParameterValues on failure)"]
+    S23["Step 23 — Error recovery (Restore on failure)"]
     S23 --> Out["ProcessRecord executes"]
 ```
 
@@ -505,7 +507,7 @@ Get-Process | Stop-Process -Id { $_.Id }
 
 #### Step 20 — Reset Per-Object State
 
-**Method**: `DefaultValueManager.RestoreDefaultParameterValues()` + `ParameterSetResolver` reset — `DefaultValueManager`
+**Method**: `DefaultValueManager.Restore()` + `ParameterSetResolver` reset — `DefaultValueManager`
 
 Before binding each new pipeline object:
 1. Every parameter that was previously bound through pipeline input is reset to its saved default value.
@@ -544,9 +546,9 @@ After pipeline binding:
 
 #### Step 23 — Error Recovery
 
-**Method**: `DefaultValueManager.RestoreDefaultParameterValues()` — `DefaultValueManager`
+**Method**: `DefaultValueManager.Restore()` — `DefaultValueManager`
 
-If any step in Phase 3 throws a `ParameterBindingException`, the controller catches it and calls `RestoreDefaultParameterValues()` before re-throwing. This prevents stale pipeline-bound values from contaminating `EndProcessing()` if the per-object binding failed.
+If any step in Phase 3 throws a `ParameterBindingException`, the controller catches it and calls `Restore()` before re-throwing. This prevents stale pipeline-bound values from contaminating `EndProcessing()` if the per-object binding failed.
 
 ---
 
@@ -562,7 +564,7 @@ flowchart LR
     T2["2. Type Coercion<br/>(ParameterTypeCoercer)"] --> T3
     T3["3. Validation<br/>(ValidateArgumentsAttribute)"] --> T4
     T4["4. Obsolete Warning"] --> T5
-    T5["5. Dispatch Bind<br/>(abstract BindParameter)"] --> Done["Value stored in target"]
+    T5["5. Dispatch Bind<br/>(abstract StoreParameterValue)"] --> Done["Value stored in target"]
 ```
 
 ### Step 1 — Argument Transformation
@@ -601,12 +603,12 @@ If the parameter's `[Obsolete]` attribute is set (detected via `CompiledCommandP
 
 ### Step 5 — Dispatch Bind
 
-The abstract `BindParameter()` method is called on the concrete binder instance:
+The abstract `StoreParameterValue()` method is called on the concrete binder instance:
 
-- **`ReflectionParameterBinder.BindParameter()`** — Invokes a cached compiled-expression delegate to set the CLR property on the cmdlet instance.
-- **`ScriptParameterBinder.BindParameter()`** — Calls `SessionStateScope.SetVariable()` to place the value in the script's local variable table.
-- **`RuntimeDefinedParameterBinder.BindParameter()`** — Sets the `Value` property on the corresponding `RuntimeDefinedParameter` in the dictionary.
-- **`NativeCommandParameterBinder.BindParameter()`** — Appends the string-formatted value to the argument list being built.
+- **`ReflectionParameterBinder.StoreParameterValue()`** — Invokes a cached compiled-expression delegate to set the CLR property on the cmdlet instance.
+- **`ScriptParameterBinder.StoreParameterValue()`** — Calls `SessionStateScope.SetVariable()` to place the value in the script's local variable table.
+- **`RuntimeDefinedParameterBinder.StoreParameterValue()`** — Sets the `Value` property on the corresponding `RuntimeDefinedParameter` in the dictionary.
+- **`NativeCommandParameterBinder.StoreParameterValue()`** — Appends the string-formatted value to the argument list being built.
 
 ---
 
@@ -686,7 +688,7 @@ Simple functions (no `[CmdletBinding()]`) do not have mandatory-parameter prompt
 
 External executables use `NativeCommandParameterBinderController`. There is no parameter metadata:
 
-- All arguments are passed through as strings using platform-specific quoting (`NativeCommandParameterBinder.AppendArgument()`).
+- All arguments are passed through as strings using platform-specific quoting (`NativeCommandParameterBinder.AppendOneNativeArgument()`).
 - On Windows, values containing spaces or special characters are double-quoted unless they already contain balanced quotes.
 - On POSIX systems, values are passed as-is (the shell layer handles quoting outside PowerShell).
 - `MinishellParameterBinderController` wraps this for `pwsh` sub-process invocations, prepending `-InputFormat xml` and `-OutputFormat xml` (or `json`) for serialisation format negotiation.
@@ -775,23 +777,23 @@ All files are in `src/System.Management.Automation/engine/` unless noted otherwi
 |------|---------|---------------------|
 | [`engine/CommandProcessor.cs`](../../src/System.Management.Automation/engine/CommandProcessor.cs) | `CommandProcessor` | `Prepare()`, `ProcessRecord()` — Tier 1 cmdlet lifecycle driver |
 | [`engine/CommandProcessorBase.cs`](../../src/System.Management.Automation/engine/CommandProcessorBase.cs) | `CommandProcessorBase` | Abstract base for all command processors |
-| [`engine/ScriptCommandProcessor.cs`](../../src/System.Management.Automation/engine/ScriptCommandProcessor.cs) | `ScriptCommandProcessor` | `Prepare()` — Tier 1 script/function lifecycle driver |
+| [`engine/ScriptCommandProcessor.cs`](../../src/System.Management.Automation/engine/ScriptCommandProcessor.cs) | `ScriptCommandProcessorBase`, `DlrScriptCommandProcessor` | `Prepare()`, `ProcessRecord()` — Tier 1 script/function lifecycle driver |
 | [`engine/NativeCommandProcessor.cs`](../../src/System.Management.Automation/engine/NativeCommandProcessor.cs) | `NativeCommandProcessor` | `Prepare()`, `ProcessRecord()` — Tier 1 native-command lifecycle driver |
 | [`engine/ParameterBinderController.cs`](../../src/System.Management.Automation/engine/ParameterBinderController.cs) | `ParameterBinderController` | `InitUnboundArguments()`, `ReparseUnboundArguments()`, `BindNamedParameters()`, `BindPositionalParameters()` — Abstract Tier 2 base |
 | [`engine/CmdletParameterBinderController.cs`](../../src/System.Management.Automation/engine/CmdletParameterBinderController.cs) | `CmdletParameterBinderController` | `BindCommandLineParameters()`, `BindCommandLineParametersNoValidation()`, `HandleRemainingArguments()`, `VerifyArgumentsProcessed()`, `DispatchBindToSubBinder()` — Full cmdlet binding algorithm |
 | [`engine/scriptparameterbindercontroller.cs`](../../src/System.Management.Automation/engine/scriptparameterbindercontroller.cs) | `ScriptParameterBinderController` | `BindCommandLineParameters()`, `BindUnboundScriptParameters()` — Simplified script/function binding |
 | [`engine/NativeCommandParameterBinderController.cs`](../../src/System.Management.Automation/engine/NativeCommandParameterBinderController.cs) | `NativeCommandParameterBinderController` | `BindCommandLineParameters()` — Pass-through native command binding |
 | [`engine/MinishellParameterBinderController.cs`](../../src/System.Management.Automation/engine/MinishellParameterBinderController.cs) | `MinishellParameterBinderController` | Extends native binding for `pwsh -Command` / `pwsh -File`; inserts `-InputFormat`/`-OutputFormat` |
-| [`engine/ParameterBinderBase.cs`](../../src/System.Management.Automation/engine/ParameterBinderBase.cs) | `ParameterBinderBase` | `CoerceValidateAndBind()`, abstract `BindParameter()` — Tier 3 abstract base with inner-pipeline implementation |
-| [`engine/ReflectionParameterBinder.cs`](../../src/System.Management.Automation/engine/ReflectionParameterBinder.cs) | `ReflectionParameterBinder` | `BindParameter()`, `StoreParameterValue()` — Writes CLR properties via compiled expression delegates |
-| [`engine/scriptparameterbinder.cs`](../../src/System.Management.Automation/engine/scriptparameterbinder.cs) | `ScriptParameterBinder` | `BindParameter()` — Writes `SessionStateScope` variables for scripts/advanced functions |
-| [`engine/PseudoParameterBinder.cs`](../../src/System.Management.Automation/engine/PseudoParameterBinder.cs) | `RuntimeDefinedParameterBinder` | `BindParameter()` — Writes `RuntimeDefinedParameterDictionary` entries for dynamic parameters |
-| [`engine/NativeCommandParameterBinder.cs`](../../src/System.Management.Automation/engine/NativeCommandParameterBinder.cs) | `NativeCommandParameterBinder` | `BindParameter()`, `AppendArgument()` — Builds argument string for native executables |
+| [`engine/ParameterBinderBase.cs`](../../src/System.Management.Automation/engine/ParameterBinderBase.cs) | `ParameterBinderBase` | `CoerceValidateAndBind()`, abstract `StoreParameterValue()` — Tier 3 abstract base with inner-pipeline implementation |
+| [`engine/ReflectionParameterBinder.cs`](../../src/System.Management.Automation/engine/ReflectionParameterBinder.cs) | `ReflectionParameterBinder` | `StoreParameterValue()` — Writes CLR properties via compiled expression delegates |
+| [`engine/scriptparameterbinder.cs`](../../src/System.Management.Automation/engine/scriptparameterbinder.cs) | `ScriptParameterBinder` | `StoreParameterValue()` — Writes `SessionStateScope` variables for scripts/advanced functions |
+| [`engine/PseudoParameterBinder.cs`](../../src/System.Management.Automation/engine/PseudoParameterBinder.cs) | `RuntimeDefinedParameterBinder` | `StoreParameterValue()` — Writes `RuntimeDefinedParameterDictionary` entries for dynamic parameters |
+| [`engine/NativeCommandParameterBinder.cs`](../../src/System.Management.Automation/engine/NativeCommandParameterBinder.cs) | `NativeCommandParameterBinder` | `BindParameters()`, `StoreParameterValue()`, `AppendOneNativeArgument()` (private) — Builds argument string for native executables |
 | [`engine/ParameterSetResolver.cs`](../../src/System.Management.Automation/engine/ParameterSetResolver.cs) | `ParameterSetResolver` | `ValidateParameterSets()`, `VerifyParameterSetSelected()`, `FilterParameterSetsTakingNoPipelineInput()`, `PrePipelineProcessingParameterSetFlags` — Bitmask set management and disambiguation |
 | [`engine/PipelineParameterBinder.cs`](../../src/System.Management.Automation/engine/PipelineParameterBinder.cs) | `PipelineParameterBinder` | `BindPipelineParameters()` — 4-phase pipeline binding state machine |
 | [`engine/DelayBindScriptBlockHandler.cs`](../../src/System.Management.Automation/engine/DelayBindScriptBlockHandler.cs) | `DelayBindScriptBlockHandler` | `InvokeAndBind()` — Deferred ScriptBlock evaluation per pipeline object |
-| [`engine/DefaultParameterValueBinder.cs`](../../src/System.Management.Automation/engine/DefaultParameterValueBinder.cs) | `DefaultParameterValueBinder` | `GetDefaultParameterValuePairs()`, `BindDefaultParameterValues()` — `$PSDefaultParameterValues` lookup and injection |
-| [`engine/DefaultValueManager.cs`](../../src/System.Management.Automation/engine/DefaultValueManager.cs) | `DefaultValueManager` | `SaveDefaultParameterValues()`, `RestoreDefaultParameterValues()` — Snapshots and restores pipeline parameter defaults per iteration |
+| [`engine/DefaultParameterValueBinder.cs`](../../src/System.Management.Automation/engine/DefaultParameterValueBinder.cs) | `DefaultParameterValueBinder` | `GetDefaultParameterValuePairs()`, `ApplyDefaultParameterBinding()`, `BindDefaultParameters()` — `$PSDefaultParameterValues` lookup and injection |
+| [`engine/DefaultValueManager.cs`](../../src/System.Management.Automation/engine/DefaultValueManager.cs) | `DefaultValueManager` | `SaveScriptParameterValue()`, `Backup()`, `Restore()` — Snapshots and restores pipeline parameter defaults per iteration |
 | [`engine/DynamicParameterHandler.cs`](../../src/System.Management.Automation/engine/DynamicParameterHandler.cs) | `DynamicParameterHandler` | `Handle()` — Calls `GetDynamicParameters()`, merges metadata, creates sub-binder, re-binds |
 | [`engine/MandatoryParameterPrompter.cs`](../../src/System.Management.Automation/engine/MandatoryParameterPrompter.cs) | `MandatoryParameterPrompter` | `HandleUnboundMandatoryParameters()` — Interactive prompt or exception for missing mandatory parameters |
 | [`engine/ParameterTypeCoercer.cs`](../../src/System.Management.Automation/engine/ParameterTypeCoercer.cs) | `ParameterTypeCoercer` | `CoerceTypeAsNeeded()` — Collection encoding, `LanguagePrimitives.ConvertTo()`, null and bool/switch special cases |
@@ -806,6 +808,6 @@ All files are in `src/System.Management.Automation/engine/` unless noted otherwi
 | [`engine/PositionalCommandParameter.cs`](../../src/System.Management.Automation/engine/PositionalCommandParameter.cs) | `PositionalCommandParameter` | Wrapper used by the positional-parameter sort dictionary during `BindPositionalParameters()` |
 | [`engine/UserFeedbackParameters.cs`](../../src/System.Management.Automation/engine/UserFeedbackParameters.cs) | `UserFeedbackParameters` | Visual Studio friendly feedback parameter definitions overlapping with ShouldProcess parameters |
 | [`engine/NativeCommand.cs`](../../src/System.Management.Automation/engine/NativeCommand.cs) | `NativeCommand` | Helpers for native command execution shared by `NativeCommandProcessor` |
-| [`engine/ScriptCommand.cs`](../../src/System.Management.Automation/engine/ScriptCommand.cs) | `ScriptCommand` | Command wrapper for script blocks used by `ScriptCommandProcessor` |
+| [`engine/ScriptCommand.cs`](../../src/System.Management.Automation/engine/ScriptCommand.cs) | `ScriptCommand` | Command wrapper for script blocks used by `DlrScriptCommandProcessor` |
 | [`engine/ParameterInfo.cs`](../../src/System.Management.Automation/engine/ParameterInfo.cs) | `ParameterMetadata`, `ParameterSetMetadata` | Public reflection API over compiled parameter metadata; used by `Get-Command -Syntax` |
 | [`engine/ParameterSetInfo.cs`](../../src/System.Management.Automation/engine/ParameterSetInfo.cs) | `ParameterSetInfo` | Public reflection API representing a parameter set; exposed via `CommandInfo.ParameterSets` |
