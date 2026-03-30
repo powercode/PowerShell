@@ -165,6 +165,13 @@ namespace System.Management.Automation
         {
             int writeIndex = 0;
 
+            // Clear any stale resolved-parameter cache from a previous reparse pass
+            // (e.g. when called a second time after dynamic parameters are added).
+            for (int i = 0; i < UnboundArguments.Count; i++)
+            {
+                UnboundArguments[i].ResolvedParameter = null;
+            }
+
             for (int index = 0; index < UnboundArguments.Count; ++index)
             {
                 CommandParameterInternal argument = UnboundArguments[index];
@@ -192,6 +199,9 @@ namespace System.Management.Automation
                     UnboundArguments[writeIndex++] = argument;
                     continue;
                 }
+
+                // Cache the resolved parameter so BindNamedParameters can skip a second lookup.
+                argument.ResolvedParameter = matchingParameter;
 
                 // Now that we know we have a single match for the parameter name,
                 // see if we can figure out what the argument value for the parameter is.
@@ -589,8 +599,10 @@ namespace System.Management.Automation
 
                 // We don't want to throw an exception yet because the parameter might be a positional argument,
                 // or in case of a cmdlet or an advanced function, it might match up to a dynamic parameter.
+                // Use the resolved parameter cached by ReparseUnboundArguments when available.
                 MergedCompiledCommandParameter parameter =
-                    BindableParameters.GetMatchingParameter(
+                    argument.ResolvedParameter
+                    ?? BindableParameters.GetMatchingParameter(
                         argument.ParameterName,
                         throwOnParameterNotFound: false,
                         tryExactMatching: true,
