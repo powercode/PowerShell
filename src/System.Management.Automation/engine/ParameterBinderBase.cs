@@ -1014,7 +1014,7 @@ namespace System.Management.Automation
 
         internal HashSet<string> CopyBoundPositionalParameters()
         {
-            HashSet<string> result = new(StringComparer.CurrentCultureIgnoreCase);
+            HashSet<string> result = new(_dictionary.Count, StringComparer.CurrentCultureIgnoreCase);
             foreach (string item in _dictionary.BoundPositionally)
             {
                 result.Add(item);
