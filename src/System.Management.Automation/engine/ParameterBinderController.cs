@@ -759,48 +759,39 @@ namespace System.Management.Automation
                     break;
                 }
 
-                // Bind first to defaultParameterSet without type coercion, then to
-                // other sets without type coercion, then to the defaultParameterSet with
-                // type coercion and finally to the other sets with type coercion.
+                // When only one parameter set is active and it equals the default set, passes 1 & 3
+                // (default-set, no-coerce and default-set, coerce) are identical to passes 2 & 4.
+                // Skip passes 1 and 3 to collapse the 4-pass loop to 2 passes for the common case.
+                bool skipDefaultSetPreference = defaultParameterSet == 0
+                    || (validParameterSets & defaultParameterSet) == 0
+                    || validParameterSets == defaultParameterSet;
 
                 bool aParameterWasBound = false;
-                if (defaultParameterSet != 0 && (validParameterSets & defaultParameterSet) != 0)
+                if (!skipDefaultSetPreference)
                 {
-                    // Favor the default parameter set.
-                    // First try without type coercion
-
+                    // Pass 1: default set, no coercion
                     aParameterWasBound =
                         BindPositionalParametersInSet(defaultParameterSet, nextPositionalParameters, argument, ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
                 }
 
                 if (!aParameterWasBound)
                 {
-                    // Try the non-default parameter sets
-                    // without type coercion.
-
+                    // Pass 2: all valid sets, no coercion
                     aParameterWasBound =
                         BindPositionalParametersInSet(validParameterSets, nextPositionalParameters, argument, ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
                 }
 
-                if (!aParameterWasBound)
+                if (!aParameterWasBound && !skipDefaultSetPreference)
                 {
-                    // Now try the default parameter set with type coercion
-                    if (defaultParameterSet != 0 && (validParameterSets & defaultParameterSet) != 0)
-                    {
-                        // Favor the default parameter set.
-                        // First try without type coercion
-
-                        aParameterWasBound =
-                            BindPositionalParametersInSet(defaultParameterSet, nextPositionalParameters, argument, 
-                                ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
-                    }
+                    // Pass 3: default set, with coercion
+                    aParameterWasBound =
+                        BindPositionalParametersInSet(defaultParameterSet, nextPositionalParameters, argument,
+                            ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
                 }
 
                 if (!aParameterWasBound)
                 {
-                    // Try the non-default parameter sets
-                    // with type coercion.
-
+                    // Pass 4: all valid sets, with coercion
                     aParameterWasBound =
                         BindPositionalParametersInSet(validParameterSets, nextPositionalParameters, argument,
                             ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
