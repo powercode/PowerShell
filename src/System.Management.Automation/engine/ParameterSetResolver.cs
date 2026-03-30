@@ -373,11 +373,9 @@ internal sealed class ParameterSetResolver
         return false;
     }
 
-    internal Collection<MergedCompiledCommandParameter> GetMissingMandatoryParameters(
-        int validParameterSetCount,
-        bool isPipelineInputExpected)
+    internal Collection<MergedCompiledCommandParameter> GetMissingMandatoryParameters(int validParameterSetCount, bool isPipelineInputExpected)
     {
-        Collection<MergedCompiledCommandParameter> result = new Collection<MergedCompiledCommandParameter>();
+        Collection<MergedCompiledCommandParameter> result = new();
 
         uint defaultParameterSet = _commandMetadata.DefaultParameterSetFlag;
         uint commandMandatorySets = 0;
@@ -405,7 +403,7 @@ internal sealed class ParameterSetResolver
                     availableParameterSetFlags = uint.MaxValue;
                 }
 
-                commandMandatorySets = (CurrentParameterSetFlag & availableParameterSetFlags);
+                commandMandatorySets = CurrentParameterSetFlag & availableParameterSetFlags;
             }
 
             if (validParameterSetCount > 1 &&

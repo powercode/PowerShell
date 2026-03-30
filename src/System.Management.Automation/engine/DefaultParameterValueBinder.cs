@@ -181,18 +181,9 @@ internal sealed class DefaultParameterValueBinder
                 }
 
                 CommandParameterInternal bindableArgument =
-                    CommandParameterInternal.CreateParameterWithArgument(
-                        parameterAst: null,
-                        parameterName,
-                        $"-{parameterName}:",
-                        argumentAst: null,
-                        argumentValue,
-                        false);
+                    CommandParameterInternal.CreateParameterWithArgument(parameterAst: null, parameterName, $"-{parameterName}:", argumentAst: null, argumentValue, false);
 
-                bool bindResult = _bindingContext.DispatchBindToSubBinder(
-                    validParameterSetFlag,
-                    bindableArgument,
-                    parameter,
+                bool bindResult = _bindingContext.DispatchBindToSubBinder(validParameterSetFlag, bindableArgument, parameter,
                     ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock);
 
                 if (bindResult && !ret)
