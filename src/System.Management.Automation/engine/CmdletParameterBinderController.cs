@@ -124,7 +124,7 @@ namespace System.Management.Automation
         /// <remarks>
         /// The command-line binding orchestration executes these high-level phases in order:
         /// <list type="number">
-        ///   <item><description>Run non-validating command-line binding (<see cref="BindCommandLineParametersNoValidation(Collection{CommandParameterInternal})"/>).</description></item>
+        ///   <item><description>Run non-validating command-line binding (<see cref="BindCommandLineParametersNoValidation(List{CommandParameterInternal})"/>).</description></item>
         ///   <item><description>Determine whether pipeline input is expected for this invocation.</description></item>
         ///   <item><description>Validate and narrow candidate parameter sets for strict execution mode.</description></item>
         ///   <item><description>Re-apply default parameter binding for mandatory-check scenarios when a single set is selected.</description></item>
@@ -146,7 +146,7 @@ namespace System.Management.Automation
         /// <exception cref="MetadataException">
         /// If there is an error generating the metadata for dynamic parameters.
         /// </exception>
-        internal void BindCommandLineParameters(Collection<CommandParameterInternal> arguments)
+        internal void BindCommandLineParameters(List<CommandParameterInternal> arguments)
         {
             s_tracer.WriteLine("Argument count: {0}", arguments.Count);
 
@@ -276,7 +276,7 @@ namespace System.Management.Automation
         ///   <item><description>Verify all command-line arguments were consumed.</description></item>
         /// </list>
         /// </remarks>
-        internal void BindCommandLineParametersNoValidation(Collection<CommandParameterInternal> arguments)
+        internal void BindCommandLineParametersNoValidation(List<CommandParameterInternal> arguments)
         {
             PrepareForBinding(arguments);
 
@@ -301,7 +301,7 @@ namespace System.Management.Automation
 
         // Initializes binding state: prepares any script cmdlet, loads command-line tokens into
         // UnboundArguments, parses $PSDefaultParameterValues, and re-pairs names with values.
-        private void PrepareForBinding(Collection<CommandParameterInternal> arguments)
+        private void PrepareForBinding(List<CommandParameterInternal> arguments)
         {
             (Command as PSScriptCmdlet)?.PrepareForBinding(CommandLineParameters);
 
@@ -907,7 +907,7 @@ namespace System.Management.Automation
         /// <returns>
         /// True if there are no unbound mandatory parameters. False if there are unbound mandatory parameters.
         /// </returns>
-        internal bool HandleUnboundMandatoryParameters(out Collection<MergedCompiledCommandParameter> missingMandatoryParameters)
+        internal bool HandleUnboundMandatoryParameters(out List<MergedCompiledCommandParameter> missingMandatoryParameters)
             => _mandatoryParameterPrompter.HandleUnboundMandatoryParameters(out missingMandatoryParameters);
 
         /// <summary>
@@ -1056,7 +1056,7 @@ namespace System.Management.Automation
 
         Dictionary<string, MergedCompiledCommandParameter> IDefaultParameterBindingContext.BoundParameters => BoundParameters;
 
-        Collection<string> IDefaultParameterBindingContext.BoundDefaultParameters => BoundDefaultParameters;
+        List<string> IDefaultParameterBindingContext.BoundDefaultParameters => BoundDefaultParameters;
 
         HashSet<string> IDefaultParameterBindingContext.CopyBoundPositionalParameters()
             => DefaultParameterBinder.CommandLineParameters.CopyBoundPositionalParameters();
@@ -1094,7 +1094,7 @@ namespace System.Management.Automation
 
         IList<MergedCompiledCommandParameter> IPipelineParameterBindingContext.UnboundParameters => UnboundParameters;
 
-        Collection<MergedCompiledCommandParameter> IPipelineParameterBindingContext.ParametersBoundThroughPipelineInput
+        List<MergedCompiledCommandParameter> IPipelineParameterBindingContext.ParametersBoundThroughPipelineInput
             => ParametersBoundThroughPipelineInput;
 
         ParameterSetResolver IPipelineParameterBindingContext.ParameterSetResolver => ParameterSetResolver;
@@ -1165,7 +1165,7 @@ namespace System.Management.Automation
 
         IList<MergedCompiledCommandParameter> IDynamicParameterHandlerContext.UnboundParameters => UnboundParameters;
 
-        Collection<CommandParameterInternal> IDynamicParameterHandlerContext.UnboundArguments
+        List<CommandParameterInternal> IDynamicParameterHandlerContext.UnboundArguments
         {
             get => UnboundArguments;
             set => UnboundArguments = value;
@@ -1185,11 +1185,11 @@ namespace System.Management.Automation
 
         void IDynamicParameterHandlerContext.ReparseUnboundArguments() => ReparseUnboundArguments();
 
-        void IDynamicParameterHandlerContext.BindNamedParameters(uint parameterSetFlag, Collection<CommandParameterInternal> args)
+        void IDynamicParameterHandlerContext.BindNamedParameters(uint parameterSetFlag, List<CommandParameterInternal> args)
             => BindNamedParameters(parameterSetFlag, args);
 
         void IDynamicParameterHandlerContext.BindPositionalParameters(
-            Collection<CommandParameterInternal> args,
+            List<CommandParameterInternal> args,
             uint currentParameterSetFlag,
             uint defaultParameterSetFlag,
             out ParameterBindingException? outgoingBindingException)

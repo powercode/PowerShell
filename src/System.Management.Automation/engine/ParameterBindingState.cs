@@ -4,7 +4,6 @@
 #nullable enable
 
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
@@ -37,7 +36,7 @@ namespace System.Management.Automation
         /// <summary>
         /// Command-line arguments that have not yet been matched to a parameter.
         /// </summary>
-        internal Collection<CommandParameterInternal> UnboundArguments { get; set; } = [];
+        internal List<CommandParameterInternal> UnboundArguments { get; set; } = [];
 
         /// <summary>
         /// Arguments that have been bound, keyed by parameter name (OrdinalIgnoreCase).
@@ -48,7 +47,7 @@ namespace System.Management.Automation
         /// <summary>
         /// Names of parameters that were bound via <c>$PSDefaultParameterValues</c>.
         /// </summary>
-        internal Collection<string> BoundDefaultParameters { get; } = [];
+        internal List<string> BoundDefaultParameters { get; } = [];
 
         /// <summary>
         /// Whether default parameter binding from <c>$PSDefaultParameterValues</c> is active.
@@ -58,8 +57,7 @@ namespace System.Management.Automation
         /// <summary>
         /// Parameters that received their value from the pipeline input.
         /// </summary>
-        internal Collection<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput { get; }
-            = new Collection<MergedCompiledCommandParameter>();
+        internal List<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput { get; } = [];
 
         // ── Default-value tracking ──────────────────────────────────────────────────
 
