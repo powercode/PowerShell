@@ -100,7 +100,7 @@ namespace System.Management.Automation
         #endregion ctor
 
         /// <summary>
-        /// Returns the rented <see cref="BindingState"/> to the per-runspace pool on
+        /// Returns the rented <see cref="ParameterBindingState"/> to the per-runspace pool on
         /// <see cref="ExecutionContext"/> so it can be reused by the next command invocation.
         /// Called from <see cref="CommandProcessor"/> during disposal.
         /// </summary>
@@ -669,7 +669,7 @@ namespace System.Management.Automation
                 ParameterSetResolver.NarrowByParameterSetFlags(parameter.Parameter.ParameterSetFlags);
             }
 
-            BindingState.SwapRemove(UnboundParameters, parameter);
+            ParameterBindingState.SwapRemove(UnboundParameters, parameter);
 
             BoundParameters[parameter.Parameter.Name] = parameter;
             BoundArguments[parameter.Parameter.Name] = argument;
@@ -765,7 +765,7 @@ namespace System.Management.Automation
                 ParameterSetResolver.NarrowByParameterSetFlags(parameter.Parameter.ParameterSetFlags);
             }
 
-            BindingState.SwapRemove(UnboundParameters, parameter);
+            ParameterBindingState.SwapRemove(UnboundParameters, parameter);
 
             BoundParameters.TryAdd(parameter.Parameter.Name, parameter);
 
@@ -1009,7 +1009,7 @@ namespace System.Management.Automation
 
         /// <summary>
         /// Keep the obsolete parameter warnings generated from parameter binding.
-        /// Routes through <see cref="BindingState"/> for pooled allocation.
+        /// Routes through <see cref="ParameterBindingState"/> for pooled allocation.
         /// </summary>
         internal List<WarningRecord>? ObsoleteParameterWarningList => State.ObsoleteParameterWarningList;
 

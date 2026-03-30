@@ -13,10 +13,10 @@ namespace System.Management.Automation
     /// <summary>
     /// Consolidates the per-invocation mutable binding state that was previously scattered
     /// across <see cref="ParameterBinderController"/> and its SRP components.
-    /// A single <see cref="BindingState"/> instance travels with each command invocation.
+    /// A single <see cref="ParameterBindingState"/> instance travels with each command invocation.
     /// </summary>
     [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
-    internal sealed class BindingState
+    internal sealed class ParameterBindingState
     {
         /// <summary>
         /// The name of the command being bound. Set by the controller at initialization.

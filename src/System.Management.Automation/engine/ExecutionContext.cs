@@ -661,30 +661,30 @@ namespace System.Management.Automation
         // Single-entry per-runspace cache for BindingState reuse.
         // Runspaces execute a single pipeline at a time, so one cached instance is sufficient.
         // Interlocked.Exchange provides a thread-safety margin for RunspacePool scenarios.
-        private BindingState _cachedBindingState;
+        private ParameterBindingState _cachedParameterBindingState;
 
         /// <summary>
-        /// Rents a <see cref="BindingState"/> from the per-runspace pool, or allocates a new one.
+        /// Rents a <see cref="ParameterBindingState"/> from the per-runspace pool, or allocates a new one.
         /// The returned instance is fully reset and ready for a new command invocation.
         /// </summary>
-        internal BindingState RentBindingState(
+        internal ParameterBindingState RentBindingState(
             IReadOnlyList<MergedCompiledCommandParameter> allParameters,
             string commandName)
         {
-            BindingState state = Interlocked.Exchange(ref _cachedBindingState, null) ?? new BindingState();
+            ParameterBindingState state = Interlocked.Exchange(ref _cachedParameterBindingState, null) ?? new ParameterBindingState();
             state.Reset(allParameters, commandName);
             return state;
         }
 
         /// <summary>
-        /// Returns a <see cref="BindingState"/> to the per-runspace pool for reuse.
+        /// Returns a <see cref="ParameterBindingState"/> to the per-runspace pool for reuse.
         /// Clears all references so cached objects are not kept alive between invocations.
         /// </summary>
-        internal void ReturnBindingState(BindingState state)
+        internal void ReturnBindingState(ParameterBindingState state)
         {
             // Reset with empty parameters to release all command-specific object references.
             state.Reset(System.Array.Empty<MergedCompiledCommandParameter>(), null);
-            Interlocked.Exchange(ref _cachedBindingState, state);
+            Interlocked.Exchange(ref _cachedParameterBindingState, state);
         }
 
         #endregion BindingState pool
