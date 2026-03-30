@@ -720,7 +720,8 @@ namespace System.Management.Automation
             try
             {
                 positionalParameterDictionary =
-                    EvaluateUnboundPositionalParameters(UnboundParameters, ParameterSetResolver.CurrentParameterSetFlag);
+                    State.GetCachedPositionalDictionary(UnboundParameters.Count, ParameterSetResolver.CurrentParameterSetFlag)
+                    ?? EvaluateAndCachePositionalParameters();
             }
             catch (InvalidOperationException)
             {
@@ -820,6 +821,16 @@ namespace System.Management.Automation
             {
                 unboundArguments.Add(unboundArgumentsCollection[index]);
             }
+        }
+
+        private SortedDictionary<int, Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter>>
+            EvaluateAndCachePositionalParameters()
+        {
+            var dict = EvaluateUnboundPositionalParameters(
+                UnboundParameters, ParameterSetResolver.CurrentParameterSetFlag);
+            State.SetCachedPositionalDictionary(
+                dict, UnboundParameters.Count, ParameterSetResolver.CurrentParameterSetFlag);
+            return dict;
         }
 
         /// <summary>

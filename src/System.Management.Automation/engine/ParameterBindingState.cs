@@ -115,6 +115,45 @@ namespace System.Management.Automation
         /// </summary>
         internal List<WarningRecord>? ObsoleteParameterWarningList { get; set; }
 
+        // ── Positional parameter dictionary cache ─────────────────────────────────────
+
+        /// <summary>
+        /// Cached result of <c>EvaluateUnboundPositionalParameters</c>.
+        /// Valid when <see cref="_cachedPositionalUnboundCount"/> and
+        /// <see cref="_cachedPositionalSetFlag"/> match the current binding state.
+        /// </summary>
+        private SortedDictionary<int, Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter>>? _cachedPositionalDict;
+        private int _cachedPositionalUnboundCount;
+        private uint _cachedPositionalSetFlag;
+
+        /// <summary>
+        /// Returns the cached positional dictionary if the (unboundCount, setFlag) key matches;
+        /// otherwise returns <see langword="null"/>.
+        /// </summary>
+        internal SortedDictionary<int, Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter>>?
+            GetCachedPositionalDictionary(int unboundCount, uint validParameterSetFlag)
+        {
+            if (_cachedPositionalDict != null
+                && _cachedPositionalUnboundCount == unboundCount
+                && _cachedPositionalSetFlag == validParameterSetFlag)
+            {
+                return _cachedPositionalDict;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Stores the computed positional dictionary together with the key used to validate it.
+        /// </summary>
+        internal void SetCachedPositionalDictionary(
+            SortedDictionary<int, Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter>> dict,
+            int unboundCount, uint validParameterSetFlag)
+        {
+            _cachedPositionalDict = dict;
+            _cachedPositionalUnboundCount = unboundCount;
+            _cachedPositionalSetFlag = validParameterSetFlag;
+        }
+
         // ── Pipeline CPI pool ─────────────────────────────────────────────────────────
 
         /// <summary>
@@ -216,6 +255,11 @@ namespace System.Management.Automation
             BoundObsoleteParameterNames = null;
             ObsoleteParameterWarningList = null;
 
+            // Positional parameter dictionary cache
+            _cachedPositionalDict = null;
+            _cachedPositionalUnboundCount = 0;
+            _cachedPositionalSetFlag = 0;
+
             // Pipeline CPI pool — drop all refs so pooled CPIs don't outlive this invocation
             _cpiPoolCount = 0;
             _cpiPool = null;
@@ -243,6 +287,7 @@ namespace System.Management.Automation
             Debug.Assert(UseDefaultParameterBinding, $"[{caller}] UseDefaultParameterBinding not reset to true after Reset");
             Debug.Assert(BoundObsoleteParameterNames == null, $"[{caller}] BoundObsoleteParameterNames not clean after Reset");
             Debug.Assert(ObsoleteParameterWarningList == null, $"[{caller}] ObsoleteParameterWarningList not clean after Reset");
+            Debug.Assert(_cachedPositionalDict == null, $"[{caller}] _cachedPositionalDict not clean after Reset");
         }
 
         // ── O(1) list-removal helpers ─────────────────────────────────────────────────
