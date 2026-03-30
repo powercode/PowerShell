@@ -82,7 +82,7 @@ namespace System.Management.Automation
         /// Consolidated per-invocation mutable binding state. All state fields
         /// previously declared individually are now stored here to enable pooling.
         /// </summary>
-        internal BindingState State { get; set; } = new();
+        internal ParameterBindingState State { get; set; } = new();
 
         /// <summary>
         /// A list of the unbound parameters for the command.
@@ -533,7 +533,7 @@ namespace System.Management.Automation
 
             if (result && ((flags & ParameterBindingFlags.IsDefaultValue) == 0))
             {
-                BindingState.SwapRemove(UnboundParameters, parameter);
+                ParameterBindingState.SwapRemove(UnboundParameters, parameter);
                 BoundParameters.Add(parameter.Parameter.Name, parameter);
             }
 
