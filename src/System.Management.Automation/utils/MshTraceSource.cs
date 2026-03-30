@@ -3,8 +3,10 @@
 
 #define TRACE
 
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Management.Automation.Internal;
+using System.Runtime.CompilerServices;
 
 namespace System.Management.Automation
 {
@@ -224,6 +226,26 @@ namespace System.Management.Automation
             var e = new PSArgumentNullException(paramName, message);
 
             return e;
+        }
+        
+        /// <summary>Throws an exception if <paramref name="argument"/> is null or empty.</summary>
+        /// <param name="argument">The string argument to validate as non-null and non-empty.</param>
+        /// <param name="paramName">The name of the parameter with which <paramref name="argument"/> corresponds.</param>
+        /// <exception cref="PSArgumentNullException"><paramref name="argument"/> is null.</exception>
+        /// <exception cref="ArgumentException"><paramref name="argument"/> is empty.</exception>
+        public static void ThrowIfNull([NotNull] object argument, [CallerArgumentExpression(nameof(argument))] string paramName = null)
+        {
+            if (argument == null)
+            {
+                ThrowNullException(paramName);   
+            }
+        }
+        
+        [DoesNotReturn]
+        private static void ThrowNullException(string paramName)
+        {
+            ArgumentNullException.ThrowIfNull(paramName);
+            throw NewArgumentNullException(paramName);
         }
 
         /// <summary>

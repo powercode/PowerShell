@@ -645,11 +645,10 @@ internal sealed class PipelineParameterBinder
     {
         bool bindResult = false;
 
-        ParameterBinderBase.bindingTracer.WriteLine(
-            ((flags & ParameterBindingFlags.ShouldCoerceType) != 0) ?
-                "Parameter [{0}] PIPELINE INPUT ValueFromPipelineByPropertyName WITH COERCION" :
-                "Parameter [{0}] PIPELINE INPUT ValueFromPipelineByPropertyName NO COERCION",
-            parameter.Parameter.Name);
+        var messageFormat = ((flags & ParameterBindingFlags.ShouldCoerceType) != 0) ?
+            "Parameter [{0}] PIPELINE INPUT ValueFromPipelineByPropertyName WITH COERCION" :
+            "Parameter [{0}] PIPELINE INPUT ValueFromPipelineByPropertyName NO COERCION";
+        ParameterBinderBase.bindingTracer.WriteLine(messageFormat, parameter.Parameter.Name);
 
         PSMemberInfo member = inputToOperateOn.Properties[parameter.Parameter.Name];
 
