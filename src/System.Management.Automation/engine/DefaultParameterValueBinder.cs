@@ -230,9 +230,9 @@ internal sealed class DefaultParameterValueBinder
     /// </summary>
     private PSObject WrapBindingState()
     {
-        HashSet<string> boundParameterNames = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> boundParameterNames = new(_bindingContext.BoundParameters.Count, StringComparer.OrdinalIgnoreCase);
         HashSet<string> boundPositionalParameterNames = _bindingContext.CopyBoundPositionalParameters();
-        HashSet<string> boundDefaultParameterNames = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> boundDefaultParameterNames = new(_bindingContext.BoundParameters.Count, StringComparer.OrdinalIgnoreCase);
 
         foreach (string paramName in _bindingContext.BoundParameters.Keys)
         {
@@ -341,7 +341,7 @@ internal sealed class DefaultParameterValueBinder
             return null;
         }
 
-        var availablePairs = new Dictionary<MergedCompiledCommandParameter, object>();
+        Dictionary<MergedCompiledCommandParameter, object> availablePairs = new(DefaultParameterValues.Count);
 
         if (needToGetAlias && DefaultParameterValues.Count > 0)
         {

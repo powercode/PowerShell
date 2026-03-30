@@ -148,7 +148,7 @@ namespace System.Management.Automation
         /// </remarks>
         private void HandleRemainingArguments(Collection<CommandParameterInternal> arguments)
         {
-            List<object> args = new List<object>();
+            List<object> args = new(arguments.Count);
 
             foreach (CommandParameterInternal parameter in arguments)
             {
