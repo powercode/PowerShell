@@ -35,7 +35,6 @@ internal interface IParameterBindingContext
 
 /// <summary>
 /// Encapsulates parameter-set state management, validation, and resolution.
-/// Extracted from CmdletParameterBinderController to satisfy SRP.
 /// </summary>
 [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
 internal sealed class ParameterSetResolver

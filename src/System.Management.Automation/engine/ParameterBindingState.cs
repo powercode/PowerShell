@@ -11,8 +11,7 @@ using System.Runtime.CompilerServices;
 namespace System.Management.Automation
 {
     /// <summary>
-    /// Consolidates the per-invocation mutable binding state that was previously scattered
-    /// across <see cref="ParameterBinderController"/> and its SRP components.
+    /// Consolidates the per-invocation mutable binding state for the parameter binding subsystem.
     /// A single <see cref="ParameterBindingState"/> instance travels with each command invocation.
     /// </summary>
     [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
@@ -62,67 +61,59 @@ namespace System.Management.Automation
         internal Collection<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput { get; }
             = new Collection<MergedCompiledCommandParameter>();
 
-        // ── Task 3.1: DefaultValueManager state ──────────────────────────────────────
+        // ── Default-value tracking ──────────────────────────────────────────────────
 
         /// <summary>
         /// Saved default values for restoration after each pipeline-object is processed,
         /// keyed by parameter name (OrdinalIgnoreCase).
-        /// Previously stored as a field on <see cref="DefaultValueManager"/>.
         /// </summary>
         internal Dictionary<string, CommandParameterInternal> DefaultParameterValues { get; }
             = new Dictionary<string, CommandParameterInternal>(StringComparer.OrdinalIgnoreCase);
 
-        // ── Task 3.2: DelayBindScriptBlockHandler state ───────────────────────────────
+        // ── Delay-bind ScriptBlock state ──────────────────────────────────────────────
 
         /// <summary>
         /// ScriptBlock arguments deferred for per-pipeline-object evaluation, keyed by parameter.
-        /// Previously stored as a field on <see cref="DelayBindScriptBlockHandler"/>.
         /// </summary>
         internal Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument> DelayBindScriptBlocks { get; }
             = new Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument>();
 
-        // ── Task 3.3: DefaultParameterValueBinder state ───────────────────────────────
+        // ── $PSDefaultParameterValues state ──────────────────────────────────────────
 
         /// <summary>
         /// Aliases of the current cmdlet, cached per invocation for <c>$PSDefaultParameterValues</c> matching.
-        /// Previously stored as <c>_aliasList</c> on <see cref="DefaultParameterValueBinder"/>.
         /// </summary>
         internal List<string>? DefaultParameterAliasList { get; set; }
 
         /// <summary>
         /// Keys for which a <c>$PSDefaultParameterValues</c> warning has already been emitted.
         /// Prevents duplicate warnings within a single invocation.
-        /// Previously stored as <c>_warningSet</c> on <see cref="DefaultParameterValueBinder"/>.
         /// </summary>
         internal HashSet<string> DefaultParameterWarningSet { get; }
             = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// The last computed set of qualified default parameter value pairs.
-        /// Previously stored as <c>_allDefaultParameterValuePairs</c> on <see cref="DefaultParameterValueBinder"/>.
         /// </summary>
         internal Dictionary<MergedCompiledCommandParameter, object>? AllDefaultParameterValuePairs { get; set; }
 
         /// <summary>
         /// Whether <c>$PSDefaultParameterValues</c> binding should be attempted for this invocation.
         /// Set to <see langword="false"/> when the dictionary has <c>Disabled=true</c>.
-        /// Previously stored as <c>_useDefaultParameterBinding</c> on <see cref="DefaultParameterValueBinder"/>.
         /// </summary>
         internal bool UseDefaultParameterBinding { get; set; } = true;
 
-        // ── Task 3.4: CmdletParameterBinderController obsolete-tracking state ─────────
+        // ── Obsolete-parameter tracking ────────────────────────────────────────────
 
         /// <summary>
         /// Names of parameters for which an obsolete warning has already been generated.
         /// Lazy-allocated; <see langword="null"/> when no obsolete parameters have been bound.
-        /// Previously stored as <c>_boundObsoleteParameterNames</c> on <see cref="CmdletParameterBinderController"/>.
         /// </summary>
         internal HashSet<string>? BoundObsoleteParameterNames { get; set; }
 
         /// <summary>
         /// Accumulated obsolete-parameter warning records, flushed in <c>DoBegin</c>.
         /// Lazy-allocated; <see langword="null"/> when no obsolete parameters have been bound.
-        /// Previously stored as <c>ObsoleteParameterWarningList</c> on <see cref="CmdletParameterBinderController"/>.
         /// </summary>
         internal List<WarningRecord>? ObsoleteParameterWarningList { get; set; }
 
@@ -211,19 +202,19 @@ namespace System.Management.Automation
             BoundDefaultParameters.Clear();
             DefaultParameterBindingInUse = false;
 
-            // DefaultValueManager state (Task 3.1)
+            // Default-value tracking
             DefaultParameterValues.Clear();
 
-            // DelayBindScriptBlockHandler state (Task 3.2)
+            // Delay-bind ScriptBlock state
             DelayBindScriptBlocks.Clear();
 
-            // DefaultParameterValueBinder state (Task 3.3)
+            // $PSDefaultParameterValues state
             DefaultParameterAliasList = null;
             DefaultParameterWarningSet.Clear();
             AllDefaultParameterValuePairs = null;
             UseDefaultParameterBinding = true;
 
-            // Obsolete-tracking state (Task 3.4)
+            // Obsolete-parameter tracking
             BoundObsoleteParameterNames = null;
             ObsoleteParameterWarningList = null;
 

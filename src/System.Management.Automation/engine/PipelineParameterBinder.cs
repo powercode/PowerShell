@@ -36,19 +36,16 @@ internal interface IPipelineParameterBindingContext
 
     /// <summary>
     /// Invokes any delay-bind ScriptBlocks and binds the evaluated result.
-    /// Will be delegated to DelayBindScriptBlockHandler after Task D3.
     /// </summary>
     bool InvokeAndBindDelayBindScriptBlock(PSObject inputToOperateOn, out bool thereWasSomethingToBind);
 
     /// <summary>
     /// Backs up the default value of <paramref name="parameter"/> before pipeline binding overwrites it.
-    /// Will be delegated to DefaultValueManager after Task D5.
     /// </summary>
     void BackupDefaultParameter(MergedCompiledCommandParameter parameter);
 
     /// <summary>
     /// Restores the default values of <paramref name="parameters"/> that were overwritten during pipeline binding.
-    /// Will be delegated to DefaultValueManager after Task D5.
     /// </summary>
     void RestoreDefaultParameterValues(IEnumerable<MergedCompiledCommandParameter> parameters);
 
@@ -74,7 +71,6 @@ internal interface IPipelineParameterBindingContext
 
 /// <summary>
 /// Encapsulates the pipeline-input parameter binding state-machine.
-/// Extracted from <see cref="CmdletParameterBinderController"/> to satisfy SRP.
 /// </summary>
 [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
 internal sealed class PipelineParameterBinder
