@@ -8,6 +8,8 @@ using System.Management.Automation.Language;
 using System.Management.Automation.Runspaces;
 using System.Security;
 
+using Microsoft.PowerShell.Commands.Internal.Format;
+
 using Dbg = System.Management.Automation.Diagnostics;
 
 namespace System.Management.Automation.Internal.Host
@@ -80,6 +82,9 @@ namespace System.Management.Automation.Internal.Host
         {
             get { return _externalUI != null && _externalUI.SupportsVirtualTerminal; }
         }
+
+        internal override TerminalImageOutput TerminalImageOutput
+            => _externalUI?.TerminalImageOutput ?? TerminalImageOutput.Unavailable;
 
         /// <summary>
         /// See base class.

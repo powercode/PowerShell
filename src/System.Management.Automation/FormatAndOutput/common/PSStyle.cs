@@ -4,6 +4,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Management.Automation.Internal;
+using System.Threading;
 
 namespace System.Management.Automation
 {
@@ -36,12 +37,142 @@ namespace System.Management.Automation
         Classic = 1,
     }
 
+    /// <summary>
+    /// Defines whether sixel rendering has explicit destination geometry.
+    /// </summary>
+    public enum SixelMode
+    {
+        /// <summary>Sixel rendering is disabled.</summary>
+        Disabled = 0,
+
+        /// <summary>Sixel rendering uses explicitly supplied geometry and profile assumptions.</summary>
+        Explicit = 1,
+    }
+
+    /// <summary>
+    /// Identifies a terminal contract whose sixel behavior is understood by the renderer.
+    /// </summary>
+    public enum SixelProfile
+    {
+        /// <summary>Xterm patch 411 with the documented sixel modes established by the caller.</summary>
+        XtermPatch411 = 1,
+
+        /// <summary>Windows Terminal 1.24.11911.0 with sixel support enabled.</summary>
+        WindowsTerminal124 = 2,
+    }
+
     #region PSStyle
     /// <summary>
     /// Contains configuration for how PowerShell renders text.
     /// </summary>
     public sealed class PSStyle
     {
+        /// <summary>
+        /// Owns process-wide user configuration without inferring host capability or viewport state.
+        /// </summary>
+        public sealed class SixelConfiguration
+        {
+            /// <summary>
+            /// Captures all user-controlled Sixel settings under one lock so hosts never observe a partially updated configuration.
+            /// </summary>
+            internal readonly struct Snapshot
+            {
+                internal Snapshot(
+                    SixelMode mode,
+                    int cellPixelWidth,
+                    int cellPixelHeight,
+                    SixelProfile? profile,
+                    long generation)
+                {
+                    Mode = mode;
+                    CellPixelWidth = cellPixelWidth;
+                    CellPixelHeight = cellPixelHeight;
+                    Profile = profile;
+                    Generation = generation;
+                }
+
+                internal SixelMode Mode { get; }
+
+                internal int CellPixelWidth { get; }
+
+                internal int CellPixelHeight { get; }
+
+                internal SixelProfile? Profile { get; }
+
+                internal long Generation { get; }
+            }
+
+            private readonly Lock _syncObject = new();
+            private SixelMode _mode;
+            private int _cellPixelWidth;
+            private int _cellPixelHeight;
+            private SixelProfile? _profile;
+            private long _generation;
+
+            /// <summary>Gets the current configuration mode.</summary>
+            public SixelMode Mode { get { lock (_syncObject) { return _mode; } } }
+
+            /// <summary>Gets the configured cell width in pixels, or zero when disabled.</summary>
+            public int CellPixelWidth { get { lock (_syncObject) { return _cellPixelWidth; } } }
+
+            /// <summary>Gets the configured cell height in pixels, or zero when disabled.</summary>
+            public int CellPixelHeight { get { lock (_syncObject) { return _cellPixelHeight; } } }
+
+            /// <summary>Gets the asserted terminal profile, or null when disabled.</summary>
+            public SixelProfile? Profile { get { lock (_syncObject) { return _profile; } } }
+
+            /// <summary>Gets the generation used by hosts to detect configuration changes.</summary>
+            public long Generation { get { lock (_syncObject) { return _generation; } } }
+
+            internal Snapshot GetSnapshot()
+            {
+                lock (_syncObject)
+                {
+                    return new Snapshot(_mode, _cellPixelWidth, _cellPixelHeight, _profile, _generation);
+                }
+            }
+
+            /// <summary>
+            /// Atomically enables explicit sixel settings after validating the complete configuration.
+            /// </summary>
+            /// <param name="cellPixelWidth">Terminal cell width in pixels.</param>
+            /// <param name="cellPixelHeight">Terminal cell height in pixels.</param>
+            /// <param name="profile">Terminal behavior asserted by the caller.</param>
+            public void Configure(int cellPixelWidth, int cellPixelHeight, SixelProfile profile)
+            {
+                ArgumentOutOfRangeException.ThrowIfNegativeOrZero(cellPixelWidth);
+                ArgumentOutOfRangeException.ThrowIfNegativeOrZero(cellPixelHeight);
+                if (!Enum.IsDefined(profile))
+                {
+                    throw new ArgumentOutOfRangeException(nameof(profile));
+                }
+
+                lock (_syncObject)
+                {
+                    _cellPixelWidth = cellPixelWidth;
+                    _cellPixelHeight = cellPixelHeight;
+                    _profile = profile;
+                    _mode = SixelMode.Explicit;
+                    _generation++;
+                }
+            }
+
+            /// <summary>
+            /// Atomically disables sixel rendering and clears destination assumptions.
+            /// </summary>
+            public void Reset()
+            {
+                lock (_syncObject)
+                {
+                    _cellPixelWidth = 0;
+                    _cellPixelHeight = 0;
+                    _profile = null;
+                    _mode = SixelMode.Disabled;
+                    _generation++;
+                }
+            }
+        }
+
         /// <summary>
         /// Contains foreground colors.
         /// </summary>
@@ -767,6 +898,11 @@ namespace System.Management.Automation
         /// </summary>
         public FileInfoFormatting FileInfo { get; }
 
+        /// <summary>
+        /// Gets explicit sixel rendering settings. Host eligibility remains independently enforced.
+        /// </summary>
+        public SixelConfiguration Sixel { get; }
+
         private static readonly PSStyle s_psstyle = new PSStyle();
 
         private PSStyle()
@@ -776,6 +912,7 @@ namespace System.Management.Automation
             Foreground = new ForegroundColor();
             Background = new BackgroundColor();
             FileInfo = new FileInfoFormatting();
+            Sixel = new SixelConfiguration();
         }
 
         private static string ValidateNoContent(string text)

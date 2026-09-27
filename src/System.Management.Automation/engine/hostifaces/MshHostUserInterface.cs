@@ -14,6 +14,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Microsoft.PowerShell.Commands.Internal.Format;
+
 namespace System.Management.Automation.Host
 {
     /// <summary>
@@ -44,6 +46,11 @@ namespace System.Management.Automation.Host
         /// Returns true for hosts that support VT100 like virtual terminals.
         /// </summary>
         public virtual bool SupportsVirtualTerminal { get { return false; } }
+
+        /// <summary>
+        /// Gets the optional output-only terminal image service without implying VT or image support.
+        /// </summary>
+        internal virtual TerminalImageOutput TerminalImageOutput => TerminalImageOutput.Unavailable;
 
         #region Line-oriented interaction
         /// <summary>

@@ -14,6 +14,8 @@ using System.Runtime.CompilerServices;
 using System.Security;
 using System.Text;
 
+using Microsoft.PowerShell.Commands.Internal.Format;
+
 using Dbg = System.Management.Automation.Diagnostics;
 #if !UNIX
 using ConsoleHandle = Microsoft.Win32.SafeHandles.SafeFileHandle;
@@ -49,6 +51,8 @@ namespace Microsoft.PowerShell
         /// </summary>
         public override bool SupportsVirtualTerminal { get; }
 
+        internal override TerminalImageOutput TerminalImageOutput => _terminalImageSession;
+
         /// <summary>
         /// Constructs an instance.
         /// </summary>
@@ -60,6 +64,7 @@ namespace Microsoft.PowerShell
 
             _parent = parent;
             _rawui = new ConsoleHostRawUserInterface(this);
+            _terminalImageSession = new TerminalImageSession(this);
             SupportsVirtualTerminal = true;
             _isInteractiveTestToolListening = false;
 
@@ -2232,6 +2237,8 @@ namespace Microsoft.PowerShell
         // used to serialize access to instance data
 
         private readonly object _instanceLock = new object();
+
+        private readonly TerminalImageSession _terminalImageSession;
 
         // If this is true, class throws on read or prompt method which require
         // access to console.

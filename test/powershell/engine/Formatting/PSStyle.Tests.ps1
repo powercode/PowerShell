@@ -93,6 +93,55 @@ Describe 'Tests for $PSStyle automatic variable' -Tag 'CI' {
         $PSStyle | Out-String | Should -Match 'AutoSizeDefaultFormatting'
     }
 
+    It '$PSStyle.Sixel is disabled by default' {
+        $PSStyle.Sixel.Mode | Should -BeExactly 'Disabled'
+        $PSStyle.Sixel.CellPixelWidth | Should -Be 0
+        $PSStyle.Sixel.CellPixelHeight | Should -Be 0
+        $PSStyle.Sixel.Profile | Should -BeNullOrEmpty
+    }
+
+    It '$PSStyle.Sixel configures and resets atomically' {
+        try {
+            $generation = $PSStyle.Sixel.Generation
+            $PSStyle.Sixel.Configure(8, 16, 'XtermPatch411')
+
+            $PSStyle.Sixel.Mode | Should -BeExactly 'Explicit'
+            $PSStyle.Sixel.CellPixelWidth | Should -Be 8
+            $PSStyle.Sixel.CellPixelHeight | Should -Be 16
+            $PSStyle.Sixel.Profile | Should -BeExactly 'XtermPatch411'
+            $PSStyle.Sixel.Generation | Should -Be ($generation + 1)
+
+            { $PSStyle.Sixel.Configure(0, 20, 'XtermPatch411') } | Should -Throw -ErrorId 'ArgumentOutOfRangeException'
+            $PSStyle.Sixel.CellPixelWidth | Should -Be 8
+            $PSStyle.Sixel.CellPixelHeight | Should -Be 16
+            $PSStyle.Sixel.Generation | Should -Be ($generation + 1)
+        }
+        finally {
+            $PSStyle.Sixel.Reset()
+        }
+
+        $PSStyle.Sixel.Mode | Should -BeExactly 'Disabled'
+        $PSStyle.Sixel.Generation | Should -Be ($generation + 2)
+    }
+
+    It '$PSStyle.Sixel accepts the Windows Terminal 1.24 profile' {
+        try {
+            $PSStyle.Sixel.Configure(8, 16, 'WindowsTerminal124')
+
+            $PSStyle.Sixel.Mode | Should -BeExactly 'Explicit'
+            $PSStyle.Sixel.Profile | Should -BeExactly 'WindowsTerminal124'
+        } finally {
+            $PSStyle.Sixel.Reset()
+        }
+    }
+
+    It 'StringDecorated removes complete sixel spans from plaintext content' {
+        $decorated = [System.Management.Automation.Internal.StringDecorated]::new("before`ePq~`e\after")
+
+        $decorated.ContentLength | Should -Be 11
+        $decorated.ToString([System.Management.Automation.OutputRendering]::PlainText) | Should -BeExactly 'beforeafter'
+    }
+
     It '$PSStyle has correct defaults for style <key>' -TestCases (Get-TestCases $styleDefaults) {
         param($key, $value)
 
@@ -507,8 +556,8 @@ Billy Bob… Senior DevOps …  13
 
     It "Word wrapping for string with escape sequences (2)" {
        $expected = @"
-`e[32;1mLongDescription : `e[0m`e[33mPowerShell`e[0m 
-                  scripting 
+`e[32;1mLongDescription : `e[0m`e[33mPowerShell`e[0m
+                  scripting
                   language
 "@
         $obj = [pscustomobject] @{ LongDescription = "`e[33mPowerShell`e[0m scripting language" }
@@ -520,7 +569,7 @@ Billy Bob… Senior DevOps …  13
 
     It "Word wrapping for string with escape sequences (3)" {
        $expected = @"
-`e[32;1mLongDescription : `e[0m`e[33mPowerShell`e[0m 
+`e[32;1mLongDescription : `e[0m`e[33mPowerShell`e[0m
                   `e[32mscripting `e[0m
                   `e[32mlanguage`e[0m
 "@
@@ -533,8 +582,8 @@ Billy Bob… Senior DevOps …  13
 
     It "Word wrapping for string with escape sequences (4)" {
        $expected = @"
-`e[32;1mLongDescription : `e[0m`e[33mPowerShell`e[0m 
-                  `e[32mscripting`e[0m 
+`e[32;1mLongDescription : `e[0m`e[33mPowerShell`e[0m
+                  `e[32mscripting`e[0m
                   language
 "@
         $obj = [pscustomobject] @{ LongDescription = "`e[33mPowerShell`e[0m `e[32mscripting`e[0m language" }

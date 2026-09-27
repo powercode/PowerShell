@@ -165,6 +165,19 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             _writeLineHelper.WriteLine(s, this.ColumnNumber);
         }
 
+        internal override TerminalImageSnapshot GetTerminalImageSnapshot()
+        {
+            CheckStopProcessing();
+            return _console.TerminalImageOutput.GetSnapshot();
+        }
+
+        internal override bool TryWriteRowLayout(RowLayout layout)
+        {
+            ArgumentNullException.ThrowIfNull(layout);
+            CheckStopProcessing();
+            return _console.TerminalImageOutput.TryWrite(layout);
+        }
+
         internal override DisplayCells DisplayCells
         {
             get

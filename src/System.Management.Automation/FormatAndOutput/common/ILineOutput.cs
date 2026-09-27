@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -256,6 +257,20 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
         /// </summary>
         /// <param name="s">The raw text to be written to the device.</param>
         internal virtual void WriteRawText(string s) => WriteLine(s);
+
+        /// <summary>
+        /// Gets an immutable image-output snapshot for the current destination.
+        /// </summary>
+        internal virtual TerminalImageSnapshot GetTerminalImageSnapshot() => default;
+
+        /// <summary>
+        /// Writes one prepared rectangular row as an atomic output transaction.
+        /// </summary>
+        internal virtual bool TryWriteRowLayout(RowLayout layout)
+        {
+            ArgumentNullException.ThrowIfNull(layout);
+            return false;
+        }
 
         internal WriteStreamType WriteStream
         {
