@@ -21,7 +21,9 @@ namespace System.Management.Automation.Internal
         {
             get
             {
-                _plaintextcontent ??= ValueStringDecorated.AnsiRegex.Replace(_text, string.Empty);
+                _plaintextcontent ??= FormattedText.MightContainImage(_text)
+                    ? FormattedText.Parse(_text).ToPlainTextString()
+                    : ValueStringDecorated.AnsiRegex.Replace(_text, string.Empty);
 
                 return _plaintextcontent;
             }
@@ -91,7 +93,9 @@ namespace System.Management.Automation.Internal
         {
             get
             {
-                _plaintextcontent ??= AnsiRegex.Replace(_text, string.Empty);
+                _plaintextcontent ??= FormattedText.MightContainImage(_text)
+                    ? FormattedText.Parse(_text).ToPlainTextString()
+                    : AnsiRegex.Replace(_text, string.Empty);
 
                 return _plaintextcontent;
             }

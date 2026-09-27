@@ -89,4 +89,14 @@ Describe 'OutputRendering tests' -Tag 'CI' {
         $s.ToString([System.Management.Automation.OutputRendering]::PlainText) | Should -BeExactly 'Hello.'
         { $s.ToString([System.Management.Automation.OutputRendering]::Host) } | Should -Throw -ErrorId 'ArgumentException'
     }
+
+    It 'preserves raw sixel strings but replaces sixel in formatted objects' {
+        $sixel = "`ePq~`e\"
+
+        ($sixel | Out-String).TrimEnd() | Should -BeExactly $sixel
+
+        $formatted = [pscustomobject]@{ Picture = $sixel } | Format-Table | Out-String
+        $formatted | Should -Match '\[sixel\]'
+        $formatted | Should -Not -Match ([regex]::Escape($sixel))
+    }
 }
