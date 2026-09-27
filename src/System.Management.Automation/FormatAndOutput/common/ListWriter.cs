@@ -178,6 +178,12 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
         private void WriteProperty(int k, string propertyValue, LineOutput lo)
         {
             propertyValue ??= string.Empty;
+            if (TryWriteImageProperty(k, propertyValue, lo))
+            {
+                return;
+            }
+
+            propertyValue = FormattedText.GetFallbackIfNeeded(propertyValue);
 
             // make sure we honor embedded newlines
             List<string> lines = StringManipulationHelper.SplitLines(propertyValue);
@@ -200,6 +206,75 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
                 WriteSingleLineHelper(prependString, lines[i], lo);
             }
+        }
+
+        private bool TryWriteImageProperty(int propertyIndex, string propertyValue, LineOutput lineOutput)
+        {
+            if (!FormattedText.MightContainImage(propertyValue))
+            {
+                return false;
+            }
+
+            TerminalImageSnapshot snapshot = lineOutput.GetTerminalImageSnapshot();
+            if (!snapshot.IsAvailable)
+            {
+                return false;
+            }
+
+            FormattedText value = FormattedText.Parse(propertyValue);
+            if (!ContainsImage(value))
+            {
+                return false;
+            }
+
+            int valueWidth = _columnWidth - _propertyLabelsDisplayLength;
+            FieldLayout valueLayout = ImageLayout.LayoutField(value, valueWidth, wrap: true, lineOutput.DisplayCells, snapshot);
+            if (!ContainsImage(valueLayout))
+            {
+                return false;
+            }
+
+            string label = _propertyLabels[propertyIndex];
+            string style = PSStyle.Instance.Formatting.FormatAccent;
+            if (!string.IsNullOrWhiteSpace(label) && style.Length > 0)
+            {
+                label = style + label + PSStyle.Instance.Reset;
+            }
+
+            var labelLayout = new FieldLayout(
+                [new FieldLayoutFragment(label, 0, 0, _propertyLabelsDisplayLength, 1, isImage: false)],
+                occupiedRows: 1);
+            RowLayout row = ImageLayout.ComposeRow(
+                [labelLayout, valueLayout],
+                [0, _propertyLabelsDisplayLength],
+                snapshot);
+            return lineOutput.TryWriteRowLayout(row);
+        }
+
+        private static bool ContainsImage(FormattedText text)
+        {
+            foreach (FormattedTextToken token in text.Tokens)
+            {
+                if (token.Kind == FormattedTextTokenKind.Sixel)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool ContainsImage(FieldLayout layout)
+        {
+            foreach (FieldLayoutFragment fragment in layout.Fragments)
+            {
+                if (fragment.IsImage)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

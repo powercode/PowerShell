@@ -163,10 +163,18 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
                 followingLinesWidth += firstLineIndentation;
             }
 
+            string bufferedText = _stringBuffer.ToString();
+            if (firstLineWidth == followingLinesWidth
+                && TryWriteImageBuffer(bufferedText, firstLineWidth, leftIndentation))
+            {
+                _stringBuffer = new StringBuilder();
+                return;
+            }
+
             // error checking on invalid values
 
             // generate the lines using the computed widths
-            StringCollection sc = StringManipulationHelper.GenerateLines(_lo.DisplayCells, _stringBuffer.ToString(),
+            StringCollection sc = StringManipulationHelper.GenerateLines(_lo.DisplayCells, FormattedText.GetFallbackIfNeeded(bufferedText),
                                         firstLineWidth, followingLinesWidth);
 
             // compute padding
@@ -199,6 +207,38 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             }
 
             _stringBuffer = new StringBuilder();
+        }
+
+        private bool TryWriteImageBuffer(string text, int fieldWidth, int leftIndentation)
+        {
+            if (fieldWidth <= 0 || !FormattedText.MightContainImage(text))
+            {
+                return false;
+            }
+
+            TerminalImageSnapshot snapshot = _lo.GetTerminalImageSnapshot();
+            if (!snapshot.IsAvailable || leftIndentation < 0 || leftIndentation + fieldWidth > snapshot.UsableColumns)
+            {
+                return false;
+            }
+
+            FormattedText formatted = FormattedText.Parse(text);
+            if (!formatted.HasImages)
+            {
+                return false;
+            }
+
+            FieldLayout field = ImageLayout.LayoutField(formatted, fieldWidth, wrap: true, _lo.DisplayCells, snapshot);
+            foreach (FieldLayoutFragment fragment in field.Fragments)
+            {
+                if (fragment.IsImage)
+                {
+                    RowLayout row = ImageLayout.ComposeRow([field], [leftIndentation], snapshot);
+                    return _lo.TryWriteRowLayout(row);
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

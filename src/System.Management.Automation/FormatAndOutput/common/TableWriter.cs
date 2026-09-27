@@ -239,6 +239,11 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             string style = PSStyle.Instance.Formatting.TableHeader;
             string reset = PSStyle.Instance.Reset;
 
+            if (!isHeader && generatedRows is null && TryWriteImageRow(values, lo, multiLine, currentAlignment, dc))
+            {
+                return;
+            }
+
             if (multiLine)
             {
                 foreach (string line in GenerateTableRow(values, currentAlignment, lo.DisplayCells, isHeader))
@@ -253,6 +258,70 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
                 generatedRows?.Add(line);
                 lo.WriteLine(line);
             }
+        }
+
+        private bool TryWriteImageRow(
+            string[] values,
+            LineOutput lineOutput,
+            bool multiLine,
+            ReadOnlySpan<int> alignment,
+            DisplayCells displayCells)
+        {
+            if (!ContainsImageCandidate(values))
+            {
+                return false;
+            }
+
+            TerminalImageSnapshot snapshot = lineOutput.GetTerminalImageSnapshot();
+            if (!snapshot.IsAvailable)
+            {
+                return false;
+            }
+
+            var fields = new List<FieldLayout>();
+            var startColumns = new List<int>();
+            bool containsImage = false;
+            for (int column = 0; column < _si.columnInfo.Length; column++)
+            {
+                ColumnInfo columnInfo = _si.columnInfo[column];
+                if (columnInfo.width <= 0)
+                {
+                    continue;
+                }
+
+                string value = values[column] ?? string.Empty;
+                FormattedText formatted = FormattedText.Parse(value);
+                foreach (FormattedTextToken token in formatted.Tokens)
+                {
+                    containsImage |= token.Kind == FormattedTextTokenKind.Sixel;
+                }
+
+                FieldLayout field = ImageLayout.LayoutField(formatted, columnInfo.width, multiLine, displayCells, snapshot);
+                fields.Add(ImageLayout.AlignField(field, columnInfo.width, alignment[column]));
+                startColumns.Add(columnInfo.startCol);
+            }
+
+            if (!containsImage)
+            {
+                return false;
+            }
+
+            return lineOutput.TryWriteRowLayout(ImageLayout.ComposeRow(fields, startColumns, snapshot));
+        }
+
+        private bool ContainsImageCandidate(string[] values)
+        {
+            for (int column = 0; column < _si.columnInfo.Length; column++)
+            {
+                if (_si.columnInfo[column].width > 0
+                    && !string.IsNullOrEmpty(values[column])
+                    && FormattedText.MightContainImage(values[column]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private string[] GenerateTableRow(string[] values, ReadOnlySpan<int> alignment, DisplayCells ds, bool isHeader)
@@ -424,6 +493,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
         private StringCollection GenerateMultiLineRowField(string val, int k, int alignment, DisplayCells dc, bool addPadding)
         {
+            val = FormattedText.GetFallbackIfNeeded(val);
             StringCollection sc = StringManipulationHelper.GenerateLines(dc, val,
                                         _si.columnInfo[k].width, _si.columnInfo[k].width);
             if (addPadding || alignment == TextAlignment.Right || alignment == TextAlignment.Center)
@@ -493,6 +563,8 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
         private static string GenerateRowField(string val, int width, int alignment, DisplayCells dc, bool addPadding)
         {
+            val = FormattedText.GetFallbackIfNeeded(val);
+
             // make sure the string does not have any embedded <CR> in it
             string s = StringManipulationHelper.TruncateAtNewLine(val);
             int currentValueDisplayLength = dc.Length(s);

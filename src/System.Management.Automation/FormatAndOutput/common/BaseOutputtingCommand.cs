@@ -661,6 +661,8 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
             if (thi.tableColumnInfoList.Count == 0)
                 return;
 
+            // Capture on the first image candidate and reuse even an unavailable result for this measurement pass.
+            TerminalImageSnapshot? snapshot = null;
             int[] widths = new int[thi.tableColumnInfoList.Count];
 
             for (int k = 0; k < thi.tableColumnInfoList.Count; k++)
@@ -686,7 +688,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
                     foreach (FormatPropertyField fpf in tre.formatPropertyFieldList)
                     {
-                        cellCount = _lo.DisplayCells.Length(fpf.propertyValue);
+                        cellCount = MeasureCachedFieldWidth(fpf.propertyValue, ref snapshot);
                         if (widths[kk] < cellCount)
                             widths[kk] = cellCount;
 
@@ -711,6 +713,8 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
             int maxLen = 0;
             int cellCount; // scratch variable
+            // Ordinary groups never query the host; candidate widths share one lazily captured destination state.
+            TerminalImageSnapshot? snapshot = null;
 
             foreach (PacketInfoData o in objects)
             {
@@ -721,7 +725,7 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
                     if (!string.IsNullOrEmpty(fpf.propertyValue))
                     {
-                        cellCount = _lo.DisplayCells.Length(fpf.propertyValue);
+                        cellCount = MeasureCachedFieldWidth(fpf.propertyValue, ref snapshot);
                         if (cellCount > maxLen)
                             maxLen = cellCount;
                     }
@@ -732,6 +736,18 @@ namespace Microsoft.PowerShell.Commands.Internal.Format
 
             hint.maxWidth = maxLen;
             _formattingHint = hint;
+        }
+
+        private int MeasureCachedFieldWidth(string value, ref TerminalImageSnapshot? snapshot)
+        {
+            value ??= string.Empty;
+            if (!FormattedText.MightContainImage(value))
+            {
+                return _lo.DisplayCells.Length(value);
+            }
+
+            snapshot ??= _lo.GetTerminalImageSnapshot();
+            return ImageLayout.MeasureNaturalWidthForOutput(value, _lo.DisplayCells, snapshot.Value);
         }
 
         /// <summary>
