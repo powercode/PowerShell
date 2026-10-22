@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="../../../Analyzers.props" />
+  <PropertyGroup>
+    <!-- Keep these local: BenchmarkDotNet copies language properties into its
+         generated project and cannot copy the XML namespace in Test.Common.props. -->
+    <TargetFramework>net11.0</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <OutputType>Exe</OutputType>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../src/Microsoft.PowerShell.Commands.Utility/commands/utility/SelectString.Engine.cs" Link="SelectString.Engine.cs" />
+    <Compile Include="Engine.Benchmarks.cs" />
+    <!-- .NET 11 support is required by the repository target framework. -->
+    <PackageReference Include="BenchmarkDotNet" Version="0.16.0-preview.2" />
+  </ItemGroup>
+</Project>
