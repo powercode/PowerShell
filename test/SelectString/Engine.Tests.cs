@@ -16,6 +16,108 @@ namespace PSTests.SelectString;
 public sealed class SelectStringEngineTests
 {
     [Fact]
+    public void ParallelFilesPreserveOrderDuplicatesContextAndCallbackThread()
+    {
+        WithFile(first => WithFile(second =>
+        {
+            File.WriteAllLines(first, new[] { "before", "hit 1", "hit 2", "after" });
+            File.WriteAllText(second, "hit 3");
+            string[] paths = { first, second, first };
+            var engine = new SelectStringEngine(new[] { @"hit (\d)" }, compiledRegex: true);
+            var expected = new List<string>();
+            var actual = new List<string>();
+            string Describe(SelectStringEngine.Result result) =>
+                $"{result.Path}:{result.LineNumber}:{result.Matches[0].Groups[1].Value}:" +
+                string.Join("|", result.Context.PreContext) + ":" + string.Join("|", result.Context.PostContext);
+            foreach (string path in paths)
+            {
+                engine.ScanFile(path, Encoding.UTF8, 1, 1, false, result =>
+                {
+                    expected.Add(Describe(result));
+                    return true;
+                });
+            }
+
+            int caller = Environment.CurrentManagedThreadId;
+            engine.ScanFiles(paths, Encoding.UTF8, result =>
+            {
+                Assert.Equal(caller, Environment.CurrentManagedThreadId);
+                actual.Add(Describe(result));
+                return true;
+            }, (_, error) => throw error, preContext: 1, postContext: 1, maxResults: 1);
+            Assert.Equal(expected, actual);
+        }));
+    }
+
+    [Fact]
+    public void ParallelFileErrorsFollowEarlierResultsAndAllowLaterFiles()
+    {
+        WithFile(path =>
+        {
+            File.WriteAllText(path, "hit");
+            var events = new List<string>();
+            int caller = Environment.CurrentManagedThreadId;
+            new SelectStringEngine(new[] { "hit" }).ScanFiles(
+                new[] { path, path + ".missing", path }, Encoding.UTF8,
+                result => { events.Add(result.Line); return true; },
+                (failedPath, error) =>
+                {
+                    Assert.Equal(caller, Environment.CurrentManagedThreadId);
+                    Assert.Equal(path + ".missing", failedPath);
+                    Assert.IsType<FileNotFoundException>(error);
+                    events.Add("error");
+                });
+            Assert.Equal(new[] { "hit", "error", "hit" }, events);
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ParallelStopAndSinkFailureJoinWorkersAndCloseFiles(bool throwFromSink)
+    {
+        WithFile(path =>
+        {
+            File.WriteAllLines(path, Enumerable.Repeat("hit", 10000));
+            var engine = new SelectStringEngine(new[] { "hit" });
+            int count = 0;
+            void Scan() => engine.ScanFiles(new[] { path, path, path }, Encoding.UTF8,
+                _ =>
+                {
+                    count++;
+                    if (throwFromSink) { throw new InvalidOperationException("sink"); }
+                    return false;
+                }, (_, error) => throw error, queuedBatches: 1, maxResults: 1);
+            if (throwFromSink) { Assert.Throws<InvalidOperationException>(Scan); }
+            else { Scan(); }
+            Assert.Equal(1, count);
+            using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        });
+    }
+
+    [Fact]
+    public void ParallelCancellationFromConsumerStopsAllWorkers()
+    {
+        WithFile(path =>
+        {
+            File.WriteAllLines(path, Enumerable.Repeat("hit", 10000));
+            using var cancellation = new CancellationTokenSource();
+            int count = 0;
+            Assert.ThrowsAny<OperationCanceledException>(() =>
+                new SelectStringEngine(new[] { "hit" }).ScanFiles(new[] { path, path }, Encoding.UTF8,
+                    _ =>
+                    {
+                        count++;
+                        cancellation.Cancel();
+                        return true;
+                    }, (_, error) => throw error, queuedBatches: 1, maxResults: 1,
+                    cancellationToken: cancellation.Token));
+            Assert.Equal(1, count);
+            using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        });
+    }
+
+    [Fact]
     public void BatchesPauseScanningAndPublishFirstResultPromptly()
     {
         WithFile(path =>
