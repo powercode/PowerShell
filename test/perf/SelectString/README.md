@@ -37,12 +37,12 @@ git worktree add --detach ../SelectString-first-extraction 41b3169b4
 
 ./test/SelectString/Build-Comparison.ps1 -SourceRoot ../SelectString-baseline -OutputDirectory ./tmp/SelectString/baseline
 ./test/SelectString/Build-Comparison.ps1 -SourceRoot ../SelectString-first-extraction -OutputDirectory ./tmp/SelectString/first-extraction
-./test/SelectString/Build-Comparison.ps1 -SourceRoot . -OutputDirectory ./tmp/SelectString/concrete-queues
+./test/SelectString/Build-Comparison.ps1 -SourceRoot . -OutputDirectory ./tmp/SelectString/candidate
 
 dotnet test test/SelectString/SelectString.Engine.Tests.csproj -c Release
-./test/SelectString/Compare-SelectString.ps1 -Baseline ./tmp/SelectString/baseline/pwsh.exe -Candidate ./tmp/SelectString/concrete-queues/pwsh.exe
+./test/SelectString/Compare-SelectString.ps1 -Baseline ./tmp/SelectString/baseline/pwsh.exe -Candidate ./tmp/SelectString/candidate/pwsh.exe
 
-& ./tmp/SelectString/concrete-queues/pwsh.exe -NoProfile -Command {
+& ./tmp/SelectString/candidate/pwsh.exe -NoProfile -Command {
     Import-Module Pester -RequiredVersion 4.10.1
     $result = Invoke-Pester -Script ./test/powershell/Modules/Microsoft.PowerShell.Utility/Select-String.Tests.ps1 -PassThru
     if ($result.FailedCount) { exit 1 }
@@ -88,8 +88,8 @@ dotnet run -c Release --project test/perf/SelectString/SelectString.Engine.Bench
 
 ```powershell
 ./test/perf/SelectString/Measure-SelectString.ps1 `
-    -PwshPath ./tmp/SelectString/baseline/pwsh.exe,./tmp/SelectString/first-extraction/pwsh.exe,./tmp/SelectString/concrete-queues/pwsh.exe `
-    -Revision 17f1446e5,41b3169b4,concrete-queues `
+    -PwshPath ./tmp/SelectString/baseline/pwsh.exe,./tmp/SelectString/candidate/pwsh.exe `
+    -Revision shipping,candidate `
     -Iterations 25 -WarmupIterations 15 -Affinity 1
 ```
 
@@ -131,12 +131,20 @@ The [queue experiment](RESULTS-queues.md) and subsequent
 For the large-log scenarios, use the generation and capture commands in the
 section below. Existing DenseContext captures keep their previous defaults.
 
-Run `New-EtwCapture.ps1` from an elevated PowerShell after building the three
-comparison executables: baseline, first-extraction and concrete-queues. The old
-candidate directory is not used. Run from the repository root:
+Run `New-EtwCapture.ps1` from an elevated PowerShell after building shipping and
+the candidate. Shipping uses `tmp/SelectString/baseline/pwsh.exe`. Pass the build
+directory name under `tmp/SelectString` with `-CandidateDirectory` (tab completion
+is supported). When omitted, the newest eligible build is selected by the Utility
+assembly modification time, falling back to `pwsh.exe` modification time if the
+assembly is absent. Ties are resolved by directory name. Baseline, first-extraction,
+the old experiment and shipping directories are excluded from automatic
+selection/completion. Results and traces always use the labels `shipping` and
+`candidate`, independently of the selected directory;
+the selected executable path is printed before recording. The extraction
+build is no longer part of these captures. Run from the repository root:
 
 ```powershell
-./test/perf/SelectString/New-EtwCapture.ps1
+./test/perf/SelectString/New-EtwCapture.ps1 -CandidateDirectory candidate
 ```
 
 It writes separate DenseContext traces and benchmark JSON
@@ -185,14 +193,19 @@ the opening command and interpretation limits.
 
 See [RESULTS-log.md](RESULTS-log.md) for initial measurements and validation.
 
-Generate one deterministic UTF-8 file and reuse it across builds and densities:
+Log scenarios automatically reuse `tmp/SelectString/log-fixture`. If neither
+the log nor its manifest exists, they generate the default 300 MiB fixture before
+workers or recording start. An incomplete or invalid fixture still fails validation
+rather than overwriting existing data. `-LogFixture` selects an explicit directory.
+
+To generate a different size or location explicitly and reuse it across builds:
 
 ```powershell
 ./test/perf/SelectString/New-LogFixture.ps1 -SizeMiB 300
 
 ./test/perf/SelectString/Measure-SelectString.ps1 `
-    -PwshPath ./tmp/SelectString/baseline/pwsh.exe,./tmp/SelectString/first-extraction/pwsh.exe,./tmp/SelectString/concrete-queues/pwsh.exe `
-    -Revision shipping,extraction,queues `
+    -PwshPath ./tmp/SelectString/baseline/pwsh.exe,./tmp/SelectString/candidate/pwsh.exe `
+    -Revision shipping,candidate `
     -Scenario LogRare,LogSparse,LogMedium,LogBroad,LogDense,LogAllMatches,LogContext `
     -LogFixture ./tmp/SelectString/log-fixture `
     -WarmupIterations 3 -Iterations 5 -Affinity 1 -TimeoutSeconds 600 `
@@ -245,12 +258,14 @@ For a focused capture, run from elevated PowerShell after generation:
 
 ```powershell
 ./test/perf/SelectString/New-EtwCapture.ps1 `
-    -Scenario LogContext -LogFixture ./tmp/SelectString/log-fixture `
+    -Scenario LogContext `
     -WarmupIterations 3 -Iterations 5 -TimeoutSeconds 600
 ```
 
 Choose another log scenario to vary density or exercise AllMatches. The script
-captures shipping, extraction and concrete-queues using the same file, with
+captures shipping and the selected candidate using the same file, with
 markers enabled and counting disabled. ETL filenames include the scenario.
 Select the measured regions (five for this example); validation and startup are
 also in the recording and must be excluded from timed-region analysis.
+
+See [RESULTS-traces.md](RESULTS-traces.md) for the large-log ETW findings and the host-dependent highlighting allocation difference.

@@ -27,7 +27,13 @@ if (!$Worker) {
     $Artifacts = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Artifacts)
     $PwshPath = @($PwshPath | ForEach-Object { (Resolve-Path -LiteralPath $_ -ErrorAction Stop).ProviderPath })
     if (@($Scenario | Where-Object { $_ -like 'Log*' }).Count) {
-        if (!$LogFixture) { throw 'Generate a log with New-LogFixture.ps1 and supply -LogFixture <directory>.' }
+        if (!$LogFixture) {
+            $LogFixture = Join-Path $PSScriptRoot '../../../tmp/SelectString/log-fixture'
+            if (!(Test-Path -LiteralPath (Join-Path $LogFixture 'manifest.json')) -and
+                !(Test-Path -LiteralPath (Join-Path $LogFixture 'application.log'))) {
+                & (Join-Path $PSScriptRoot 'New-LogFixture.ps1') -Directory $LogFixture
+            }
+        }
         $LogFixture = (Resolve-Path -LiteralPath $LogFixture).ProviderPath
         $manifest = Get-Content (Join-Path $LogFixture 'manifest.json') -Raw | ConvertFrom-Json
         if ($manifest.Version -ne 1 -or (Get-FileHash (Join-Path $LogFixture 'application.log')).Hash -ne $manifest.SHA256) {

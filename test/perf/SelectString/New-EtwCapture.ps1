@@ -3,6 +3,22 @@
 
 [CmdletBinding()]
 param(
+    # Build directory name beneath the repository's tmp/SelectString directory.
+    [ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_.-]*$')]
+    [ArgumentCompleter({
+        param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+        $scriptDirectory = Split-Path (Get-Command $commandAst.CommandElements[0].Value -ErrorAction Stop).Path
+        $buildRoot = Join-Path $scriptDirectory '../../../tmp/SelectString'
+        Get-ChildItem -LiteralPath $buildRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.Name -notin 'baseline','first-extraction','experiment','shipping' -and
+                $_.Name -like "$wordToComplete*" -and
+                (Test-Path -LiteralPath (Join-Path $_.FullName 'pwsh.exe'))
+            } | Sort-Object Name | ForEach-Object {
+                [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ParameterValue', $_.FullName)
+            }
+    })]
+    [string] $CandidateDirectory,
     [ValidateSet('DenseContext','LogRare','LogSparse','LogMedium','LogBroad','LogDense','LogAllMatches','LogContext')]
     [string] $Scenario = 'DenseContext',
     [string] $LogFixture,
@@ -13,10 +29,32 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).ProviderPath
+if (!$CandidateDirectory) {
+    $latest = Get-ChildItem -LiteralPath (Join-Path $repoRoot 'tmp/SelectString') -Directory |
+        Where-Object {
+            $_.Name -notin 'baseline','first-extraction','experiment','shipping' -and
+            (Test-Path -LiteralPath (Join-Path $_.FullName 'pwsh.exe'))
+        } | Sort-Object @{
+            Expression = {
+                $assembly = Get-Item -LiteralPath (Join-Path $_.FullName 'Microsoft.PowerShell.Commands.Utility.dll') -ErrorAction SilentlyContinue
+                if ($assembly) { $assembly.LastWriteTimeUtc }
+                else { (Get-Item -LiteralPath (Join-Path $_.FullName 'pwsh.exe')).LastWriteTimeUtc }
+            }; Descending = $true
+        }, Name | Select-Object -First 1
+    if (!$latest) { throw 'No candidate build found under tmp/SelectString. Build PowerShell first.' }
+    $CandidateDirectory = $latest.Name
+    Write-Host "Selected newest candidate build: $CandidateDirectory"
+}
 $benchmark = Join-Path $PSScriptRoot 'Measure-SelectString.ps1'
 $profile = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'SelectString.wprp')).ProviderPath
 if ($Scenario -like 'Log*') {
-    if (!$LogFixture) { throw 'Supply -LogFixture with the generated log directory.' }
+    if (!$LogFixture) {
+        $LogFixture = Join-Path $PSScriptRoot '../../../tmp/SelectString/log-fixture'
+        if (!(Test-Path -LiteralPath (Join-Path $LogFixture 'manifest.json')) -and
+            !(Test-Path -LiteralPath (Join-Path $LogFixture 'application.log'))) {
+            & (Join-Path $PSScriptRoot 'New-LogFixture.ps1') -Directory $LogFixture
+        }
+    }
     $LogFixture = (Resolve-Path -LiteralPath $LogFixture).ProviderPath
     $manifest = Get-Content (Join-Path $LogFixture 'manifest.json') -Raw | ConvertFrom-Json
     if ($manifest.Version -ne 1 -or (Get-FileHash (Join-Path $LogFixture 'application.log')).Hash -ne $manifest.SHA256) {
@@ -28,9 +66,8 @@ New-Item -ItemType Directory -Path $out -Force | Out-Null
 Write-Host "Capture directory: $out"
 
 $builds = [ordered]@{
-    shipping          = './tmp/SelectString/baseline/pwsh.exe'
-    extraction        = './tmp/SelectString/first-extraction/pwsh.exe'
-    'concrete-queues' = './tmp/SelectString/concrete-queues/pwsh.exe'
+    shipping = './tmp/SelectString/baseline/pwsh.exe'
+    candidate = "./tmp/SelectString/$CandidateDirectory/pwsh.exe"
 }
 
 # Validate all executables before starting a recording.
