@@ -201,9 +201,9 @@ public sealed class SelectStringEngineTests
     {
         WithFile(path =>
         {
-            File.WriteAllLines(path, new[] { "hit", "miss", "miss" });
+            File.WriteAllLines(path, ["hit", "miss", "miss"]);
             using var cancellation = new CancellationTokenSource();
-            using var scan = new SelectStringEngine(new[] { "hit" }).OpenFileScan(path, Encoding.UTF8,
+            using var scan = new SelectStringEngine(["hit"]).OpenFileScan(path, Encoding.UTF8,
                 cancellationToken: cancellation.Token);
             Assert.Equal(1, scan.ReadBatch().Count);
             cancellation.Cancel();
@@ -221,7 +221,7 @@ public sealed class SelectStringEngineTests
             using var cancellation = new CancellationTokenSource();
             int checks = 0;
             using var scan = new SelectStringEngine.ScanSession<SelectStringEngine.Result, SelectStringEngine.ResultFactory>(
-                new(new[] { "hit" }), path, Encoding.UTF8, 0, 0, false, default,
+                new(["hit"]), path, Encoding.UTF8, 0, 0, false, default,
                 shouldStop: () =>
                 {
                     if (++checks == 3) { cancellation.Cancel(); }
@@ -241,7 +241,7 @@ public sealed class SelectStringEngineTests
             File.WriteAllText(path, "hit");
             int checks = 0;
             bool emitted = false;
-            bool found = new SelectStringEngine(new[] { "hit" }).ScanFile(path, Encoding.UTF8, 0, 0, true,
+            bool found = new SelectStringEngine(["hit"]).ScanFile(path, Encoding.UTF8, 0, 0, true,
                 _ => { emitted = true; return true; }, shouldStop: () => ++checks == 2);
             Assert.True(found);
             Assert.False(emitted);
@@ -253,9 +253,10 @@ public sealed class SelectStringEngineTests
     {
         WithFile(path =>
         {
+            const byte MalformedByte = 0xff;
             // Valid matches fit in the first reader block; malformed bytes are later.
             byte[] valid = Encoding.UTF8.GetBytes("hit\nhit\n" + new string('x', 32768));
-            File.WriteAllBytes(path, valid.Concat(new byte[] { 0xff }).ToArray());
+            File.WriteAllBytes(path, valid.Concat([MalformedByte]).ToArray());
             using var scan = new SelectStringEngine(new[] { "hit" }).OpenFileScan(path,
                 new UTF8Encoding(false, true));
             Assert.Equal(1, scan.ReadBatch().Count);
@@ -279,18 +280,18 @@ public sealed class SelectStringEngineTests
             {
                 string before = new string('x', bufferSize - 2) + "😀";
                 string hit = "hit café 😀";
-                File.WriteAllText(path, before + "\r\n" + hit + "\r\nafter", encoding);
+                File.WriteAllText(path, $"{before}\r\n{hit}\r\nafter", encoding);
                 var results = new List<SelectStringEngine.Result>();
                 // BOM detection must override the deliberately incorrect fallback encoding.
-                new SelectStringEngine(new[] { "hit (?<word>café)" }).ScanFile(
+                new SelectStringEngine(["hit (?<word>café)"]).ScanFile(
                     path, Encoding.ASCII, 1, 1, false,
                     result => { results.Add(result); return true; }, readerBufferSize: bufferSize);
                 var result = Assert.Single(results);
                 Assert.Equal(2UL, result.LineNumber);
                 Assert.Equal(hit, result.Line);
                 Assert.Equal("café", Assert.Single(result.Matches).Groups["word"].Value);
-                Assert.Equal(new[] { before }, result.Context.PreContext);
-                Assert.Equal(new[] { "after" }, result.Context.PostContext);
+                Assert.Equal([before], result.Context.PreContext);
+                Assert.Equal(["after"], result.Context.PostContext);
             });
         }
     }
@@ -301,7 +302,7 @@ public sealed class SelectStringEngineTests
         WithFile(path =>
         {
             File.WriteAllBytes(path, Encoding.UTF8.GetBytes("hit\n" + new string('x', 32768)).Concat(new byte[] { 0xff }).ToArray());
-            var engine = new SelectStringEngine(new[] { "hit" });
+            var engine = new SelectStringEngine(["hit"]);
             var strict = new UTF8Encoding(false, true);
             Assert.True(engine.ScanFile(path, strict, 0, 0, true, _ => true));
             Assert.Throws<DecoderFallbackException>(() =>
@@ -320,7 +321,7 @@ public sealed class SelectStringEngineTests
             bytes[8192] = 0xff;
             File.WriteAllBytes(path, bytes);
             int count = 0;
-            Assert.True(new SelectStringEngine(new[] { "hit" }).ScanFile(path,
+            Assert.True(new SelectStringEngine(["hit"]).ScanFile(path,
                 new UTF8Encoding(false, true), 0, 0, stopAfterFirst,
                 result => { count++; return false; }));
             Assert.Equal(1, count);
@@ -333,7 +334,7 @@ public sealed class SelectStringEngineTests
         WithFile(path =>
         {
             File.WriteAllText(path, "hit\n" + new string('x', 2 * 1024 * 1024));
-            Assert.True(new SelectStringEngine(new[] { "hit" }).ScanFile(path,
+            Assert.True(new SelectStringEngine(["hit"]).ScanFile(path,
                 new ShortReadEncoding(), 0, 0, false, _ => false));
         });
     }
@@ -351,7 +352,7 @@ public sealed class SelectStringEngineTests
     public void StringsAreRecordsAndRetainTheirStorage()
     {
         string text = "before\nmatch\nafter";
-        var engine = new SelectStringEngine(new[] { "match" });
+        var engine = new SelectStringEngine(["match"]);
         Assert.True(engine.TryMatch(text, out var result));
         Assert.Same(text, new SelectStringEngine.ResultFactory().Create(text, null, 1, in result, false).Line);
         Assert.Equal(7, Assert.Single(result.Matches).Index);
@@ -362,7 +363,7 @@ public sealed class SelectStringEngineTests
     [InlineData(true)]
     public void FirstMatchingPatternWinsAndAllCapturesSurvive(bool compiled)
     {
-        var engine = new SelectStringEngine(new[] { "missing", "(?<word>a)+", "b" }, allMatches: true, compiledRegex: compiled);
+        var engine = new SelectStringEngine(["missing", "(?<word>a)+", "b"], allMatches: true, compiledRegex: compiled);
         Assert.True(engine.TryMatch("aa b a", out var result));
         Assert.Equal(1, result.PatternIndex);
         Assert.Equal(2, result.Matches.Length);
@@ -379,12 +380,12 @@ public sealed class SelectStringEngineTests
         try
         {
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
-            var engine = new SelectStringEngine(new[] { "I" }, compiledRegex: compiled);
+            var engine = new SelectStringEngine(["I"], compiledRegex: compiled);
             Assert.True(engine.TryMatch("ı", out _));
             Assert.False(engine.TryMatch("i", out _));
-            Assert.False(new SelectStringEngine(new[] { "I" }, caseSensitive: true, compiledRegex: compiled).TryMatch("ı", out _));
+            Assert.False(new SelectStringEngine(["I"], caseSensitive: true, compiledRegex: compiled).TryMatch("ı", out _));
             var error = Assert.Throws<SelectStringEngine.InvalidPatternException>(() =>
-                new SelectStringEngine(new[] { "ok", "[" }, compiledRegex: compiled));
+                new SelectStringEngine(["ok", "["], compiledRegex: compiled));
             Assert.Equal(1, error.PatternIndex);
             Assert.IsAssignableFrom<ArgumentException>(error.InnerException);
         }
@@ -397,7 +398,7 @@ public sealed class SelectStringEngineTests
     [Fact]
     public void NotMatchRequiresAllPatternsToFail()
     {
-        var engine = new SelectStringEngine(new[] { "a", "b" }, allMatches: true, notMatch: true);
+        var engine = new SelectStringEngine(["a", "b"], allMatches: true, notMatch: true);
         Assert.False(engine.TryMatch("b", out _));
         Assert.True(engine.TryMatch("c", out var result));
         Assert.Equal(0, result.PatternIndex);
@@ -410,7 +411,7 @@ public sealed class SelectStringEngineTests
     [InlineData("en-US", "I", "i", true)]
     public void SimpleMatchUsesTheSelectedCulture(string culture, string pattern, string text, bool expected)
     {
-        var engine = new SelectStringEngine(new[] { pattern }, simpleMatch: true,
+        var engine = new SelectStringEngine([pattern], simpleMatch: true,
             compareInfo: CultureInfo.GetCultureInfo(culture).CompareInfo);
         Assert.Equal(expected, engine.TryMatch(text, out _));
     }
@@ -430,7 +431,7 @@ public sealed class SelectStringEngineTests
         WithFile(path =>
         {
             File.WriteAllText(path, text, encoding);
-            var results = Scan(path, new SelectStringEngine(new[] { "hit" }), bom ? Encoding.ASCII : encoding);
+            var results = Scan(path, new SelectStringEngine(["hit"]), bom ? Encoding.ASCII : encoding);
             Assert.Equal(new ulong[] { 3, 4, 5 }, results.Select(r => r.LineNumber));
             Assert.Equal(new[] { "hit café", "hit fin", "hit end" }, results.Select(r => r.Line));
         });
@@ -445,11 +446,11 @@ public sealed class SelectStringEngineTests
         WithFile(path =>
         {
             File.WriteAllText(path, "zero\nhit one\nhit two\nthree");
-            var results = Scan(path, new SelectStringEngine(new[] { "hit" }), Encoding.UTF8, pre, post);
+            var results = Scan(path, new SelectStringEngine(["hit"]), Encoding.UTF8, pre, post);
             Assert.Equal(2, results.Count);
-            Assert.Equal(pre == 0 ? Array.Empty<string>() : new[] { "zero" }, results[0].Context.PreContext);
-            Assert.Equal(post == 0 ? Array.Empty<string>() : new[] { "hit two", "three" }, results[0].Context.PostContext);
-            Assert.Equal(post == 0 ? Array.Empty<string>() : new[] { "three" }, results[1].Context.PostContext);
+            Assert.Equal(pre == 0 ? [] : ["zero"], results[0].Context.PreContext);
+            Assert.Equal(post == 0 ? [] : ["hit two", "three"], results[0].Context.PostContext);
+            Assert.Equal(post == 0 ? [] : ["three"], results[1].Context.PostContext);
             Assert.Empty(results[0].Context.DisplayPostContext);
         });
     }
@@ -459,7 +460,7 @@ public sealed class SelectStringEngineTests
     {
         WithFile(path =>
         {
-            var engine = new SelectStringEngine(new[] { "hit" });
+            var engine = new SelectStringEngine(["hit"]);
             File.WriteAllText(path, "old\nhit old");
             Scan(path, engine, Encoding.UTF8, 2, 2);
             File.WriteAllText(path, "hit new");
@@ -476,7 +477,7 @@ public sealed class SelectStringEngineTests
         {
             File.WriteAllText(path, "hit\nafter\nhit again");
             int count = 0;
-            new SelectStringEngine(new[] { "hit" }).ScanFile(path, Encoding.UTF8, 0, 1, true, result =>
+            new SelectStringEngine(["hit"]).ScanFile(path, Encoding.UTF8, 0, 1, true, result =>
             {
                 using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
                 Assert.Equal(new[] { "after" }, result.Context.PostContext);
@@ -494,7 +495,7 @@ public sealed class SelectStringEngineTests
         {
             File.WriteAllBytes(path, Encoding.UTF8.GetBytes("hit\n" + new string('x', 32768)).Concat(new byte[] { 0xff }).ToArray());
             int count = 0;
-            new SelectStringEngine(new[] { "hit" }).ScanFile(path, new UTF8Encoding(false, true), 0, 0, false, result =>
+            new SelectStringEngine(["hit"]).ScanFile(path, new UTF8Encoding(false, true), 0, 0, false, result =>
             {
                 count++;
                 return false;
@@ -510,7 +511,7 @@ public sealed class SelectStringEngineTests
         {
             File.WriteAllText(path, "hit\nhit\nhit");
             using var cancellation = new CancellationTokenSource();
-            Assert.Throws<OperationCanceledException>(() => new SelectStringEngine(new[] { "hit" }).ScanFile(
+            Assert.Throws<OperationCanceledException>(() => new SelectStringEngine(["hit"]).ScanFile(
                 path, Encoding.UTF8, 0, 0, false, result => { cancellation.Cancel(); return true; }, cancellationToken: cancellation.Token));
             using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
         });
@@ -526,7 +527,7 @@ public sealed class SelectStringEngineTests
         WithFile(path =>
         {
             File.WriteAllText(path, text);
-            Assert.Equal(text.Length == 0 ? 0 : 1, Scan(path, new SelectStringEngine(new[] { "^$" }), Encoding.UTF8).Count);
+            Assert.Equal(text.Length == 0 ? 0 : 1, Scan(path, new SelectStringEngine(["^$"]), Encoding.UTF8).Count);
         });
     }
 
@@ -537,7 +538,7 @@ public sealed class SelectStringEngineTests
         {
             string text = new string('x', 1024 * 1024) + "hit";
             File.WriteAllText(path, text);
-            Assert.Equal(text, Assert.Single(Scan(path, new SelectStringEngine(new[] { "hit" }), Encoding.UTF8)).Line);
+            Assert.Equal(text, Assert.Single(Scan(path, new SelectStringEngine(["hit"]), Encoding.UTF8)).Line);
         });
     }
 
@@ -553,7 +554,7 @@ public sealed class SelectStringEngineTests
             File.WriteAllLines(path, lines);
             var created = new List<OwnedMatch>();
             var emitted = new List<OwnedMatch>();
-            var engine = new SelectStringEngine(new[] { "hit" });
+            var engine = new SelectStringEngine(["hit"]);
             engine.ScanFile<OwnedMatch, OwnedMatchFactory>(path, Encoding.UTF8, pre, post, false,
                 new OwnedMatchFactory(created), result => { emitted.Add(result); return true; });
 
@@ -595,7 +596,7 @@ public sealed class SelectStringEngineTests
             var created = new List<OwnedMatch>();
             OwnedMatch emitted = null;
             using var cancellation = new CancellationTokenSource();
-            Assert.Throws<OperationCanceledException>(() => new SelectStringEngine(new[] { "hit" })
+            Assert.Throws<OperationCanceledException>(() => new SelectStringEngine(["hit"])
                 .ScanFile<OwnedMatch, OwnedMatchFactory>(path, Encoding.UTF8, 1, 1, false,
                     new OwnedMatchFactory(created), result =>
                     {
@@ -661,7 +662,13 @@ public sealed class SelectStringEngineTests
     private static void WithFile(Action<string> action)
     {
         string path = Path.GetTempFileName();
-        try { action(path); }
-        finally { File.Delete(path); }
+        try
+        { 
+            action(path); 
+        }
+        finally 
+        {
+             File.Delete(path);
+        }
     }
 }

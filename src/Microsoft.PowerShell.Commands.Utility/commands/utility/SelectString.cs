@@ -11,6 +11,8 @@ using System.Management.Automation;
 using System.Management.Automation.Internal;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Runtime.ExceptionServices;
 using SearchResult = Microsoft.PowerShell.Commands.SelectStringEngine.Result;
 
 namespace Microsoft.PowerShell.Commands
@@ -400,6 +402,18 @@ namespace Microsoft.PowerShell.Commands
     [OutputType(typeof(string), ParameterSetName = new[] { ParameterSetFileRaw, ParameterSetObjectRaw, ParameterSetLiteralFileRaw })]
     public sealed class SelectStringCommand : PSCmdlet
     {
+        private readonly Lock _scanCancellationLock = new();
+        private CancellationTokenSource _scanCancellation;
+
+        /// <summary>Wake file workers even when no matching output is being produced.</summary>
+        protected override void StopProcessing()
+        {
+            lock (_scanCancellationLock)
+            {
+                _scanCancellation?.Cancel();
+            }
+        }
+
         private const string ParameterSetFile = "File";
         private const string ParameterSetFileRaw = "FileRaw";
         private const string ParameterSetObject = "Object";
@@ -833,6 +847,12 @@ namespace Microsoft.PowerShell.Commands
 
             if (expandedPaths != null)
             {
+                if (CanScanFilesConcurrently(expandedPaths))
+                {
+                    ProcessFilesConcurrently(expandedPaths);
+                    return;
+                }
+
                 foreach (var filename in expandedPaths)
                 {
                     if (expandedPathsMaybeDirectory && Directory.Exists(filename))
@@ -962,6 +982,89 @@ namespace Microsoft.PowerShell.Commands
             }
 
             return false;
+        }
+
+        private bool CanScanFilesConcurrently(List<string> paths)
+        {
+            // Keep short-circuit modes and individually arriving pipeline objects on
+            // their original path. Custom/strict decoders may observe speculative reads.
+            // Limit this first integration to ordinary Windows files; Unix special
+            // files need a reliable file-type check before opening on worker threads.
+            return OperatingSystem.IsWindows() && Path != null && paths.Count > 1 &&
+                !Quiet && !List && !Raw && Encoding is UTF8Encoding &&
+                Encoding.GetType().Assembly == typeof(UTF8Encoding).Assembly &&
+                Encoding.DecoderFallback is DecoderReplacementFallback &&
+                paths.TrueForAll(IsConcurrentScanFile);
+        }
+
+        private static bool IsConcurrentScanFile(string path)
+        {
+            try
+            {
+                return File.Exists(path) &&
+                    (File.GetAttributes(path) & (FileAttributes.Device | FileAttributes.ReparsePoint)) == 0;
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                // Let the sequential path report metadata/open failures with its
+                // existing error identity and ordering, including file-removal races.
+                return false;
+            }
+        }
+
+        private void ProcessFilesConcurrently(List<string> paths)
+        {
+            // Resolve/filter on the pipeline thread. Workers receive only file names,
+            // engine settings and a token; they never read command or host state.
+            List<string> included = paths.FindAll(MeetsIncludeExcludeCriteria);
+            var factory = new MatchInfoFactory(this);
+            using var cancellation = new CancellationTokenSource();
+            lock (_scanCancellationLock)
+            {
+                _scanCancellation = cancellation;
+                if (Stopping) { cancellation.Cancel(); }
+            }
+
+            try
+            {
+                _engine.ScanFiles(included, Encoding, result =>
+                {
+                    if (Stopping) { return false; }
+                    var data = new SelectStringEngine.MatchData(result.PatternIndex, result.SimpleMatchIndex, result.Matches);
+                    MatchInfo output = factory.Create(result.Line, result.Path, result.LineNumber, in data, result.Context != null);
+                    if (result.Context is { } context)
+                    {
+                        factory.SetLogicalContext(output, context.PreContext, context.PostContext);
+                        factory.SetDisplayContext(output, context.DisplayPreContext, context.DisplayPostContext);
+                    }
+
+                    factory.Write(output);
+                    return true;
+                }, (filename, error) =>
+                {
+                    if (error is NotSupportedException or IOException or System.Security.SecurityException or UnauthorizedAccessException)
+                    {
+                        WriteError(BuildErrorRecord(MatchStringStrings.FileReadError, filename, error.Message, "ProcessingFile", error));
+                    }
+                    else
+                    {
+                        ExceptionDispatchInfo.Capture(error).Throw();
+                    }
+                }, _preContext, _postContext, cancellationToken: cancellation.Token);
+            }
+            catch (OperationCanceledException) when (Stopping)
+            {
+                // Pipeline stop already owns termination; workers have been joined.
+            }
+            finally
+            {
+                // StopProcessing may run concurrently with this cleanup. Remove the
+                // published token source under the same lock before disposing it.
+                lock (_scanCancellationLock)
+                {
+                    _scanCancellation = null;
+                }
+            }
         }
 
         private bool ScanFile<T, TFactory>(string filename, TFactory factory)

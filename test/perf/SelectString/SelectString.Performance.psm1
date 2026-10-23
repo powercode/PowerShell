@@ -1066,6 +1066,22 @@ Add-Case 'context-ring-wraparound' {
     0..49 | ForEach-Object { if ($_ % 7 -lt 2) { "hit $_" } else { "line $_" } } | Select-String hit -Context 3
 }
 Add-Case 'downstream-stop' { Select-String -LiteralPath $one -Pattern hit | Select-Object -First 1 }
+Add-Case 'parallel-duplicates-context' { Select-String -LiteralPath $one,$two,$one -Pattern '(?<word>hit)' -Context 2 }
+Add-Case 'parallel-empty-first' { Select-String -LiteralPath $none,$one,$two -Pattern hit }
+Add-Case 'parallel-downstream-stop' { Select-String -LiteralPath $one,$two,$one -Pattern hit | Select-Object -First 1 }
+Add-Case 'parallel-strict-decoder-fallback' {
+    Select-String -LiteralPath $one,$two -Pattern hit -Encoding ([Text.UTF8Encoding]::new($false, $true))
+}
+Add-Case 'parallel-ordered-open-error' {
+    $locked = [IO.File]::Open($two, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+    try { Select-String -LiteralPath $one,$two,$one -Pattern hit }
+    finally { $locked.Dispose() }
+}
+Add-Case 'parallel-terminating-open-error' {
+    $locked = [IO.File]::Open($two, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+    try { Select-String -LiteralPath $one,$two,$one -Pattern hit -ErrorAction Stop }
+    finally { $locked.Dispose() }
+}
 Add-Case 'list-file-closed' {
     Select-String -LiteralPath $one -Pattern hit -List | ForEach-Object {
         $stream = [IO.File]::Open($one, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
