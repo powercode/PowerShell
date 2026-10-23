@@ -24,6 +24,42 @@ Filtered MatchInfo objects preserve shipped identity/cloning behavior, including
 downstream line mutations that affect later context. The factory owns context
 assignment; results and context arrays must not be reused after emission.
 
+## Performance module and entry scripts
+
+`SelectString.Performance.psd1` defines the module and its exports. Implementations,
+parameter definitions and full help live in `SelectString.Performance.psm1`.
+The three entry scripts load dynamic parameters from those definitions, force-reload
+through `Initialize-Performance.ps1`, and delegate. Existing command lines still work.
+The module owns build discovery, worker lifetime and directory completion classes;
+completion uses `IArgumentCompleter` and `IArgumentCompleterFactory`.
+
+For full help in a fresh interactive session, initialize first (PowerShell does not
+load a dynamic script's help target just to display help):
+
+```powershell
+./test/perf/SelectString/Initialize-Performance.ps1
+Get-Help Invoke-SelectStringMeasurement -Full
+Get-Help ./test/perf/SelectString/New-EtwCapture.ps1 -Full
+Get-Help New-SelectStringLogFixture -Full
+```
+
+The initializer imports globally for interactive use. It is deliberately separate
+from the manifest's `ScriptsToProcess`: it imports the manifest itself. Ordinary
+script execution and tab completion initialize automatically. Avoid `using module`
+in wrappers so parse-time class references do not pin old definitions during edits.
+
+Run the harness checks with a built executable:
+
+```powershell
+./test/SelectString/Test-PerformanceScripts.ps1 -PwshPath ./tmp/SelectString/candidate/pwsh.exe
+```
+
+These check help, completion, changed-class reload, worker failures/timeouts,
+fixture validation and small real measurements. Capture orchestration uses a fake
+recorder; the checks do not start WPR. Artifacts stay under `tmp/SelectString`.
+Measurement JSON also records `HostSupportsVirtualTerminal` to help explain
+host-dependent highlight allocations.
+
 ## Build and check compatibility
 
 Run from the repository root. Use separate worktrees and output directories to
