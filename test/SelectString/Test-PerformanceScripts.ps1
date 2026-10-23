@@ -222,6 +222,22 @@ foreach ($inputKind in 'Mixed','Absent') {
         if ($expectedCount -eq 0) { Assert ($null -eq $patternResult.FirstResultMs) 'Absent pattern must not have first-result latency' }
     }
 }
+foreach ($outputMode in 'Context','Raw','List','Quiet') {
+    foreach ($inputKind in 'Mixed','Absent') {
+        $modeOutput = Join-Path $artifacts "mode-$outputMode-$inputKind"
+        & (Join-Path $source 'Measure-SelectString.ps1') -PwshPath $PwshPath -Revision test `
+            -Scenario PatternFile -PatternFamily SqlDuration -InputKind $inputKind `
+            -PatternOutput $outputMode -RecordCount 17 -LineCount 16 -PromotionMode delayed-background-warm `
+            -Iterations 1 -WarmupIterations 1 -Artifacts $modeOutput
+        $modeResult = Get-Content (Join-Path $modeOutput 'results.json') -Raw | ConvertFrom-Json
+        $expected = $outputMode -eq 'Quiet' ? 1 : ($inputKind -eq 'Absent' ? 0 : ($outputMode -eq 'List' ? 1 : 5))
+        Assert ($modeResult.Status -eq 'Measured' -and $modeResult.ResultCount -eq $expected -and $modeResult.ValidatedResults -eq $expected) 'Output-mode validation failed'
+        Assert ($modeResult.PatternOutput -eq $outputMode) 'Output mode not forwarded'
+        if ($modeResult.PromotionCounters) {
+            Assert ($modeResult.PromotionCounters.Completed -eq 1 -and $modeResult.PromotionCounters.Admitted -eq 0) 'Short output-mode case should not admit delayed compilation'
+        }
+    }
+}
 Assert ($log.ValidatedResults -eq $log.ResultCount -and $log.ValidatedMatches -gt $log.ResultCount) 'Capture validation missing'
 & (Join-Path $source 'Measure-SelectString.ps1') -PwshPath $PwshPath -Revision test `
     -Scenario LogContext -LogFixture $fixture -Iterations 1 -WarmupIterations 1 `

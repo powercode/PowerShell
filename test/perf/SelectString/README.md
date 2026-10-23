@@ -621,3 +621,30 @@ they do not model cold storage. Choose an affinity appropriate to your machine.
 
 Results for literal hits and mixed SQL captures/near misses are in
 [RESULTS-background-small-files.md](RESULTS-background-small-files.md).
+
+### Pattern output modes
+
+`PatternFile` accepts `-PatternOutput` with Matches, Context, Raw, List or Quiet (one
+value per run; default `Matches`). `Context` requests two lines before/after each
+match. The other pattern scenarios currently require `Matches`. Validation runs
+outside timing and checks logical context contents, raw strings, first-match
+captures for List, or the true/false Quiet result. A false Quiet result is still
+one output object, so its first-result latency measures completion of the scan.
+
+```powershell
+./test/perf/SelectString/Measure-SelectString.ps1 `
+    -PwshPath ./tmp/SelectString/regex-background/pwsh.exe -Revision background `
+    -PromotionMode background -Scenario PatternFile -PatternOutput Quiet `
+    -PatternFamily SqlDuration -InputKind LongNearMiss -CaseSensitive `
+    -RecordCount 4096 -LineCount 16 -WarmupIterations 20 -Iterations 15 `
+    -LatencyIterations 5 -Affinity 5 -TimeoutSeconds 300 `
+    -Artifacts ./tmp/SelectString/quiet-full-scan-example
+```
+
+Use `Mixed` for a match on the first line (early List/Quiet termination) and
+`LongNearMiss` for a complete scan without matches. The same `Mixed` corpus with
+Context/Raw exercises sustained matching and output. Neither input is a proxy
+for every pattern's compilation cost.
+
+See [RESULTS-background-output-modes.md](RESULTS-background-output-modes.md) for
+the paired output-mode measurements and unused-compilation accounting.

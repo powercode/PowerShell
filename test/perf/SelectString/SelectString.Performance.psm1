@@ -188,6 +188,9 @@ Records per file in PatternSmallFiles (default 16); the last file may be shorter
 One matching record per this many inputs in PipelineCaptures and PipelineStop (default 100).
 .PARAMETER PatternFamily
 Shared corpus pattern for PatternFile, PatternSmallFiles and PatternRecords (default Literal).
+.PARAMETER PatternOutput
+Output mode for PatternFile: Matches (default), Context (two lines each side), Raw, List or Quiet.
+Other pattern scenarios currently require Matches.
 .PARAMETER InputKind
 Corpus input shape; Mixed cycles through match, absent, short and long near miss.
 .PARAMETER CaseSensitive
@@ -236,6 +239,8 @@ param(
     [ValidateRange(1,2147483647)] [int] $MatchEvery = 100,
     [ValidateSet('Literal','DotStar','DotPlus','SqlDuration','OrderId','FileExtension','PrReference','Markdown','Assignment')]
     [string] $PatternFamily = 'Literal',
+    [ValidateSet('Matches','Context','Raw','List','Quiet')]
+    [string] $PatternOutput = 'Matches',
     [ValidateSet('Match','Absent','NearMiss','LongNearMiss','Mixed')]
     [string] $InputKind = 'Mixed',
     [switch] $CaseSensitive,
@@ -255,6 +260,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($PatternOutput -ne 'Matches' -and @($Scenario | Where-Object { $_ -ne 'PatternFile' }).Count) {
+    throw 'PatternOutput modes require PatternFile.'
+}
 if (!$Worker) {
     if (!$PwshPath -or $Revision.Count -ne $PwshPath.Count) { throw 'Provide a revision label for each executable.' }
     # .NET's current directory can differ from PowerShell's current location.
@@ -303,7 +311,7 @@ if (!$Worker) {
             }
             if ($TraceMarkers) { $start.ArgumentList.Add('-TraceMarkers') }
             foreach ($arg in @('-RecordCount', [string]$RecordCount, '-MatchEvery', [string]$MatchEvery, '-LinesPerFile', [string]$LinesPerFile)) { $start.ArgumentList.Add($arg) }
-            foreach ($arg in @('-PatternFamily', $PatternFamily, '-InputKind', $InputKind, '-Culture', $Culture)) {
+            foreach ($arg in @('-PatternFamily', $PatternFamily, '-InputKind', $InputKind, '-Culture', $Culture, '-PatternOutput', $PatternOutput)) {
                 $start.ArgumentList.Add($arg)
             }
             if ($CaseSensitive) { $start.ArgumentList.Add('-CaseSensitive') }
@@ -355,6 +363,12 @@ if ($Scenario[0] -in 'PatternFile','PatternRecords','PatternSmallFiles') {
     $patternParameters = @{
         Pattern = $patternFixture.Pattern
         CaseSensitive = [bool]$CaseSensitive
+    }
+    switch ($PatternOutput) {
+        Context { $patternParameters.Context = 2 }
+        Raw { $patternParameters.Raw = $true }
+        List { $patternParameters.List = $true }
+        Quiet { $patternParameters.Quiet = $true }
     }
     $patternFile = Join-Path $FixtureRoot 'pattern.txt'
     if ($Scenario[0] -eq 'PatternFile') {
@@ -446,8 +460,21 @@ if ($patternFixture) {
         $index = $InputKind -eq 'Mixed' ? $i % $patternFixture.Examples.Length : $inputIndex
         if ($null -ne $patternFixture.Examples[$index].Value) { $expectedLines.Add($i + 1) }
     }
+    $hasExpectedMatch = $expectedLines.Count -gt 0
+    if ($PatternOutput -eq 'List' -and $hasExpectedMatch) {
+        $firstLine = $expectedLines[0]
+        $expectedLines.Clear()
+        $expectedLines.Add($firstLine)
+    }
     $script:validatedCount = 0
     & $action | ForEach-Object {
+        if ($PatternOutput -eq 'Quiet') {
+            if ($_ -isnot [bool] -or $_ -ne $hasExpectedMatch -or $script:validatedCount -ne 0) {
+                throw 'Incorrect Quiet result'
+            }
+            $script:validatedCount++
+            return
+        }
         if ($script:validatedCount -ge $expectedLines.Count) {
             throw 'Unexpected extra pattern result'
         }
@@ -460,15 +487,45 @@ if ($patternFixture) {
                 throw 'Incorrect pattern result file/order'
             }
         }
+        if ($PatternOutput -eq 'Raw') {
+            if ($_ -isnot [string] -or $_ -cne $patternRecords[$recordIndex]) {
+                throw 'Incorrect Raw result'
+            }
+            $script:validatedCount++
+            return
+        }
         if ($_.LineNumber -ne $expectedLine) {
             throw 'Incorrect pattern result line/order'
         }
         $index = $InputKind -eq 'Mixed' ? $recordIndex % $patternFixture.Examples.Length : $inputIndex
         if ($_.Line -cne $patternFixture.Examples[$index].Input) { throw 'Incorrect pattern input line' }
         [PowerShell.Benchmarks.SelectString.SearchPatternFixture]::ValidateResult($patternFixture.Examples[$index], $_.Matches)
+        if ($PatternOutput -eq 'Context') {
+            $before = @()
+            $after = @()
+            for ($n = [Math]::Max(0, $recordIndex - 2); $n -lt $recordIndex; $n++) {
+                $before += $patternRecords[$n]
+            }
+            for ($n = $recordIndex + 1; $n -le [Math]::Min($RecordCount - 1, $recordIndex + 2); $n++) {
+                $after += $patternRecords[$n]
+            }
+            foreach ($side in 'PreContext','PostContext') {
+                $expectedContext = $side -eq 'PreContext' ? $before : $after
+                $actualContext = $_.Context.$side
+                if ($actualContext.Count -ne $expectedContext.Count) {
+                    throw 'Incorrect context length'
+                }
+                for ($n = 0; $n -lt $expectedContext.Count; $n++) {
+                    if ($actualContext[$n] -cne $expectedContext[$n]) {
+                        throw 'Incorrect context line'
+                    }
+                }
+            }
+        }
         $script:validatedCount++
     }
-    if ($script:validatedCount -ne $expectedLines.Count) { throw 'Incorrect pattern result count' }
+    $expectedResultCount = $PatternOutput -eq 'Quiet' ? 1 : $expectedLines.Count
+    if ($script:validatedCount -ne $expectedResultCount) { throw 'Incorrect pattern result count' }
     $validatedPipelineResults = $script:validatedCount
 }
 if ($Scenario[0] -in 'PipelineCaptures','PipelineStop','FileStop') {
@@ -605,6 +662,7 @@ $sorted = @($samples | Sort-Object)
     PipelineRecordCount = $pipelineRecords ? $RecordCount : $null
     PipelineMatchEvery = $pipelineRecords ? $MatchEvery : $null
     PatternFamily = $patternFixture ? $PatternFamily : $null
+    PatternOutput = $patternFixture ? $PatternOutput : $null
     PatternInput = $patternFixture ? $InputKind : $null
     PatternRecordCount = $patternFixture ? $RecordCount : $null
     PatternFileCount = $Scenario[0] -eq 'PatternSmallFiles' ? $patternFiles.Count : $null
