@@ -184,6 +184,13 @@ Input records for PipelineCaptures, PipelineStop, PatternRecords, PatternFile an
 (default 10000), shared by one cmdlet invocation.
 .PARAMETER LinesPerFile
 Records per file in PatternSmallFiles (default 16); the last file may be shorter.
+.PARAMETER SinkDelayMilliseconds
+Optional periodic consumer sleep during warmup and throughput measurements (default
+zero). Includes ForEach-Object pipeline binding; latency uses the ordinary counting
+sink separately. Sleep duration is scheduler-dependent, not a throughput guarantee.
+.PARAMETER SinkDelayEvery
+Number of results between consumer sleeps (default 128). Applies only when
+SinkDelayMilliseconds is nonzero. Validation always uses an undelayed consumer.
 .PARAMETER MatchEvery
 One matching record per this many inputs in PipelineCaptures and PipelineStop (default 100).
 .PARAMETER PatternFamily
@@ -193,7 +200,7 @@ Single (default), TargetFirst or TargetLast. Multi-pattern controls add OrderId,
 PrReference and Assignment patterns that do not match the Literal/SqlDuration inputs.
 .PARAMETER PatternOutput
 Output mode for PatternFile: Matches (default), Context (two lines each side), Raw, List or Quiet.
-Other pattern scenarios currently require Matches.
+PatternSmallFiles also supports Context; PatternRecords requires Matches.
 .PARAMETER InputKind
 Corpus input shape; Mixed cycles through match, absent, short and long near miss.
 .PARAMETER CaseSensitive
@@ -239,6 +246,8 @@ param(
     [ValidateRange(16,2147483647)] [int] $LineCount = 100000,
     [ValidateRange(1,2147483647)] [int] $RecordCount = 10000,
     [ValidateRange(1,2147483647)] [int] $LinesPerFile = 16,
+    [ValidateRange(0,1000)] [int] $SinkDelayMilliseconds = 0,
+    [ValidateRange(1,2147483647)] [int] $SinkDelayEvery = 128,
     [ValidateRange(1,2147483647)] [int] $MatchEvery = 100,
     [ValidateSet('Literal','DotStar','DotPlus','SqlDuration','OrderId','FileExtension','PrReference','Markdown','Assignment')]
     [string] $PatternFamily = 'Literal',
@@ -268,8 +277,10 @@ $ErrorActionPreference = 'Stop'
 if ($PatternSet -ne 'Single' -and ($PatternFamily -notin 'Literal','SqlDuration' -or @($Scenario | Where-Object { $_ -notin 'PatternFile','PatternRecords','PatternSmallFiles' }).Count)) {
     throw 'Multi-pattern controls require Literal/SqlDuration pattern scenarios.'
 }
-if ($PatternOutput -ne 'Matches' -and @($Scenario | Where-Object { $_ -ne 'PatternFile' }).Count) {
-    throw 'PatternOutput modes require PatternFile.'
+if ($PatternOutput -ne 'Matches' -and @($Scenario | Where-Object {
+    $_ -ne 'PatternFile' -and !($_ -eq 'PatternSmallFiles' -and $PatternOutput -eq 'Context')
+}).Count) {
+    throw 'PatternOutput modes require PatternFile; Context also supports PatternSmallFiles.'
 }
 if (!$Worker) {
     if (!$PwshPath -or $Revision.Count -ne $PwshPath.Count) { throw 'Provide a revision label for each executable.' }
@@ -319,6 +330,9 @@ if (!$Worker) {
             }
             if ($TraceMarkers) { $start.ArgumentList.Add('-TraceMarkers') }
             foreach ($arg in @('-RecordCount', [string]$RecordCount, '-MatchEvery', [string]$MatchEvery, '-LinesPerFile', [string]$LinesPerFile)) { $start.ArgumentList.Add($arg) }
+            foreach ($arg in @('-SinkDelayMilliseconds', [string]$SinkDelayMilliseconds, '-SinkDelayEvery', [string]$SinkDelayEvery)) {
+                $start.ArgumentList.Add($arg)
+            }
             foreach ($arg in @('-PatternFamily', $PatternFamily, '-InputKind', $InputKind, '-Culture', $Culture, '-PatternOutput', $PatternOutput, '-PatternSet', $PatternSet)) {
                 $start.ArgumentList.Add($arg)
             }
@@ -521,10 +535,12 @@ if ($patternFixture) {
         if ($PatternOutput -eq 'Context') {
             $before = @()
             $after = @()
-            for ($n = [Math]::Max(0, $recordIndex - 2); $n -lt $recordIndex; $n++) {
+            $firstRecord = $Scenario[0] -eq 'PatternSmallFiles' ? $fileIndex * $LinesPerFile : 0
+            $lastRecord = $Scenario[0] -eq 'PatternSmallFiles' ? [Math]::Min($RecordCount - 1, $firstRecord + $LinesPerFile - 1) : $RecordCount - 1
+            for ($n = [Math]::Max($firstRecord, $recordIndex - 2); $n -lt $recordIndex; $n++) {
                 $before += $patternRecords[$n]
             }
-            for ($n = $recordIndex + 1; $n -le [Math]::Min($RecordCount - 1, $recordIndex + 2); $n++) {
+            for ($n = $recordIndex + 1; $n -le [Math]::Min($lastRecord, $recordIndex + 2); $n++) {
                 $after += $patternRecords[$n]
             }
             foreach ($side in 'PreContext','PostContext') {
@@ -571,6 +587,19 @@ if ($logManifest) {
 }
 
 # Startup, fixture creation, module loading and warmup are outside timed samples.
+$timedAction = $action
+if ($SinkDelayMilliseconds) {
+    # Deliberately include downstream pipeline binding and periodic blocking in
+    # delivered throughput. Validation and latency retain the original action.
+    $timedAction = {
+        & $action | ForEach-Object -Begin { $received = 0 } -Process {
+            $received++
+            if ($received % $SinkDelayEvery -eq 0) {
+                [Threading.Thread]::Sleep($SinkDelayMilliseconds)
+            }
+        }
+    }
+}
 $markers = $null
 if ($TraceMarkers) {
     Add-Type -Path (Join-Path $PSScriptRoot 'BenchmarkEvents.cs')
@@ -579,7 +608,7 @@ if ($TraceMarkers) {
     $markers.WarmupBegin($Scenario[0])
 }
 try {
-    for ($warmup = 0; $warmup -lt $WarmupIterations; $warmup++) { & $action > $null }
+    for ($warmup = 0; $warmup -lt $WarmupIterations; $warmup++) { & $timedAction > $null }
 } finally {
     if ($markers) { $markers.WarmupEnd($Scenario[0]) }
 }
@@ -598,7 +627,7 @@ for ($i = 0; $i -lt $Iterations; $i++) {
     $g1 = [GC]::CollectionCount(1)
     $g2 = [GC]::CollectionCount(2)
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    try { & $action > $null }
+    try { & $timedAction > $null }
     finally { $timer.Stop() }
     $samples += $timer.Elapsed.TotalMilliseconds
     $allocations += [GC]::GetTotalAllocatedBytes($true) - $before
@@ -671,7 +700,9 @@ $sorted = @($samples | Sort-Object)
     CpuMsPerInvocation = $cpuMs / $Iterations
     WarmupIterations = $WarmupIterations
     WorkerPid = $PID
-    Sink = 'NullRedirection'
+    Sink = $SinkDelayMilliseconds ? 'PeriodicBlockingConsumer' : 'NullRedirection'
+    SinkDelayMilliseconds = $SinkDelayMilliseconds
+    SinkDelayEvery = $SinkDelayMilliseconds ? $SinkDelayEvery : $null
     TraceMarkers = [bool]$TraceMarkers
     CountingMeasured = !$SkipCounting
     HostSupportsVirtualTerminal = $Host.UI.SupportsVirtualTerminal
