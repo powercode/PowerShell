@@ -35,6 +35,7 @@ foreach ($name in $builds.Keys) {
             -Iterations 25 `
             -WarmupIterations 60 `
             -Affinity 1 `
+            -TraceMarkers -SkipCounting `
             -TimeoutSeconds 180 `
             -Artifacts (Join-Path $out $name)
 

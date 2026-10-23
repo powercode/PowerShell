@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
+<InstrumentationManifest>
+  <Instrumentation>
+    <Regions>
+      <RegionRoot Guid="{34a48075-687a-4be5-b3da-868136bda800}" Name="SelectStringBenchmark" FriendlyName="Select-String benchmark phases">
+        <Region Guid="{34a48075-687a-4be5-b3da-868136bda801}" Name="Warmup" FriendlyName="Warmup">
+          <Start>
+            <Event Provider="{cf52a2f8-c51a-4c1e-9a75-62796b581a55}" Id="1" Version="0" />
+          </Start>
+          <Stop>
+            <Event Provider="{cf52a2f8-c51a-4c1e-9a75-62796b581a55}" Id="2" Version="0" />
+          </Stop>
+          <Match>
+            <Event PID="true" TID="true" />
+          </Match>
+        </Region>
+        <Region Guid="{34a48075-687a-4be5-b3da-868136bda803}" Name="Measured iteration" FriendlyName="Measured iteration">
+          <Start>
+            <Event Provider="{cf52a2f8-c51a-4c1e-9a75-62796b581a55}" Id="3" Version="0" />
+          </Start>
+          <Stop>
+            <Event Provider="{cf52a2f8-c51a-4c1e-9a75-62796b581a55}" Id="4" Version="0" />
+          </Stop>
+          <Match>
+            <Event PID="true" TID="true" />
+          </Match>
+        </Region>
+        <Region Guid="{34a48075-687a-4be5-b3da-868136bda805}" Name="Latency and counting" FriendlyName="Latency and counting">
+          <Start>
+            <Event Provider="{cf52a2f8-c51a-4c1e-9a75-62796b581a55}" Id="5" Version="0" />
+          </Start>
+          <Stop>
+            <Event Provider="{cf52a2f8-c51a-4c1e-9a75-62796b581a55}" Id="6" Version="0" />
+          </Stop>
+          <Match>
+            <Event PID="true" TID="true" />
+          </Match>
+        </Region>
+      </RegionRoot>
+    </Regions>
+  </Instrumentation>
+</InstrumentationManifest>

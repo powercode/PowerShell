@@ -13,6 +13,8 @@ param(
     [ValidateRange(1,3600)] [int] $TimeoutSeconds = 60,
     [string] $Artifacts = (Join-Path $PSScriptRoot 'bin/measurements'),
     [switch] $Worker,
+    [switch] $TraceMarkers,
+    [switch] $SkipCounting,
     [string] $FixtureRoot,
     [string] $OutputFile
 )
@@ -59,6 +61,8 @@ if (!$Worker) {
             foreach ($arg in @('-NoLogo','-NoProfile','-File',$PSCommandPath,'-Worker','-FixtureRoot',$FixtureRoot,'-OutputFile',$output,'-Scenario',$case,'-Iterations',[string]$Iterations,'-WarmupIterations',[string]$WarmupIterations,'-Affinity',[string]$Affinity)) {
                 $start.ArgumentList.Add($arg)
             }
+            if ($TraceMarkers) { $start.ArgumentList.Add('-TraceMarkers') }
+            if ($SkipCounting) { $start.ArgumentList.Add('-SkipCounting') }
             $process = [Diagnostics.Process]::Start($start)
             try {
                 if ($Affinity) { $process.ProcessorAffinity = [IntPtr]$Affinity }
@@ -117,30 +121,51 @@ $action = switch ($Scenario[0]) {
 }
 
 # Startup, fixture creation, module loading and warmup are outside timed samples.
-1..$WarmupIterations | ForEach-Object { & $action | Out-Null }
+$markers = $null
+if ($TraceMarkers) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'BenchmarkEvents.cs')
+    $markers = [SelectStringBenchmarkEvents]::Log
+    if ($markers.ConstructionException) { throw $markers.ConstructionException }
+    $markers.WarmupBegin($Scenario[0])
+}
+try {
+    for ($warmup = 0; $warmup -lt $WarmupIterations; $warmup++) { $null = & $action }
+} finally {
+    if ($markers) { $markers.WarmupEnd($Scenario[0]) }
+}
 $samples = @()
 $allocations = @()
 $collections = @()
 for ($i = 0; $i -lt $Iterations; $i++) {
+    if ($markers) { $markers.IterationBegin($i) }
     $before = [GC]::GetTotalAllocatedBytes($true)
     $g0 = [GC]::CollectionCount(0); $g1 = [GC]::CollectionCount(1); $g2 = [GC]::CollectionCount(2)
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    & $action | Out-Null
-    $timer.Stop()
+    try { $null = & $action }
+    finally { $timer.Stop() }
     $samples += $timer.Elapsed.TotalMilliseconds
     $allocations += [GC]::GetTotalAllocatedBytes($true) - $before
     $collections += ,@(([GC]::CollectionCount(0) - $g0), ([GC]::CollectionCount(1) - $g1), ([GC]::CollectionCount(2) - $g2))
+    if ($markers) { $markers.IterationEnd($i) }
 }
 
 # Measure streaming latency separately: the counting sink adds its own overhead.
-$script:count = 0
+$script:count = $null
 $script:first = $null
-$latency = [Diagnostics.Stopwatch]::StartNew()
-& $action | ForEach-Object {
-    if ($script:count -eq 0) { $script:first = $latency.Elapsed.TotalMilliseconds }
-    $script:count++
+if (!$SkipCounting) {
+    if ($markers) { $markers.CountingBegin($Scenario[0]) }
+    $script:count = 0
+    $latency = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        & $action | ForEach-Object {
+            if ($script:count -eq 0) { $script:first = $latency.Elapsed.TotalMilliseconds }
+            $script:count++
+        }
+    } finally {
+        $latency.Stop()
+        if ($markers) { $markers.CountingEnd($Scenario[0]) }
+    }
 }
-$latency.Stop()
 $sorted = @($samples | Sort-Object)
 [ordered]@{
     Scenario = $Scenario[0]; Status = 'Measured'; Cache = 'Warm'; PowerShell = $PSVersionTable.PSVersion.ToString()
@@ -149,6 +174,8 @@ $sorted = @($samples | Sort-Object)
     Architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
     ProcessorCount = [Environment]::ProcessorCount; Processor = $env:PROCESSOR_IDENTIFIER
     RequestedAffinity = $Affinity; WarmupIterations = $WarmupIterations
+    WorkerPid = $PID; Sink = 'NullAssignment'; TraceMarkers = [bool]$TraceMarkers
+    CountingMeasured = !$SkipCounting
     AssemblyHash = (Get-FileHash ([Microsoft.PowerShell.Commands.SelectStringCommand].Assembly.Location)).Hash
     SamplesMs = $samples; MedianMs = $sorted[[int][Math]::Floor($sorted.Count / 2)]
     AllocatedBytes = ($allocations | Measure-Object -Average).Average; Collections = $collections

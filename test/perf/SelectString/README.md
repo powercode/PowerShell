@@ -95,7 +95,7 @@ dotnet run -c Release --project test/perf/SelectString/SelectString.Engine.Bench
 
 Every build/scenario gets a separate process with a timeout. Startup, module
 loading, data preparation and warmups (three by default) are excluded. Throughput samples
-consume output with Out-Null. A separate instrumented pass measures first-result
+discard output with `$null = & $action`. A separate instrumented pass measures first-result
 latency and counts results. JSON includes all timing samples, process-wide managed
 allocation deltas, GC counts, peak working set, runtime, hardware and assembly hash.
 Peak working set includes setup and warmup; it is not incremental engine memory.
@@ -139,11 +139,24 @@ inlining diagnostics. It does not attribute allocations by type. See the
 [runtime event manifest](https://github.com/dotnet/runtime/blob/main/src/coreclr/vm/ClrEtwAll.man)
 for event levels and keywords. Each collector has 256 buffers of 256 KiB.
 
-Recording begins before worker startup to capture method loads, and includes
-warmup and the final latency/count pass. Phase markers are not yet emitted;
-whole-trace totals mix these phases. The counting pass uses ForEach-Object and
-adds downstream pipeline work. Switching timed calls to null assignment and
-adding phase markers are the next measurement step, not part of these results.
+Recording begins before worker startup to capture method loads and includes
+warmup. The capture script enables `-TraceMarkers` and `-SkipCounting` so the
+ForEach-Object latency/count pass does not contaminate CPU captures. A plain for
+loop drives warmup. Ordinary measurement runs still include the separate counting
+pass unless explicitly skipped; skipped latency/count fields are null.
+
+`BenchmarkEvents.cs` provides warmup, measured-iteration and counting boundaries.
+Marker calls are outside the timing/allocation samples; iteration regions also
+include the small measurement bookkeeping surrounding each timed call. The WPA
+profile loads `SelectString.Regions.xml` to expose these phases. Select measured
+iteration regions when comparing builds. Failed iterations may have an unmatched
+begin marker and must not be treated as successful samples.
+
+JSON records `Sink`, `WorkerPid`, `TraceMarkers` and `CountingMeasured`. Historical
+reports used Out-Null: rerun all compared builds with this harness rather than
+comparing new numbers directly against those old reports. Marker compilation and
+registration happen before warmup and only when requested; untraced runs do not
+load the provider. Actual ETW region pairing still needs validation in WPA.
 Filter analysis to the benchmark worker PID; other PowerShell processes
 also match the executable filter. Kernel sampling remains system-wide to expose
 competing CPU activity. Managed symbol coverage and event loss must be checked

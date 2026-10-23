@@ -20,6 +20,10 @@
       <Entrypoint Module="System.Management.Automation.dll" Method="Microsoft.PowerShell.Commands.Internal.Format.*"/>
       <Entrypoint Module="System.Management.Automation.ni.dll" Method="Microsoft.PowerShell.Commands.Internal.Format.*"/>
     </Tag>
+    <Tag Name="Parameter Binding">
+      <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.*ParameterBinder*"/>
+      <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.*ParameterBinder*"/>
+    </Tag>
     <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.Runspaces.PipelineThread.WorkerProc*"/>
     <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.Runspaces.LocalPipeline.*"/>
     <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.Internal.PipelineProcessor.*"/>
