@@ -8,9 +8,12 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <OutputType>Exe</OutputType>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- Environment variables propagate to BenchmarkDotNet's generated builds. -->
+    <SelectStringEngineSource>$(SELECTSTRING_ENGINE_SOURCE)</SelectStringEngineSource>
+    <SelectStringEngineSource Condition="'$(SelectStringEngineSource)' == ''">../../../src/Microsoft.PowerShell.Commands.Utility/commands/utility/SelectString.Engine.cs</SelectStringEngineSource>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../../src/Microsoft.PowerShell.Commands.Utility/commands/utility/SelectString.Engine.cs" Link="SelectString.Engine.cs" />
+    <Compile Include="$(SelectStringEngineSource)" Link="SelectString.Engine.cs" />
     <Compile Include="Engine.Benchmarks.cs" />
     <!-- .NET 11 support is required by the repository target framework. -->
     <PackageReference Include="BenchmarkDotNet" Version="0.16.0-preview.2" />

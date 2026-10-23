@@ -36,7 +36,7 @@ public class EngineScanning
     private int _count;
     private Func<SelectStringEngine.Result, bool> _sink;
 
-    [Params("String", "Records", "SmallFiles", "LargeFile", "LongLine", "Dense", "Early", "Late", "Context", "Utf16", "Utf32", "Legacy")]
+    [Params("String", "Records", "SmallFiles", "LargeFile", "LongLine", "Dense", "Early", "Late", "Context", "DenseContext", "NoMatchContext", "Utf16", "Utf32", "Legacy")]
     public string Scenario { get; set; }
 
     [Params(false, true)]
@@ -83,7 +83,8 @@ public class EngineScanning
                 {
                     "Early" => i == 0,
                     "Late" => i == lines - 1,
-                    "Dense" => true,
+                    "Dense" or "DenseContext" => true,
+                    "NoMatchContext" => false,
                     _ => i % 100 == 0,
                 };
                 writer.WriteLine(hit ? "needle café needle" : "ordinary input café without a match");
@@ -107,7 +108,7 @@ public class EngineScanning
         }
         else
         {
-            int context = Scenario == "Context" ? 2 : 0;
+            int context = Scenario is "Context" or "DenseContext" or "NoMatchContext" ? 2 : 0;
             foreach (string path in _paths)
             {
                 _engine.ScanFile(path, _encoding, context, context, Scenario == "Early" || Scenario == "Late", _sink);

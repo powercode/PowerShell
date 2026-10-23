@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
+<!-- Inclusive stack categories, not mutually exclusive allocation counters.
+     Match both shipping nested trackers and the extracted generic engine. -->
+<Tag Name="Select-String">
+  <Tag Name="Matching">
+    <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringEngine.TryMatch*" />
+    <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringCommand.DoMatch*" />
+  </Tag>
+  <Tag Name="Context">
+    <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectString*ContextTracker*" />
+  </Tag>
+  <Tag Name="Result construction">
+    <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectString*Factory*Create*" />
+    <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringCommand.ToMatchInfo*" />
+  </Tag>
+  <Tag Name="Regex">
+    <Entrypoint Module="System.Text.RegularExpressions.dll" Method="System.Text.RegularExpressions.*" />
+  </Tag>
+  <Tag Name="Reading and decoding">
+    <Entrypoint Module="System.Private.CoreLib.dll" Method="System.IO.StreamReader.*" />
+    <Entrypoint Module="System.Private.CoreLib.dll" Method="System.IO.FileStream*" />
+    <Entrypoint Module="System.Private.CoreLib.dll" Method="System.Text.*Encoding*" />
+  </Tag>
+  <Tag Name="Pipeline output">
+    <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.MshCommandRuntime.WriteObject*" />
+    <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.Internal.Pipe.Add*" />
+  </Tag>
+  <Tag Name="JIT compiler">
+    <Entrypoint Module="clrjit.dll" Method="*" />
+  </Tag>
+  <Tag Name="Garbage collector">
+    <Entrypoint Module="coreclr.dll" Method="*gc_heap::*" />
+    <Entrypoint Module="coreclr.dll" Method="*GCHeap::*" />
+  </Tag>
+  <Tag Name="Command and engine">
+    <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringCommand.*" />
+    <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringEngine.*" />
+  </Tag>
+</Tag>

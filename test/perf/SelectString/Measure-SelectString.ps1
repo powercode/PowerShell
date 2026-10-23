@@ -5,8 +5,10 @@
 param(
     [string[]] $PwshPath,
     [string[]] $Revision,
-    [string[]] $Scenario = @('String', 'Records', 'SmallFiles', 'LargeFile', 'LongLine', 'Dense', 'NoMatch', 'AllMatches', 'Simple', 'Context', 'Raw', 'List', 'QuietEarly', 'QuietLate', 'Utf16', 'Utf32', 'Legacy', 'Formatting'),
+    [string[]] $Scenario = @('String', 'Records', 'SmallFiles', 'LargeFile', 'LongLine', 'Dense', 'NoMatch', 'AllMatches', 'Simple', 'Context', 'DenseContext', 'NoMatchContext', 'Raw', 'List', 'QuietEarly', 'QuietLate', 'Utf16', 'Utf32', 'Legacy', 'Formatting'),
     [ValidateRange(1,100)] [int] $Iterations = 7,
+    [ValidateRange(1,1000)] [int] $WarmupIterations = 3,
+    [ValidateRange(0,9223372036854775807)] [long] $Affinity = 0,
     [ValidateRange(16,2147483647)] [int] $LineCount = 100000,
     [ValidateRange(1,3600)] [int] $TimeoutSeconds = 60,
     [string] $Artifacts = (Join-Path $PSScriptRoot 'bin/measurements'),
@@ -18,7 +20,9 @@ param(
 $ErrorActionPreference = 'Stop'
 if (!$Worker) {
     if (!$PwshPath -or $Revision.Count -ne $PwshPath.Count) { throw 'Provide a revision label for each executable.' }
-    $Artifacts = [IO.Path]::GetFullPath($Artifacts)
+    # .NET's current directory can differ from PowerShell's current location.
+    $Artifacts = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Artifacts)
+    $PwshPath = @($PwshPath | ForEach-Object { (Resolve-Path -LiteralPath $_ -ErrorAction Stop).ProviderPath })
     $FixtureRoot = Join-Path $Artifacts 'fixtures'
     $null = New-Item -ItemType Directory -Path $FixtureRoot -Force
     foreach ($encoding in @(@{ Name = 'large'; Value = [Text.UTF8Encoding]::new($false) }, @{ Name = 'utf16'; Value = [Text.Encoding]::Unicode }, @{ Name = 'utf32'; Value = [Text.Encoding]::UTF32 }, @{ Name = 'legacy'; Value = [Text.Encoding]::GetEncoding(1252) })) {
@@ -48,14 +52,16 @@ if (!$Worker) {
     for ($build = 0; $build -lt $PwshPath.Count; $build++) {
         foreach ($case in $Scenario) {
             $output = Join-Path $Artifacts "$build-$case.json"
-            $start = [Diagnostics.ProcessStartInfo]::new([IO.Path]::GetFullPath($PwshPath[$build]))
+            $start = [Diagnostics.ProcessStartInfo]::new($PwshPath[$build])
+            $start.WorkingDirectory = $Artifacts
             $start.UseShellExecute = $false
             $start.CreateNoWindow = $true
-            foreach ($arg in @('-NoLogo','-NoProfile','-File',$PSCommandPath,'-Worker','-FixtureRoot',$FixtureRoot,'-OutputFile',$output,'-Scenario',$case,'-Iterations',[string]$Iterations)) {
+            foreach ($arg in @('-NoLogo','-NoProfile','-File',$PSCommandPath,'-Worker','-FixtureRoot',$FixtureRoot,'-OutputFile',$output,'-Scenario',$case,'-Iterations',[string]$Iterations,'-WarmupIterations',[string]$WarmupIterations,'-Affinity',[string]$Affinity)) {
                 $start.ArgumentList.Add($arg)
             }
             $process = [Diagnostics.Process]::Start($start)
             try {
+                if ($Affinity) { $process.ProcessorAffinity = [IntPtr]$Affinity }
                 if (!$process.WaitForExit($TimeoutSeconds * 1000)) {
                     $process.Kill($true)
                     $process.WaitForExit()
@@ -68,7 +74,7 @@ if (!$Worker) {
             }
             finally { $process.Dispose() }
             $result | Add-Member Revision $Revision[$build]
-            $result | Add-Member Executable ([IO.Path]::GetFullPath($PwshPath[$build]))
+            $result | Add-Member Executable $PwshPath[$build]
             $results.Add($result)
             Write-Host "$($Revision[$build]) $case : $($result.Status)"
         }
@@ -97,6 +103,8 @@ $action = switch ($Scenario[0]) {
     AllMatches { { Select-String -LiteralPath $large -Pattern 'needle','café' -AllMatches } }
     Simple { { Select-String -LiteralPath $large -Pattern needle -SimpleMatch } }
     Context { { Select-String -LiteralPath $large -Pattern needle -Context 2 } }
+    DenseContext { { Select-String -LiteralPath (Join-Path $FixtureRoot 'dense.txt') -Pattern needle -Context 2 } }
+    NoMatchContext { { Select-String -LiteralPath $large -Pattern absent -Context 2 } }
     Raw { { Select-String -LiteralPath $large -Pattern needle -Raw } }
     List { { Select-String -LiteralPath $small -Pattern needle -List } }
     QuietEarly { { Select-String -LiteralPath $large -Pattern needle -Quiet } }
@@ -109,7 +117,7 @@ $action = switch ($Scenario[0]) {
 }
 
 # Startup, fixture creation, module loading and warmup are outside timed samples.
-1..3 | ForEach-Object { & $action | Out-Null }
+1..$WarmupIterations | ForEach-Object { & $action | Out-Null }
 $samples = @()
 $allocations = @()
 $collections = @()
@@ -140,6 +148,7 @@ $sorted = @($samples | Sort-Object)
     OS = [Runtime.InteropServices.RuntimeInformation]::OSDescription
     Architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
     ProcessorCount = [Environment]::ProcessorCount; Processor = $env:PROCESSOR_IDENTIFIER
+    RequestedAffinity = $Affinity; WarmupIterations = $WarmupIterations
     AssemblyHash = (Get-FileHash ([Microsoft.PowerShell.Commands.SelectStringCommand].Assembly.Location)).Hash
     SamplesMs = $samples; MedianMs = $sorted[[int][Math]::Floor($sorted.Count / 2)]
     AllocatedBytes = ($allocations | Measure-Object -Average).Average; Collections = $collections

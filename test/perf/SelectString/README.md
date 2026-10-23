@@ -14,6 +14,16 @@ false. `-List`/`-Quiet` wait for the necessary context and close the file before
 emitting. Concurrency, pooled decoding, compiled regex selection and specialized
 existence-only matching remain subsequent experiments.
 
+The allocation phase separates matching metadata (`MatchData`, a value type)
+from result construction. A constrained struct factory lets scanning and both
+context trackers use caller-owned reference objects. Detailed output uses
+`MatchInfo` directly; the core does not reference that type. Raw and boolean Quiet
+output retain a lightweight representation. Logical context entries are immutable
+value types in the ring buffer, while matching results remain shared references.
+Filtered MatchInfo objects preserve shipped identity/cloning behavior, including
+downstream line mutations that affect later context. The factory owns context
+assignment; results and context arrays must not be reused after emission.
+
 ## Build and check compatibility
 
 Run from the repository root. Use separate worktrees and output directories to
@@ -23,8 +33,10 @@ needed by Add-Type/Pester, and records build provenance.
 
 ```powershell
 git worktree add --detach ../SelectString-baseline 17f1446e5c4d88636e0d65bfedbaf8fe1bd5aaa6
+git worktree add --detach ../SelectString-first-extraction 41b3169b4
 
 ./test/SelectString/Build-Comparison.ps1 -SourceRoot ../SelectString-baseline -OutputDirectory ./tmp/SelectString/baseline
+./test/SelectString/Build-Comparison.ps1 -SourceRoot ../SelectString-first-extraction -OutputDirectory ./tmp/SelectString/first-extraction
 ./test/SelectString/Build-Comparison.ps1 -SourceRoot . -OutputDirectory ./tmp/SelectString/candidate
 
 dotnet test test/SelectString/SelectString.Engine.Tests.csproj -c Release
@@ -58,23 +70,44 @@ The project pins a BenchmarkDotNet preview with .NET 11 support and keeps langua
 properties local to avoid copying XML namespaces from the repository's older
 MSBuild props into generated benchmark projects.
 
+For a controlled core-only comparison, `SELECTSTRING_ENGINE_SOURCE` can select
+the first extraction's engine while retaining the same benchmark code and data:
+
+```powershell
+$savedEngine = $env:SELECTSTRING_ENGINE_SOURCE
+try {
+    $env:SELECTSTRING_ENGINE_SOURCE = (Resolve-Path ../SelectString-first-extraction/src/Microsoft.PowerShell.Commands.Utility/commands/utility/SelectString.Engine.cs).Path
+    dotnet run -c Release --project test/perf/SelectString/SelectString.Engine.Benchmarks.csproj -- --filter '*NoMatchContext*False*' --job medium --artifacts test/perf/SelectString/bin/core-first
+} finally {
+    $env:SELECTSTRING_ENGINE_SOURCE = $savedEngine
+}
+dotnet run -c Release --project test/perf/SelectString/SelectString.Engine.Benchmarks.csproj -- --filter '*NoMatchContext*False*' --job medium --artifacts test/perf/SelectString/bin/core-current
+```
+
 ## End-to-end command
 
 ```powershell
 ./test/perf/SelectString/Measure-SelectString.ps1 `
-    -PwshPath ./tmp/SelectString/baseline/pwsh.exe,./tmp/SelectString/candidate/pwsh.exe `
-    -Revision 17f1446e5,candidate `
-    -Iterations 7
+    -PwshPath ./tmp/SelectString/baseline/pwsh.exe,./tmp/SelectString/first-extraction/pwsh.exe,./tmp/SelectString/candidate/pwsh.exe `
+    -Revision 17f1446e5,41b3169b4,candidate `
+    -Iterations 25 -WarmupIterations 15 -Affinity 1
 ```
 
 Every build/scenario gets a separate process with a timeout. Startup, module
-loading, data preparation and three warmups are excluded. Throughput samples
+loading, data preparation and warmups (three by default) are excluded. Throughput samples
 consume output with Out-Null. A separate instrumented pass measures first-result
 latency and counts results. JSON includes all timing samples, process-wide managed
 allocation deltas, GC counts, peak working set, runtime, hardware and assembly hash.
 Peak working set includes setup and warmup; it is not incremental engine memory.
 PowerShell harness overhead is included in allocations and command timing, so use
 the standalone suite for small operation and allocation comparisons.
+
+`-Affinity` is an optional processor affinity mask (zero leaves scheduling alone).
+The example pins workers to logical processor zero on Windows; use a mask allowed
+by your operating system, or omit it where process affinity is unsupported.
+Pin all compared builds to the same processor, particularly on hybrid CPUs.
+BenchmarkDotNet accepts the corresponding `--affinity 1` option. Affinity and
+warmup count are recorded in the command results.
 
 These are **warm-cache** tests. They cover strings, streamed records, 256 small
 files, a 100,000-line file, a 4 MiB line, sparse/dense/missing matches, multiple
@@ -86,5 +119,36 @@ The JSON preserves failures/timeouts rather than reporting them as fast results.
 Counts alone do not establish correctness: use the differential comparison, and
 exclude incorrect scenarios from speedup claims. Formatting is excluded from the
 search throughput scenarios; `Formatting` measures context rendering separately.
+`DenseContext` and `NoMatchContext` isolate context costs at opposite match densities.
 
-See [RESULTS.md](RESULTS.md) for the initial measurements and limitations.
+See [RESULTS.md](RESULTS.md) for the initial measurements and
+[RESULTS-allocations.md](RESULTS-allocations.md) for the allocation phase.
+
+## Focused Windows tracing
+
+Run `New-EtwCapture.ps1` from an elevated PowerShell after building the three
+comparison executables. It writes separate DenseContext traces and benchmark JSON
+under `tmp/SelectString/traces/<timestamp>` and retains WPR stop logs. Do not run
+it alongside another recording. Reported event loss stops further captures.
+
+`SelectString.wprp` captures system CPU samples with stacks and process/image
+events. CLR events are filtered to `pwsh.exe`, keyword mask `0x19` (GC, loader,
+JIT), at verbose level with allocation-tick event ID 10 excluded. This includes
+GC/pause activity, JIT starts and method-load metadata, but excludes heap dumps and
+inlining diagnostics. It does not attribute allocations by type. See the
+[runtime event manifest](https://github.com/dotnet/runtime/blob/main/src/coreclr/vm/ClrEtwAll.man)
+for event levels and keywords. Each collector has 256 buffers of 256 KiB.
+
+Recording begins before worker startup to capture method loads, and includes
+warmup and the final latency/count pass. Phase markers are not yet emitted;
+whole-trace totals mix these phases. The counting pass uses ForEach-Object and
+adds downstream pipeline work. Switching timed calls to null assignment and
+adding phase markers are the next measurement step, not part of these results.
+Filter analysis to the benchmark worker PID; other PowerShell processes
+also match the executable filter. Kernel sampling remains system-wide to expose
+competing CPU activity. Managed symbol coverage and event loss must be checked
+in the resulting trace. Traced timings are diagnostic, not benchmark claims.
+
+Open traces with `tools/performance/SelectString.wpaProfile` for CPU stacks,
+engine-oriented stack tags and GC/JIT regions. See that directory's README for
+the opening command and interpretation limits.
