@@ -10,6 +10,8 @@ using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Channels;
+using System.Threading.Tasks;
 
 namespace Microsoft.PowerShell.Commands
 {
@@ -274,6 +276,130 @@ namespace Microsoft.PowerShell.Commands
             int preContext = 0, int postContext = 0, int maxResults = 32, long byteTarget = 32768,
             CancellationToken cancellationToken = default) =>
             new(this, path, encoding, preContext, postContext, maxResults, byteTarget, cancellationToken);
+
+        /// <summary>
+        /// Scans a bounded window of files concurrently, but invokes both callbacks
+        /// synchronously on the calling thread in file order. Returning false stops all work.
+        /// </summary>
+        internal void ScanFiles(IReadOnlyList<string> paths, Encoding encoding,
+            Func<Result, bool> emit, Action<string, Exception> reportError,
+            int preContext = 0, int postContext = 0, int concurrency = 2,
+            int queuedBatches = 2, int maxResults = 32, long byteTarget = 32768,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(concurrency);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(queuedBatches);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxResults);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(byteTarget);
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var active = new Queue<FileScanWorker>();
+            int next = 0;
+            try
+            {
+                while (next < paths.Count || active.Count > 0)
+                {
+                    // A slot stays occupied until its output is consumed. Fast later
+                    // files therefore cannot create an unbounded reorder backlog.
+                    while (next < paths.Count && active.Count < concurrency)
+                    {
+                        stop.Token.ThrowIfCancellationRequested();
+                        active.Enqueue(new FileScanWorker(this, paths[next++], encoding,
+                            preContext, postContext, queuedBatches, maxResults, byteTarget, stop.Token));
+                    }
+
+                    FileScanWorker current = active.Peek();
+                    // Only the caller waits synchronously: it owns output (and may be
+                    // a PowerShell pipeline thread). Producers await capacity instead.
+                    while (current.Output.WaitToReadAsync(stop.Token).AsTask().GetAwaiter().GetResult())
+                    {
+                        while (current.Output.TryRead(out ScanBatch batch))
+                        {
+                            for (int i = 0; i < batch.Count; i++)
+                            {
+                                stop.Token.ThrowIfCancellationRequested();
+                                Result result = batch.Results[i];
+                                batch.Results[i] = null;
+                                if (!emit(result)) { return; }
+                            }
+                        }
+                    }
+
+                    current.Completion.GetAwaiter().GetResult();
+                    stop.Token.ThrowIfCancellationRequested();
+                    // Completion is separate from channel failure so every completed
+                    // batch is delivered before the file's error, including empty files.
+                    if (current.Error != null) { reportError(current.Path, current.Error); }
+                    active.Dequeue();
+                }
+            }
+            finally
+            {
+                // Cancel before joining: a producer may be waiting on a full queue
+                // whose consumer just stopped or threw. Synchronous I/O and regex
+                // calls still must return before that producer can observe cancellation.
+                stop.Cancel();
+                foreach (FileScanWorker worker in active)
+                {
+                    worker.Completion.GetAwaiter().GetResult();
+                    while (worker.Output.TryRead(out _)) { }
+                }
+            }
+        }
+
+        private sealed class FileScanWorker
+        {
+            internal FileScanWorker(SelectStringEngine engine, string path, Encoding encoding,
+                int preContext, int postContext, int queuedBatches, int maxResults,
+                long byteTarget, CancellationToken cancellationToken)
+            {
+                Path = path;
+                var channel = Channel.CreateBounded<ScanBatch>(new BoundedChannelOptions(queuedBatches)
+                {
+                    SingleReader = true,
+                    SingleWriter = true,
+                    FullMode = BoundedChannelFullMode.Wait,
+                    AllowSynchronousContinuations = false,
+                });
+                Output = channel.Reader;
+                Completion = Task.Run(async () =>
+                {
+                    try
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        using var scan = engine.OpenFileScan(path, encoding, preContext, postContext,
+                            maxResults, byteTarget, cancellationToken);
+                        // Each file owns its capacity: later files cannot consume the
+                        // earliest file's quota and deadlock ordered draining. Wait before
+                        // scanning so a full queue also stops matching and allocation.
+                        while (await channel.Writer.WaitToWriteAsync(cancellationToken).ConfigureAwait(false))
+                        {
+                            ScanBatch batch = scan.ReadBatch();
+                            if (batch == null) { break; }
+                            await channel.Writer.WriteAsync(batch, cancellationToken).ConfigureAwait(false);
+                        }
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                    }
+                    catch (Exception error)
+                    {
+                        Error = error;
+                    }
+                    finally
+                    {
+                        channel.Writer.TryComplete();
+                    }
+                });
+            }
+
+            internal string Path { get; }
+
+            internal ChannelReader<ScanBatch> Output { get; }
+
+            internal Task Completion { get; }
+
+            internal Exception Error { get; private set; }
+        }
 
         /// <summary>
         /// A result batch owns its array and all results. Byte size is an approximate
