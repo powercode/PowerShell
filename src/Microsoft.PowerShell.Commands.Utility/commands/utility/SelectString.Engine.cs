@@ -214,9 +214,9 @@ namespace Microsoft.PowerShell.Commands
 
         internal bool ScanFile(string path, Encoding encoding, int preContext, int postContext,
             bool stopAfterFirst, Func<Result, bool> emit, Func<bool> shouldStop = null,
-            CancellationToken cancellationToken = default) =>
+            int readerBufferSize = 1024, CancellationToken cancellationToken = default) =>
             ScanFile<Result, ResultFactory>(path, encoding, preContext, postContext, stopAfterFirst,
-                default, emit, shouldStop, cancellationToken);
+                default, emit, shouldStop, readerBufferSize, cancellationToken);
 
         /// <summary>
         /// Scans decoded file lines in order. A false sink result stops reading.
@@ -225,14 +225,14 @@ namespace Microsoft.PowerShell.Commands
         /// </summary>
         internal bool ScanFile<T, TFactory>(string path, Encoding encoding, int preContext, int postContext,
             bool stopAfterFirst, TFactory factory, Func<T, bool> emit, Func<bool> shouldStop = null,
-            CancellationToken cancellationToken = default)
+            int readerBufferSize = 1024, CancellationToken cancellationToken = default)
             where T : class
             where TFactory : struct, IResultFactory<T>
         {
             IContextTracker<T> tracker = CreateContextTracker<T, TFactory>(preContext, postContext, factory);
             bool found = false;
             using (FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-            using (StreamReader reader = new(stream, encoding))
+            using (StreamReader reader = new(stream, encoding, detectEncodingFromByteOrderMarks: true, bufferSize: readerBufferSize))
             {
                 ulong lineNumber = 0;
                 while (true)

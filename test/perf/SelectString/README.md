@@ -120,6 +120,31 @@ try {
 dotnet run -c Release --project test/perf/SelectString/SelectString.Engine.Benchmarks.csproj -- --filter '*NoMatchContext*False*' --job medium --artifacts test/perf/SelectString/bin/core-current
 ```
 
+## Reader buffer experiment
+
+`ReaderBufferScanning` compares 1 KiB (the unchanged cmdlet default), 16 KiB and
+64 KiB buffers in the complete engine file scan. It covers sparse captures and
+all matches on the shared 300 MiB log, 256 small files, and a first-line match with
+early termination. The FileStream configuration and regex options stay unchanged.
+It requires the current engine (unset `SELECTSTRING_ENGINE_SOURCE`).
+
+```powershell
+./test/perf/SelectString/New-LogFixture.ps1  # only if the shared fixture is absent
+$env:SELECTSTRING_LOG_FIXTURE = (Resolve-Path ./tmp/SelectString/log-fixture).Path
+dotnet run -c Release --project test/perf/SelectString/SelectString.Engine.Benchmarks.csproj -- --filter '*ReaderBufferScanning*' --job short --affinity 1 --artifacts tmp/SelectString/buffers-bdn
+```
+
+Setup checks the manifest/hash and validates result order and named captures for
+each large-log buffer variant. File generation, validation and regex construction
+are outside timing. MemoryDiagnoser reports scan allocations; the sink counts
+without retaining results. These are warm-cache engine measurements, not shipping
+cmdlet comparisons. Confirm a promising choice end-to-end before adoption.
+
+Larger buffers can decode beyond an early match and encounter invalid bytes that
+the default reader never reaches. A regression test demonstrates this with strict
+UTF-8 decoding. Buffer size therefore affects observable early-exit behavior as
+well as memory and throughput; an unconditional increase is not semantics-neutral.
+
 ## End-to-end command
 
 ```powershell

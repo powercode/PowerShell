@@ -15,6 +15,48 @@ namespace PSTests.SelectString;
 
 public sealed class SelectStringEngineTests
 {
+    [Theory]
+    [InlineData(1024)]
+    [InlineData(16384)]
+    [InlineData(65536)]
+    public void ReaderBuffersPreserveDecodedLinesCapturesAndContext(int bufferSize)
+    {
+        foreach (Encoding encoding in new[] { Encoding.UTF8, Encoding.Unicode, Encoding.BigEndianUnicode, Encoding.UTF32 })
+        {
+            WithFile(path =>
+            {
+                string before = new string('x', bufferSize - 2) + "😀";
+                string hit = "hit café 😀";
+                File.WriteAllText(path, before + "\r\n" + hit + "\r\nafter", encoding);
+                var results = new List<SelectStringEngine.Result>();
+                // BOM detection must override the deliberately incorrect fallback encoding.
+                new SelectStringEngine(new[] { "hit (?<word>café)" }).ScanFile(
+                    path, Encoding.ASCII, 1, 1, false,
+                    result => { results.Add(result); return true; }, readerBufferSize: bufferSize);
+                var result = Assert.Single(results);
+                Assert.Equal(2UL, result.LineNumber);
+                Assert.Equal(hit, result.Line);
+                Assert.Equal("café", Assert.Single(result.Matches).Groups["word"].Value);
+                Assert.Equal(new[] { before }, result.Context.PreContext);
+                Assert.Equal(new[] { "after" }, result.Context.PostContext);
+            });
+        }
+    }
+
+    [Fact]
+    public void LargerReaderBuffersCanDecodePastAnEarlyMatch()
+    {
+        WithFile(path =>
+        {
+            File.WriteAllBytes(path, Encoding.UTF8.GetBytes("hit\n" + new string('x', 32768)).Concat(new byte[] { 0xff }).ToArray());
+            var engine = new SelectStringEngine(new[] { "hit" });
+            var strict = new UTF8Encoding(false, true);
+            Assert.True(engine.ScanFile(path, strict, 0, 0, true, _ => true));
+            Assert.Throws<DecoderFallbackException>(() =>
+                engine.ScanFile(path, strict, 0, 0, true, _ => true, readerBufferSize: 65536));
+        });
+    }
+
     [Fact]
     public void StringsAreRecordsAndRetainTheirStorage()
     {
