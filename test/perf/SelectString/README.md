@@ -674,3 +674,31 @@ warmup. These controlled sets do not cover overlapping successful patterns.
 
 See [RESULTS-background-multiple-patterns.md](RESULTS-background-multiple-patterns.md)
 for pattern-order comparisons, startup costs and unused-work counters.
+
+### Matching-work admission probe
+
+The test-only `MatchingWorkGate` admits background preparation at the next input
+after sampled matching wall time reaches a threshold. Time between matching calls
+(including reading and downstream output) is excluded. Preemption and GC within
+a sampled call still count. Sampling does not extrapolate unobserved work and can
+miss expensive inputs. Admission/rejection is attempted once, and timing stops
+after that decision or a stop request. Final-call threshold crossing alone starts
+no worker. Joined disposal still accounts for admitted work.
+
+```powershell
+dotnet build ./test/perf/SelectString/SelectString.Engine.Benchmarks.csproj -c Release
+dotnet ./test/perf/SelectString/bin/Release/net11.0/SelectString.Engine.Benchmarks.dll `
+    --promotion-probe ./tmp/SelectString/admission-example 5 admission
+```
+
+The optional `admission` profile compares direct interpretation, a wrapper without
+admission, timing-only controls, the previous compilation controls, and work gates
+timing every call or every 16th call. It uses an exploratory 0.5 ms observed-time
+threshold, not a selected production policy. Output includes admission/promotion
+record indices, observed matching time and sample counts. Warm gate variants still
+use explicitly authored fixture input. The profile covers Literal/SqlDuration,
+matching/long-near-miss input and 1/4096 records. Choose affinity for your machine.
+The default profile without `admission` retains the previous six-mode matrix.
+
+Initial overhead/admission findings are in [RESULTS-admission.md](RESULTS-admission.md).
+The sampled gate still needs adversarial input testing before cmdlet integration.

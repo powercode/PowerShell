@@ -14,12 +14,98 @@ namespace PSTests.SelectString;
 public sealed class BackgroundCompilationTests
 {
     [Fact]
-    public void PromotionPreservesCultureAndExistingCaptures()
+    public void WorkThresholdWaitsForAnotherInputAndStopsTimingAfterDecision()
+    {
+        long clock = 0;
+        var work = new MatchingWorkGate(2, timestamp: () => clock++);
+        using var gate = new SemaphoreSlim(1, 1);
+        var matcher = new BackgroundCompilation(new SelectStringEngine(new[] { "(hit)" }),
+            () => new SelectStringEngine(new[] { "(hit)" }, compiledRegex: true), gate: gate, workGate: work);
+        try
+        {
+            matcher.TryMatch("hit", out var original);
+            clock += 10000; // Reading/output delays between calls are not matching work.
+            matcher.TryMatch("hit", out _);
+            Assert.Equal(2, work.ObservedTicks);
+            Assert.False(matcher.Admitted);
+            matcher.TryMatch("hit", out _);
+            Assert.True(matcher.Admitted);
+            Assert.Equal(2, matcher.AdmissionAttemptedAtRecord);
+            Assert.True(SpinWait.SpinUntil(() => matcher.PreparationFinished, TimeSpan.FromSeconds(10)));
+            matcher.TryMatch("hit", out var promoted);
+            Assert.Equal(original.Matches[0].Groups[1].Value, promoted.Matches[0].Groups[1].Value);
+            Assert.Equal(2, work.Samples);
+        }
+        finally { matcher.Complete(); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WorkThresholdDoesNotAdmitOnFinalInputOrAfterStop(bool stop)
+    {
+        long clock = 0;
+        var work = new MatchingWorkGate(1, timestamp: () => clock++);
+        var matcher = new BackgroundCompilation(new SelectStringEngine(new[] { "hit" }),
+            () => throw new Exception("Must not compile"), workGate: work);
+        matcher.TryMatch("hit", out _);
+        Assert.True(work.Reached);
+        if (stop)
+        {
+            matcher.RequestStop();
+            matcher.TryMatch("hit", out _);
+        }
+
+        matcher.Complete();
+        Assert.False(matcher.Admitted);
+        Assert.Equal(1, work.Samples);
+        Assert.Null(matcher.CompilationError);
+    }
+
+    [Fact]
+    public void WorkAdmissionRejectsBusyGateOnceAndStopsSampling()
+    {
+        long clock = 0;
+        var work = new MatchingWorkGate(1, timestamp: () => clock++);
+        using var gate = new SemaphoreSlim(0, 1);
+        var matcher = new BackgroundCompilation(new SelectStringEngine(new[] { "hit" }),
+            () => throw new Exception("Must not compile"), gate: gate, workGate: work);
+        matcher.TryMatch("hit", out _);
+        matcher.TryMatch("hit", out _);
+        gate.Release();
+        matcher.TryMatch("hit", out _);
+        matcher.Complete();
+        Assert.True(matcher.Rejected);
+        Assert.False(matcher.Admitted);
+        Assert.Equal(1, work.Samples);
+        Assert.Equal(1, matcher.AdmissionAttemptedAtRecord);
+    }
+
+    [Fact]
+    public void SampledWorkIsNotExtrapolated()
+    {
+        long clock = 0;
+        var work = new MatchingWorkGate(3, sampleEvery: 4, timestamp: () => clock++);
+        var matcher = new BackgroundCompilation(new SelectStringEngine(new[] { "hit" }),
+            () => throw new Exception("Must not compile"), workGate: work);
+        for (int i = 0; i < 8; i++) { matcher.TryMatch("hit", out _); }
+        matcher.Complete();
+        Assert.Equal(2, work.Samples);
+        Assert.Equal(2, work.ObservedTicks);
+        Assert.False(work.Reached);
+        Assert.False(matcher.Admitted);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PromotionPreservesCultureAndExistingCaptures(bool workBased)
     {
         CultureInfo previous = CultureInfo.CurrentCulture;
         using var gate = new SemaphoreSlim(1, 1);
         using var release = new ManualResetEventSlim();
         BackgroundCompilation matcher = null;
+        long clock = 0;
         try
         {
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
@@ -28,7 +114,8 @@ public sealed class BackgroundCompilationTests
             {
                 release.Wait();
                 return new SelectStringEngine(new[] { "absent", "^(I)(.*)$" }, compiledRegex: true);
-            }, startAfter: 1, warmInput: "INPUT", gate: gate);
+            }, startAfter: workBased ? 0 : 1, warmInput: "INPUT", gate: gate,
+                workGate: workBased ? new MatchingWorkGate(1, timestamp: () => clock++) : null);
             Assert.True(matcher.TryMatch("\u0131nput", out var original));
             Assert.Equal(1, original.PatternIndex);
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
@@ -172,14 +259,24 @@ public sealed class BackgroundCompilationTests
         finally { matcher.Complete(); }
     }
 
-    [Fact]
-    public void WorkerFaultIsObservedAndInterpretationContinues()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WorkerFaultIsObservedAndInterpretationContinues(bool workBased)
     {
         using var gate = new SemaphoreSlim(1, 1);
+        long clock = 0;
         var matcher = new BackgroundCompilation(new SelectStringEngine(new[] { "hit" }),
-            () => throw new InvalidOperationException("Probe failure"), gate: gate);
+            () => throw new InvalidOperationException("Probe failure"), gate: gate,
+            workGate: workBased ? new MatchingWorkGate(1, timestamp: () => clock++) : null);
         try
         {
+            if (workBased)
+            {
+                matcher.TryMatch("hit", out _);
+                matcher.TryMatch("hit", out _);
+            }
+
             Assert.True(SpinWait.SpinUntil(() => matcher.PreparationFinished, TimeSpan.FromSeconds(10)));
             Assert.True(matcher.TryMatch("hit", out _));
         }
