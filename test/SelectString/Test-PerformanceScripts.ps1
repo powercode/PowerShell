@@ -194,6 +194,23 @@ foreach ($pipelineResult in $pipelineResults) {
     Assert ($pipelineResult.FirstResultMs -eq $latencies[1]) 'Latency median incorrect'
 }
 $log = $results | Where-Object Scenario -eq LogAllMatches
+foreach ($inputKind in 'Mixed','Absent') {
+    $patternOutput = Join-Path $artifacts "patterns-$inputKind"
+    & (Join-Path $source 'Measure-SelectString.ps1') -PwshPath $PwshPath -Revision test `
+        -Scenario PatternFile,PatternRecords -PatternFamily SqlDuration -InputKind $inputKind `
+        -RecordCount 17 -Culture tr-TR -CaseSensitive -LineCount 16 `
+        -Iterations 1 -WarmupIterations 1 -Artifacts $patternOutput
+    $patternResults = @(Get-Content (Join-Path $patternOutput 'results.json') -Raw | ConvertFrom-Json)
+    Assert ($patternResults.Count -eq 2) 'Missing pattern scenarios'
+    foreach ($patternResult in $patternResults) {
+        Assert ($patternResult.Status -eq 'Measured') 'Pattern measurement failed'
+        $expectedCount = $inputKind -eq 'Mixed' ? 5 : 0
+        Assert ($patternResult.ResultCount -eq $expectedCount -and $patternResult.ValidatedResults -eq $expectedCount) 'Pattern validation/count incorrect'
+        Assert ($patternResult.PatternFamily -eq 'SqlDuration' -and $patternResult.PatternInput -eq $inputKind -and $patternResult.PatternRecordCount -eq 17) 'Pattern parameters not forwarded'
+        Assert ($patternResult.PatternCulture -eq 'tr-TR' -and $patternResult.PatternCaseSensitive) 'Pattern options not forwarded'
+        if ($expectedCount -eq 0) { Assert ($null -eq $patternResult.FirstResultMs) 'Absent pattern must not have first-result latency' }
+    }
+}
 Assert ($log.ValidatedResults -eq $log.ResultCount -and $log.ValidatedMatches -gt $log.ResultCount) 'Capture validation missing'
 & (Join-Path $source 'Measure-SelectString.ps1') -PwshPath $PwshPath -Revision test `
     -Scenario LogContext -LogFixture $fixture -Iterations 1 -WarmupIterations 1 `

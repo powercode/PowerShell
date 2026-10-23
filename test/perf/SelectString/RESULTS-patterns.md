@@ -111,3 +111,84 @@ and allocations as well as foreground latency/throughput; include abandoned work
 after short pipelines, bound concurrency, preserve construction-time culture and
 verify where first-use JIT occurs. Measure both affinity-1 contention and available
 spare cores. No production matching or scheduling changes were made here.
+
+## End-to-end pattern confirmation
+
+The file and pipeline harness now consumes the same authored pattern corpus as
+the engine benchmarks. `PatternFile` uses a UTF-8 file; `PatternRecords` sends the
+same 10,000 lines through one cmdlet invocation. Each invocation constructs its
+regex once. Successful matches, absent prefixes and long near misses are separate
+cases for Literal, DotStar, DotPlus and SQL duration.
+
+Measurements use shipping, the retained current build and the isolated
+always-compiled build, in forward and reverse executable order. Each worker has
+30 warmups, 15 timed calls and five separate instrumented latency calls; affinity
+1, en-US, case-sensitive, warm cache, output redirected to null. Fixture creation,
+validation and Add-Type are outside timing. Line numbers, order, spans and captures
+are validated against authored expectations before timing. All benchmark binaries
+retain their previous identities; the current/compiled reader policy is identical.
+
+Raw results and the run/summarization scripts are retained under
+`tmp/SelectString/pattern-endtoend-*`, `Run-PatternComparison.ps1` and
+`Summarize-PatternComparison.ps1`. Source hashes are in
+`pattern-endtoend-source.json`. The aggregate preserves individual worker samples
+and assembly hashes. These fixtures isolate input shapes; they do not establish
+how often expensive near misses occur in production.
+
+File scans allocate decoded lines; pipeline inputs are prepared strings reused
+across calls. Compare builds within each scenario, not file and pipeline allocation
+totals as equivalent work. No-match cases have no first-result latency; successful
+match cases remain necessary for evaluating startup responsiveness.
+
+The table below reports the range of the two worker medians in milliseconds,
+not a confidence interval. Comparisons of small differences remain exploratory;
+the run order is reversed, but this is not a randomized repeated experiment.
+The standalone suite now has 50 passing tests, including interpreted/compiled
+Turkish-I behavior and retention of construction-time culture after the current
+culture changes. Harness checks cover forwarding of case/culture parameters,
+ordered capture validation, mixed inputs and zero-result latency semantics.
+| Pattern | Input | Scenario | Shipping ms | Current ms | Compiled ms |
+| --- | --- | --- | ---: | ---: | ---: |
+| Literal | Match | PatternFile | 3.99–4.30 | 2.19–2.33 | 2.37–2.46 |
+| Literal | Match | PatternRecords | 31.70–31.82 | 29.22–29.30 | 30.66–31.47 |
+| Literal | Absent | PatternFile | 1.00–1.03 | 0.74–0.78 | 1.08–1.20 |
+| Literal | Absent | PatternRecords | 27.11–28.87 | 26.31–26.93 | 27.01–27.38 |
+| Literal | LongNearMiss | PatternFile | 26.67–27.29 | 17.35–17.66 | 18.37–19.66 |
+| Literal | LongNearMiss | PatternRecords | 28.08–29.44 | 29.63–30.35 | 29.57–29.83 |
+| DotStar | Match | PatternFile | 4.53–4.77 | 2.86–2.92 | 3.15–3.39 |
+| DotStar | Match | PatternRecords | 31.34–34.78 | 31.35–31.49 | 31.42–32.52 |
+| DotStar | Absent | PatternFile | 1.02–1.03 | 0.73–0.79 | 1.05–1.08 |
+| DotStar | Absent | PatternRecords | 25.89–27.86 | 26.50–26.73 | 28.20–28.50 |
+| DotStar | LongNearMiss | PatternFile | 223.87–226.68 | 211.81–219.00 | 23.55–25.68 |
+| DotStar | LongNearMiss | PatternRecords | 206.61–207.95 | 205.92–207.79 | 32.99–33.61 |
+| DotPlus | Match | PatternFile | 4.59–4.77 | 2.94–3.25 | 3.28–3.46 |
+| DotPlus | Match | PatternRecords | 30.17–30.80 | 31.36–32.85 | 30.54–30.67 |
+| DotPlus | Absent | PatternFile | 0.97–1.09 | 0.73–0.76 | 1.07–1.09 |
+| DotPlus | Absent | PatternRecords | 28.05–28.24 | 26.78–27.23 | 26.98–27.81 |
+| DotPlus | LongNearMiss | PatternFile | 221.75–223.41 | 213.76–215.74 | 22.53–23.18 |
+| DotPlus | LongNearMiss | PatternRecords | 207.64–210.81 | 206.20–209.83 | 31.99–33.60 |
+| SqlDuration | Match | PatternFile | 4.94–5.06 | 3.12–3.35 | 4.55–4.71 |
+| SqlDuration | Match | PatternRecords | 30.50–30.85 | 30.02–31.85 | 31.98–32.28 |
+| SqlDuration | Absent | PatternFile | 1.11–1.12 | 0.77–0.80 | 1.10–1.14 |
+| SqlDuration | Absent | PatternRecords | 28.12–28.58 | 25.84–27.15 | 27.53–27.59 |
+| SqlDuration | LongNearMiss | PatternFile | 1160.61–1237.71 | 1160.04–1167.46 | 291.68–293.10 |
+| SqlDuration | LongNearMiss | PatternRecords | 1145.51–1219.81 | 1146.83–1150.61 | 274.02–278.63 |
+
+
+Both orders confirm the same useful distinction. For these inputs, compilation
+reduces long wildcard near-miss time by roughly 88–90% in files and 84% in
+pipelines. SQL long near misses improve about 75%. Literal file scans do not
+benefit, and successful/absent short inputs generally do not recover compilation
+setup. Some pipeline differences are small or change with order; they do not
+support a classifier by themselves.
+
+Across the successful-match cases, instrumented first-result medians range from
+0.18–0.42 ms for current to 0.71–2.54 ms for compiled. These include counting-sink
+instrumentation, not just regex construction. All 144 cases were measured, counts
+agree with validation, terminal highlighting is disabled, and each revision has
+one consistent assembly hash.
+
+The next experiment is interpreted startup with bounded background compilation,
+using both cheap and expensive inputs. It must measure worker completion and total
+CPU as well as foreground throughput/latency. No production compilation policy is
+selected by this checkpoint.

@@ -3,7 +3,7 @@
 
 using System;
 using System.IO;
-using Microsoft.PowerShell.Commands;
+using System.Text.RegularExpressions;
 
 namespace PowerShell.Benchmarks.SelectString;
 
@@ -33,11 +33,11 @@ public enum SearchInputKind
 /// Authored inputs with independently specified expected spans and group values.
 /// Catalog patterns retain their anchors; source names identify the original pages.
 /// </summary>
-internal sealed record SearchPatternFixture(string Pattern, string Source, SearchPatternFixture.Example[] Examples)
+public sealed record SearchPatternFixture(string Pattern, string Source, SearchPatternFixture.Example[] Examples)
 {
-    internal sealed record Example(string Input, string Value, int Index, string[] Groups);
+    public sealed record Example(string Input, string Value, int Index, string[] Groups);
 
-    internal static SearchPatternFixture Create(SearchPatternFamily family)
+    public static SearchPatternFixture Create(SearchPatternFamily family)
     {
         string longText = new('x', 4096);
         return family switch
@@ -78,25 +78,29 @@ internal sealed record SearchPatternFixture(string Pattern, string Source, Searc
         return new(pattern, slug == null ? "Authored control" : "https://testregex.com/patterns/" + slug, examples);
     }
 
-    internal void Validate(bool compiled, bool caseSensitive, bool allMatches)
+    public void Validate(Func<string, Match[]> matchInput)
     {
-        var engine = new SelectStringEngine(new[] { Pattern }, caseSensitive: caseSensitive, allMatches: allMatches, compiledRegex: compiled);
         foreach (Example example in Examples)
         {
-            bool matched = engine.TryMatch(example.Input, out var result);
-            if (matched != (example.Value != null)) { throw new InvalidDataException("Unexpected match: " + Source); }
-            if (!matched) { continue; }
-            if (result.PatternIndex != 0 || result.Matches.Length != 1) { throw new InvalidDataException("Unexpected match count"); }
-            var match = result.Matches[0];
-            if (match.Index != example.Index || match.Value != example.Value || match.Groups.Count != example.Groups.Length + 1)
-            {
-                throw new InvalidDataException("Incorrect match span/groups: " + Source);
-            }
+            ValidateResult(example, matchInput(example.Input));
+        }
+    }
 
-            for (int i = 0; i < example.Groups.Length; i++)
-            {
-                if (match.Groups[i + 1].Value != example.Groups[i]) { throw new InvalidDataException("Incorrect capture: " + Source); }
-            }
+    public static void ValidateResult(Example example, Match[] matches)
+    {
+        bool matched = matches != null && matches.Length != 0;
+        if (matched != (example.Value != null)) { throw new InvalidDataException("Unexpected match"); }
+        if (!matched) { return; }
+        if (matches.Length != 1) { throw new InvalidDataException("Unexpected match count"); }
+        var match = matches[0];
+        if (match.Index != example.Index || match.Value != example.Value || match.Groups.Count != example.Groups.Length + 1)
+        {
+            throw new InvalidDataException("Incorrect match span/groups");
+        }
+
+        for (int i = 0; i < example.Groups.Length; i++)
+        {
+            if (match.Groups[i + 1].Value != example.Groups[i]) { throw new InvalidDataException("Incorrect capture"); }
         }
     }
 }

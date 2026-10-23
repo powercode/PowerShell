@@ -180,9 +180,18 @@ Optional process CPU affinity mask; zero leaves scheduling unchanged.
 .PARAMETER LineCount
 Number of lines generated for the small-fixture matrix (default 100000).
 .PARAMETER RecordCount
-Input records for PipelineCaptures and PipelineStop (default 10000), shared by one cmdlet invocation.
+Input records for PipelineCaptures, PipelineStop, PatternRecords and PatternFile
+(default 10000), shared by one cmdlet invocation.
 .PARAMETER MatchEvery
 One matching record per this many inputs in PipelineCaptures and PipelineStop (default 100).
+.PARAMETER PatternFamily
+Shared corpus pattern for PatternFile and PatternRecords (default Literal).
+.PARAMETER InputKind
+Corpus input shape; Mixed cycles through match, absent, short and long near miss.
+.PARAMETER CaseSensitive
+Use case-sensitive matching for the pattern-family scenarios. Default is insensitive.
+.PARAMETER Culture
+Worker culture for regex construction and matching. Default en-US.
 .PARAMETER TimeoutSeconds
 Maximum worker lifetime, including validation and warmup (default 60).
 .PARAMETER Artifacts
@@ -219,6 +228,12 @@ param(
     [ValidateRange(16,2147483647)] [int] $LineCount = 100000,
     [ValidateRange(1,2147483647)] [int] $RecordCount = 10000,
     [ValidateRange(1,2147483647)] [int] $MatchEvery = 100,
+    [ValidateSet('Literal','DotStar','DotPlus','SqlDuration','OrderId','FileExtension','PrReference','Markdown','Assignment')]
+    [string] $PatternFamily = 'Literal',
+    [ValidateSet('Match','Absent','NearMiss','LongNearMiss','Mixed')]
+    [string] $InputKind = 'Mixed',
+    [switch] $CaseSensitive,
+    [string] $Culture = 'en-US',
     [ValidateRange(1,3600)] [int] $TimeoutSeconds = 60,
     [string] $Artifacts = (Join-Path $PSScriptRoot 'bin/measurements'),
     [switch] $Worker,
@@ -280,6 +295,10 @@ if (!$Worker) {
             }
             if ($TraceMarkers) { $start.ArgumentList.Add('-TraceMarkers') }
             foreach ($arg in @('-RecordCount', [string]$RecordCount, '-MatchEvery', [string]$MatchEvery)) { $start.ArgumentList.Add($arg) }
+            foreach ($arg in @('-PatternFamily', $PatternFamily, '-InputKind', $InputKind, '-Culture', $Culture)) {
+                $start.ArgumentList.Add($arg)
+            }
+            if ($CaseSensitive) { $start.ArgumentList.Add('-CaseSensitive') }
             if ($SkipCounting) { $start.ArgumentList.Add('-SkipCounting') }
             $start.ArgumentList.Add('-LatencyIterations')
             $start.ArgumentList.Add([string]$LatencyIterations)
@@ -309,6 +328,27 @@ if ($Scenario[0] -notlike 'Log*') {
 $logManifest = $null
 $validator = $null
 $pipelineRecords = $null
+$patternFixture = $null
+$patternRecords = $null
+if ($Scenario[0] -in 'PatternFile','PatternRecords') {
+    [Globalization.CultureInfo]::CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo($Culture)
+    Add-Type -Path (Join-Path $PSScriptRoot 'PatternFamilies.cs')
+    $patternFixture = [PowerShell.Benchmarks.SelectString.SearchPatternFixture]::Create($PatternFamily)
+    $patternRecords = [string[]]::new($RecordCount)
+    $inputIndex = [int][PowerShell.Benchmarks.SelectString.SearchInputKind]$InputKind
+    for ($i = 0; $i -lt $RecordCount; $i++) {
+        $index = $InputKind -eq 'Mixed' ? $i % $patternFixture.Examples.Length : $inputIndex
+        $patternRecords[$i] = $patternFixture.Examples[$index].Input
+    }
+    $patternParameters = @{
+        Pattern = $patternFixture.Pattern
+        CaseSensitive = [bool]$CaseSensitive
+    }
+    $patternFile = Join-Path $FixtureRoot 'pattern.txt'
+    if ($Scenario[0] -eq 'PatternFile') {
+        [IO.File]::WriteAllLines($patternFile, $patternRecords, [Text.UTF8Encoding]::new($false))
+    }
+}
 if ($Scenario[0] -in 'PipelineCaptures','PipelineStop') {
     $pipelineRecords = [string[]]::new($RecordCount)
     for ($i = 0; $i -lt $RecordCount; $i++) {
@@ -333,6 +373,8 @@ $action = switch ($Scenario[0]) {
     { $_ -like 'Log*' } { { Select-String @logParameters } }
     String { { 'needle café needle' | Select-String needle } }
     Records { { $records | Select-String needle } }
+    PatternRecords { { $patternRecords | Select-String @patternParameters } }
+    PatternFile { { Select-String -LiteralPath $patternFile @patternParameters } }
     PipelineCaptures { { $pipelineRecords | Select-String -Pattern $pipelinePattern } }
     PipelineStop { { $pipelineRecords | Select-String -Pattern $pipelinePattern | Select-Object -First 1 } }
     FileStop { { Select-String -LiteralPath $large -Pattern '(?<word>needle)' | Select-Object -First 1 } }
@@ -359,6 +401,25 @@ $action = switch ($Scenario[0]) {
 
 # Validate every returned line number and named capture outside all timed phases.
 $validatedPipelineResults = $null
+if ($patternFixture) {
+    $expectedLines = [Collections.Generic.List[int]]::new()
+    for ($i = 0; $i -lt $RecordCount; $i++) {
+        $index = $InputKind -eq 'Mixed' ? $i % $patternFixture.Examples.Length : $inputIndex
+        if ($null -ne $patternFixture.Examples[$index].Value) { $expectedLines.Add($i + 1) }
+    }
+    $script:validatedCount = 0
+    & $action | ForEach-Object {
+        if ($script:validatedCount -ge $expectedLines.Count -or $_.LineNumber -ne $expectedLines[$script:validatedCount]) {
+            throw 'Incorrect pattern result line/order'
+        }
+        $index = $InputKind -eq 'Mixed' ? ($_.LineNumber - 1) % $patternFixture.Examples.Length : $inputIndex
+        if ($_.Line -cne $patternFixture.Examples[$index].Input) { throw 'Incorrect pattern input line' }
+        [PowerShell.Benchmarks.SelectString.SearchPatternFixture]::ValidateResult($patternFixture.Examples[$index], $_.Matches)
+        $script:validatedCount++
+    }
+    if ($script:validatedCount -ne $expectedLines.Count) { throw 'Incorrect pattern result count' }
+    $validatedPipelineResults = $script:validatedCount
+}
 if ($Scenario[0] -in 'PipelineCaptures','PipelineStop','FileStop') {
     $script:validatedCount = 0
     & $action | ForEach-Object {
@@ -462,6 +523,12 @@ $sorted = @($samples | Sort-Object)
     Fixture = $logManifest
     PipelineRecordCount = $pipelineRecords ? $RecordCount : $null
     PipelineMatchEvery = $pipelineRecords ? $MatchEvery : $null
+    PatternFamily = $patternFixture ? $PatternFamily : $null
+    PatternInput = $patternFixture ? $InputKind : $null
+    PatternRecordCount = $patternFixture ? $RecordCount : $null
+    Pattern = $patternFixture ? $patternFixture.Pattern : $null
+    PatternCaseSensitive = $patternFixture ? [bool]$CaseSensitive : $null
+    PatternCulture = $patternFixture ? [Globalization.CultureInfo]::CurrentCulture.Name : $null
     ValidatedResults = $validator ? $validator.Count : $validatedPipelineResults
     ValidatedMatches = $validator ? $validator.Captures : $null
     MiBPerSecond = !$logManifest ? $null : $logManifest.Bytes / 1MB / ($sorted[[int][Math]::Floor($sorted.Count / 2)] / 1000)

@@ -38,8 +38,8 @@ public class PatternFamilyScanning
     public void Setup()
     {
         _fixture = SearchPatternFixture.Create(Family);
-        _fixture.Validate(Compiled, CaseSensitive, allMatches: false);
         _engine = CreateEngine();
+        _fixture.Validate(input => _engine.TryMatch(input, out var result) ? result.Matches : null);
         _records = new string[Records];
         for (int i = 0; i < Records; i++)
         {
