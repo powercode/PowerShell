@@ -214,7 +214,7 @@ namespace Microsoft.PowerShell.Commands
 
         internal bool ScanFile(string path, Encoding encoding, int preContext, int postContext,
             bool stopAfterFirst, Func<Result, bool> emit, Func<bool> shouldStop = null,
-            int readerBufferSize = 1024, CancellationToken cancellationToken = default) =>
+            int readerBufferSize = 0, CancellationToken cancellationToken = default) =>
             ScanFile<Result, ResultFactory>(path, encoding, preContext, postContext, stopAfterFirst,
                 default, emit, shouldStop, readerBufferSize, cancellationToken);
 
@@ -225,14 +225,14 @@ namespace Microsoft.PowerShell.Commands
         /// </summary>
         internal bool ScanFile<T, TFactory>(string path, Encoding encoding, int preContext, int postContext,
             bool stopAfterFirst, TFactory factory, Func<T, bool> emit, Func<bool> shouldStop = null,
-            int readerBufferSize = 1024, CancellationToken cancellationToken = default)
+            int readerBufferSize = 0, CancellationToken cancellationToken = default)
             where T : class
             where TFactory : struct, IResultFactory<T>
         {
             IContextTracker<T> tracker = CreateContextTracker<T, TFactory>(preContext, postContext, factory);
             bool found = false;
             using (FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-            using (StreamReader reader = new(stream, encoding, detectEncodingFromByteOrderMarks: true, bufferSize: readerBufferSize))
+            using (StreamReader reader = new(stream, encoding, detectEncodingFromByteOrderMarks: true, bufferSize: readerBufferSize == 0 ? SelectReaderBufferSize(stream, encoding, stopAfterFirst) : readerBufferSize))
             {
                 ulong lineNumber = 0;
                 while (true)
@@ -298,6 +298,21 @@ namespace Microsoft.PowerShell.Commands
             }
 
             return found;
+        }
+
+        // Keep short reads for early termination and encodings whose decoder/fallback
+        // can have observable behavior. A nonzero ScanFile buffer overrides this policy
+        // for controlled benchmarks. The size gate amortizes per-file buffer allocation.
+        private static int SelectReaderBufferSize(FileStream stream, Encoding encoding, bool stopAfterFirst)
+        {
+            if (stopAfterFirst || !stream.CanSeek || stream.Length < 1024 * 1024)
+            {
+                return 1024;
+            }
+
+            return encoding is UTF8Encoding &&
+                encoding.GetType().Assembly == typeof(UTF8Encoding).Assembly &&
+                encoding.DecoderFallback is DecoderReplacementFallback ? 16384 : 1024;
         }
 
         /// <summary>

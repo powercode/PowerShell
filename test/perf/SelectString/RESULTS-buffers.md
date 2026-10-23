@@ -1,5 +1,8 @@
 # Reader buffer experiment
 
+This records the fixed-buffer experiment at `b16cd5666`. The subsequent selection
+policy and cmdlet comparisons are recorded in [RESULTS-buffer-policy.md](RESULTS-buffer-policy.md).
+
 Measured 2026-10-23. This isolates reader buffering in the current standalone
 engine; it is not a comparison against shipping Select-String. The cmdlet still
 uses the original 1 KiB buffer. No compiled-regex or FileStream changes were made.

@@ -57,6 +57,44 @@ public sealed class SelectStringEngineTests
         });
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AutomaticBufferKeepsStrictDecodingReadAhead(bool stopAfterFirst)
+    {
+        WithFile(path =>
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes("hit\n" + new string('x', 2 * 1024 * 1024));
+            bytes[8192] = 0xff;
+            File.WriteAllBytes(path, bytes);
+            int count = 0;
+            Assert.True(new SelectStringEngine(new[] { "hit" }).ScanFile(path,
+                new UTF8Encoding(false, true), 0, 0, stopAfterFirst,
+                result => { count++; return false; }));
+            Assert.Equal(1, count);
+        });
+    }
+
+    [Fact]
+    public void AutomaticBufferPreservesCustomEncodingReadSize()
+    {
+        WithFile(path =>
+        {
+            File.WriteAllText(path, "hit\n" + new string('x', 2 * 1024 * 1024));
+            Assert.True(new SelectStringEngine(new[] { "hit" }).ScanFile(path,
+                new ShortReadEncoding(), 0, 0, false, _ => false));
+        });
+    }
+
+    private sealed class ShortReadEncoding : UTF8Encoding
+    {
+        public override int GetMaxCharCount(int byteCount)
+        {
+            if (byteCount > 1024) { throw new InvalidOperationException("Custom encoding received a larger read buffer"); }
+            return base.GetMaxCharCount(byteCount);
+        }
+    }
+
     [Fact]
     public void StringsAreRecordsAndRetainTheirStorage()
     {

@@ -92,3 +92,55 @@ public class ReaderBufferScanning
         if (_smallDirectory != null) { Directory.Delete(_smallDirectory, recursive: true); }
     }
 }
+
+/// <summary>
+/// Measures the file-size crossover on the same synthetic log distribution.
+/// Each operation opens and scans one file. Construction and validation are untimed.
+/// </summary>
+[MemoryDiagnoser]
+public class ReaderBufferFileSizes
+{
+    private SelectStringEngine _engine;
+    private string _directory;
+    private string _path;
+    private int _count;
+    private Func<SelectStringEngine.Result, bool> _sink;
+
+    [Params(4, 64, 1024, 16384)]
+    public int SizeKiB { get; set; }
+
+    [Params("LogSparse", "LogAllMatches")]
+    public string Scenario { get; set; }
+
+    [Params(1024, 16384, 65536)]
+    public int BufferSize { get; set; }
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _directory = Path.Combine(Path.GetTempPath(), "SelectString-sizes-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_directory);
+        _path = Path.Combine(_directory, "application.log");
+        long lines = SelectStringLogFixture.Generate(_path, SizeKiB * 1024L);
+        _engine = new SelectStringEngine(new[] { SelectStringLogFixture.Pattern(Scenario) }, allMatches: Scenario == "LogAllMatches");
+        _sink = result => { _count++; return true; };
+        var validator = new SelectStringLogValidator(Scenario, lines);
+        _engine.ScanFile(_path, Encoding.UTF8, 0, 0, false, result =>
+        {
+            validator.Accept(result.LineNumber, result.Matches);
+            return true;
+        }, readerBufferSize: BufferSize);
+        validator.Complete();
+    }
+
+    [Benchmark]
+    public int Scan()
+    {
+        _count = 0;
+        _engine.ScanFile(_path, Encoding.UTF8, 0, 0, false, _sink, readerBufferSize: BufferSize);
+        return _count;
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => Directory.Delete(_directory, recursive: true);
+}
