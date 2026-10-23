@@ -648,3 +648,29 @@ for every pattern's compilation cost.
 
 See [RESULTS-background-output-modes.md](RESULTS-background-output-modes.md) for
 the paired output-mode measurements and unused-compilation accounting.
+
+### Multiple patterns
+
+`-PatternSet Single` (default) uses the selected corpus pattern alone.
+`TargetFirst` and `TargetLast` add the corpus OrderId, PrReference and Assignment
+patterns, placing the target before or after them. These controls support Literal
+and SqlDuration inputs only, where the added patterns do not match. Validation
+checks the winning `MatchInfo.Pattern` as well as spans/captures and output order.
+Worker JSON records the complete ordered `SearchPatterns` array and `PatternSet`.
+
+```powershell
+./test/perf/SelectString/Measure-SelectString.ps1 `
+    -PwshPath ./tmp/SelectString/regex-background/pwsh.exe -Revision background `
+    -PromotionMode background -Scenario PatternFile -PatternFamily SqlDuration `
+    -PatternSet TargetLast -InputKind Mixed -CaseSensitive -RecordCount 4096 `
+    -LineCount 16 -WarmupIterations 20 -Iterations 15 -LatencyIterations 5 `
+    -Affinity 5 -TimeoutSeconds 300 -Artifacts ./tmp/SelectString/multi-example
+```
+
+All patterns are constructed once per invocation. The explicit background warm
+probe still calls matching once on the first authored input; first-pattern success
+can prevent later patterns from being exercised. It is not an all-pattern JIT
+warmup. These controlled sets do not cover overlapping successful patterns.
+
+See [RESULTS-background-multiple-patterns.md](RESULTS-background-multiple-patterns.md)
+for pattern-order comparisons, startup costs and unused-work counters.
