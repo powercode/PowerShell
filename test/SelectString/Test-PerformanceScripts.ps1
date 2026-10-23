@@ -34,7 +34,7 @@ function Assert-Throws([scriptblock] $Action, [string] $Message) {
 
 & (Join-Path $source 'Initialize-Performance.ps1')
 $null = Test-ModuleManifest (Join-Path $source 'SelectString.Performance.psd1')
-foreach ($script in 'Measure-SelectString.ps1','New-EtwCapture.ps1','New-LogFixture.ps1') {
+foreach ($script in 'Measure-SelectString.ps1','New-EtwCapture.ps1','New-LogFixture.ps1','../../SelectString/Compare-SelectString.ps1') {
     $help = Get-Help (Join-Path $source $script) -Full
     Assert ($help.parameters.parameter.Count -gt 0) "Missing forwarded help: $script"
     $command = Get-Command (Join-Path $source $script)
@@ -188,4 +188,9 @@ $result = Get-Content (Join-Path $artifacts 'markers/results.json') -Raw | Conve
 Assert ($result.Status -eq 'Measured' -and $result.TraceMarkers -and !$result.CountingMeasured -and $null -eq $result.ResultCount -and $result.ValidatedResults -gt 0) 'Marker/SkipCounting semantics changed'
 Add-Content (Join-Path $fixture 'application.log') 'corruption'
 Assert-Throws { & (Join-Path $source 'Measure-SelectString.ps1') -PwshPath $PwshPath -Revision test -Scenario LogSparse -LogFixture $fixture -Artifacts (Join-Path $artifacts 'invalid') } 'Invalid fixture accepted'
+
+# Exercise comparison workers through the wrapper and verify the function export.
+$comparison = & (Join-Path $repo 'test/SelectString/Compare-SelectString.ps1') -Baseline $PwshPath -Candidate $PwshPath -Artifacts (Join-Path $artifacts 'comparison')
+Assert ($comparison -match 'Passed 146 baseline comparisons') 'Comparison wrapper/worker delegation failed'
+Assert ($null -ne (Get-Command Invoke-SelectStringComparison -Module SelectString.Performance)) 'Comparison implementation is not exported'
 Write-Host "Performance script checks passed. Artifacts: $artifacts"
