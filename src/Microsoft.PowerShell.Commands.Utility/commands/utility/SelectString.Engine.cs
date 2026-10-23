@@ -285,7 +285,7 @@ namespace Microsoft.PowerShell.Commands
             Func<Result, bool> emit, Action<string, Exception> reportError,
             int preContext = 0, int postContext = 0, int concurrency = 2,
             int queuedBatches = 2, int maxResults = 32, long byteTarget = 32768,
-            CancellationToken cancellationToken = default)
+            IScanObserver observer = null, CancellationToken cancellationToken = default)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(concurrency);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(queuedBatches);
@@ -304,7 +304,7 @@ namespace Microsoft.PowerShell.Commands
                     {
                         stop.Token.ThrowIfCancellationRequested();
                         active.Enqueue(new FileScanWorker(this, paths[next++], encoding,
-                            preContext, postContext, queuedBatches, maxResults, byteTarget, stop.Token));
+                            preContext, postContext, queuedBatches, maxResults, byteTarget, observer, stop.Token));
                     }
 
                     FileScanWorker current = active.Peek();
@@ -346,11 +346,21 @@ namespace Microsoft.PowerShell.Commands
             }
         }
 
+        // Optional per-file/per-batch observations for deterministic concurrency tests
+        // and queue-pressure measurements. No callback runs in the per-line scan loop.
+        // Observers run on workers and must be thread safe.
+        internal interface IScanObserver
+        {
+            void Starting(string path);
+
+            void WaitingForCapacity(string path, ulong linesRead);
+        }
+
         private sealed class FileScanWorker
         {
             internal FileScanWorker(SelectStringEngine engine, string path, Encoding encoding,
                 int preContext, int postContext, int queuedBatches, int maxResults,
-                long byteTarget, CancellationToken cancellationToken)
+                long byteTarget, IScanObserver observer, CancellationToken cancellationToken)
             {
                 Path = path;
                 var channel = Channel.CreateBounded<ScanBatch>(new BoundedChannelOptions(queuedBatches)
@@ -371,13 +381,18 @@ namespace Microsoft.PowerShell.Commands
                     try
                     {
                         cancellationToken.ThrowIfCancellationRequested();
+                        observer?.Starting(path);
+                        cancellationToken.ThrowIfCancellationRequested();
                         using var scan = engine.OpenFileScan(path, encoding, preContext, postContext,
                             maxResults, byteTarget, cancellationToken);
                         // Each file owns its capacity: later files cannot consume the
                         // earliest file's quota and deadlock ordered draining. Wait before
                         // scanning so a full queue also stops matching and allocation.
-                        while (await channel.Writer.WaitToWriteAsync(cancellationToken).ConfigureAwait(false))
+                        while (true)
                         {
+                            var capacity = channel.Writer.WaitToWriteAsync(cancellationToken);
+                            if (!capacity.IsCompleted) { observer?.WaitingForCapacity(path, scan.LinesRead); }
+                            if (!await capacity.ConfigureAwait(false)) { break; }
                             ScanBatch batch = scan.ReadBatch();
                             if (batch == null) { break; }
                             await channel.Writer.WriteAsync(batch, cancellationToken).ConfigureAwait(false);
@@ -1350,7 +1365,7 @@ namespace Microsoft.PowerShell.Commands
         /// </summary>
         internal sealed class NoContextTracker<T> : IContextTracker<T> where T : class
         {
-            private readonly List<T> _matches = new List<T>(1);
+            private readonly List<T> _matches = [with(1)];
 
             List<T> IContextTracker<T>.EmitQueue => _matches;
 
