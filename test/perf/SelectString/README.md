@@ -149,6 +149,21 @@ well as memory and throughput; an unconditional increase is not semantics-neutra
 
 ### Compiled-regex experiment
 
+End-to-end pipeline workloads are available through `Measure-SelectString.ps1`:
+
+```powershell
+./test/perf/SelectString/Measure-SelectString.ps1 -PwshPath ./tmp/SelectString/candidate/pwsh.exe -Revision current -Scenario PipelineCaptures,PipelineStop,FileStop -RecordCount 10000 -MatchEvery 100 -WarmupIterations 60 -Iterations 25 -Artifacts ./tmp/SelectString/pipeline-current
+```
+
+`PipelineCaptures` feeds all records into one cmdlet invocation using named capture
+groups. `RecordCount` controls input size and `MatchEvery` controls match spacing;
+the first record matches. `PipelineStop` uses the same input and appends
+`Select-Object -First 1`. `FileStop` searches the ordinary file fixture and appends
+the same downstream command. Total time includes termination and cleanup; first
+result is timed in a separate instrumented pass. Fixtures and capture validation
+are outside timing. These options do not change the historical `Records` scenario.
+JSON records the pipeline parameters and validated result count.
+
 `RegexScanning` compares interpreted and compiled regexes with the same production
 reader-buffer policy. `ConstructAndScan` creates a fresh engine on every timed
 operation, including regex compilation and first-use JIT. `ReuseAndScan` uses an

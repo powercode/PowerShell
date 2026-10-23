@@ -96,12 +96,93 @@ refactor is included. The benchmark command is documented in README.md.
 
 All 38 standalone engine tests pass, including interpreted/compiled capture
 history, pattern precedence, Turkish case matching, case-sensitive matching and
-invalid-pattern error attribution. The cmdlet has not been switched to compiled
-regexes, so no experimental cmdlet build has been published yet.
+invalid-pattern error attribution. Production cmdlet behavior remains interpreted;
+the isolated compiled cmdlet build is validated below.
 
-Next: run repeated end-to-end comparisons against unchanged current and shipping builds. Include
-compilation within each invocation, first-result latency, allocation and GC;
-validate full cmdlet semantics before considering a production selection rule.
-Cover many records feeding one invocation and actual downstream termination with
-`Select-String ... | Select-Object -First 1`, including exception propagation and
-cleanup. The engine early-exit benchmark does not measure those PowerShell costs.
+The end-to-end comparison below completes this follow-up. The engine early-exit
+benchmark alone does not measure PowerShell exception propagation and cleanup.
+
+## End-to-end pipeline and cmdlet comparison
+
+All 72 cases completed in forward and reverse build order: shipping, unchanged
+current (retained buffer policy), and an isolated compiled build. Each worker used
+60 warmups, 25 measured invocations, affinity 1 and the same runtime as above.
+Terminal support was false in every worker. Fixtures were warm-cache; capture
+validation and first-result instrumentation were outside the timed samples.
+The following ranges span the two run medians, not confidence intervals.
+
+| Scenario | Shipping ms | Current ms | Compiled ms |
+| --- | ---: | ---: | ---: |
+| 300 MiB sparse | 297.20–301.82 | 224.96–250.03 | 207.41–208.74 |
+| 300 MiB all matches | 512.16–528.19 | 438.06–442.57 | 335.84–356.46 |
+| 1,000 records, all match | 3.41–3.52 | 3.38–3.75 | 4.92–5.07 |
+| 1,000 records, 1% match | 2.96–2.97 | 2.93–2.96 | 4.68–4.68 |
+| 100,000 records, all match | 74.97–95.67 | 74.23–75.42 | 65.64–67.06 |
+| 100,000 records, 1% match | 55.10–55.16 | 57.77–64.83 | 53.76–57.31 |
+| Record pipeline, downstream stop | 0.09–0.12 | 0.09–0.10 | 1.92–1.99 |
+| File input, downstream stop | 0.16–0.17 | 0.18–0.18 | 1.03–1.13 |
+| 256 small files | 8.99–9.37 | 9.28–9.45 | 9.98–10.34 |
+| List, 256 files | 7.93–8.09 | 8.15–8.32 | 9.00–9.35 |
+| Quiet, first-line match | 0.10–0.11 | 0.10–0.11 | 0.76–0.80 |
+| Single string, literal regex | 0.06–0.06 | 0.07–0.07 | 0.72–0.75 |
+
+PipelineCaptures sends prepared strings into ONE Select-String invocation with
+named level/request/duration captures. Pattern construction in BeginProcessing is
+included once per timed call, amortized across all inputs. PipelineStop feeds
+10,000 records with 1% matching, starting with a match, and appends Select-Object
+-First 1. FileStop uses the ordinary file fixture with a captured literal pattern
+and the same downstream command. Both include actual termination and cleanup.
+These patterns differ from the standalone log regex; startup costs need not agree.
+
+Compared with current, compiled all-match log scans improve 19–23%, sparse logs
+8–17%, and the dense 100,000-record pipeline 11–12% in corresponding run orders.
+The sparse 100,000-record pipeline improves less than 1% in one order and 17% in
+the other; shipping also outperforms current there. Treat that as variable evidence,
+not a reliable compilation benefit. Shipping dense-pipeline time varied notably.
+
+Actual downstream-stop overhead does not dwarf compilation in these workloads.
+Compilation adds roughly 0.9 ms for FileStop and 1.8–1.9 ms for PipelineStop.
+These absolute costs can be acceptable for occasional interactive invocations;
+the ratio alone should not decide policy. Longer dense pipelines amortize setup.
+
+First-result latency is one separately instrumented observation per worker, not
+a repeated latency benchmark. For the dense 100,000-record pipeline, current was
+1.72–1.74 ms and compiled 3.60–3.79 ms. Log all-match latency was 2.23–2.37 versus
+4.69–5.26 ms; sparse was 2.30–2.35 versus 4.36–4.62 ms. Some other cases had large
+outliers (current FileStop reached 11.53 ms), so do not infer latency distributions
+or precise differences from this pass. Repeat latency sampling before a policy decision.
+
+Managed allocation is almost unchanged for long scans: forward all-match means
+were 1,371,259,791 bytes current versus 1,371,274,862 compiled. Sparse means were
+650,605,692 versus 650,619,138 bytes. Reverse all-match totals across 25 samples
+were 1,821/1/0 Gen0/Gen1/Gen2 collections current and 1,822/1/0 compiled. This
+supports a CPU-work benefit rather than a material managed-allocation reduction.
+Native generated-code memory remains outside these allocation measurements.
+
+### Build provenance and validation
+
+The isolated worktree at tmp/SelectString/regex-source is based on 4f1504d32.
+Its only functional change passes compiledRegex: true when constructing the engine
+in BeginProcessing. A local global_level setting resolves inherited analyzer
+configuration conflicts from nesting the worktree; analyzers were not disabled.
+Resources and types were regenerated for the Release build. The main cmdlet source
+and unchanged current binary retain interpretation.
+
+Utility assembly SHA256:
+
+- Shipping: `12D591C8267549CFAD4616CB561C15380330E8F019C853F809A1AF3778910463`
+- Current: `23A5A3233E8649C7EFB116E5445DC71A99FEED2586A129A6E5D3A67CAF9BACC0`
+- Compiled: `D4B90FE12555EDF022106AD9D72B1907E8664193E233934F36AE4A41C5C22ACD`
+
+The compiled build passes 56 Pester tests, 146 differential comparisons against
+shipping, and the performance-script harness including the new pipeline cases.
+All measured result counts agree; log and pipeline named captures were validated.
+
+Raw results: tmp/SelectString/regex-endtoend-forward and regex-endtoend-reverse;
+Run-RegexComparison.ps1 reproduces the matrix, Summarize-Regex.ps1 produces the
+combined summary JSON. The isolated binary is tmp/SelectString/regex-compiled/pwsh.exe.
+No ETW recording was needed for this comparison.
+
+Next: evaluate a compilation policy using per-invocation work and acceptable
+absolute startup cost. Repeat latency sampling and investigate variable sparse
+pipeline results before choosing a threshold or changing production behavior.
