@@ -99,6 +99,22 @@ public sealed class BackgroundCompilationTests
     }
 
     [Fact]
+    public void StopSuppressesDelayedAdmissionWithoutChangingMatching()
+    {
+        using var gate = new SemaphoreSlim(1, 1);
+        var matcher = new BackgroundCompilation(new SelectStringEngine(new[] { "hit" }),
+            () => throw new Exception("Must not start"), startAfter: 1, gate: gate);
+        try
+        {
+            Assert.True(matcher.TryMatch("hit", out _));
+            matcher.RequestStop();
+            Assert.True(matcher.TryMatch("hit", out _));
+            Assert.False(matcher.Admitted);
+        }
+        finally { matcher.Complete(); }
+    }
+
+    [Fact]
     public async Task CompletionDrainsAnAlreadyRunningCompilation()
     {
         using var gate = new SemaphoreSlim(1, 1);

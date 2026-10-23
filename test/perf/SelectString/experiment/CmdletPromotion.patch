@@ -1,0 +1,59 @@
+diff --git a/src/Microsoft.PowerShell.Commands.Utility/commands/utility/SelectString.Engine.cs b/src/Microsoft.PowerShell.Commands.Utility/commands/utility/SelectString.Engine.cs
+index b63e7ab15..21d512534 100644
+--- a/src/Microsoft.PowerShell.Commands.Utility/commands/utility/SelectString.Engine.cs
++++ b/src/Microsoft.PowerShell.Commands.Utility/commands/utility/SelectString.Engine.cs
+@@ -161,7 +161,14 @@ namespace Microsoft.PowerShell.Commands
+             }
+         }
+ 
+-        internal bool TryMatch(string line, out MatchData result)
++        internal delegate bool MatchLine(string line, out MatchData result);
++
++        internal MatchLine MatchOverride { get; set; }
++
++        internal bool TryMatch(string line, out MatchData result) => MatchOverride == null
++            ? TryMatchCore(line, out result) : MatchOverride(line, out result);
++
++        internal bool TryMatchCore(string line, out MatchData result)
+         {
+             result = default;
+             bool matched = false;
+diff --git a/src/Microsoft.PowerShell.Commands.Utility/commands/utility/SelectString.cs b/src/Microsoft.PowerShell.Commands.Utility/commands/utility/SelectString.cs
+index a44954b50..ac28c1546 100644
+--- a/src/Microsoft.PowerShell.Commands.Utility/commands/utility/SelectString.cs
++++ b/src/Microsoft.PowerShell.Commands.Utility/commands/utility/SelectString.cs
+@@ -398,7 +398,7 @@ namespace Microsoft.PowerShell.Commands
+     [Cmdlet(VerbsCommon.Select, "String", DefaultParameterSetName = ParameterSetFile, HelpUri = "https://go.microsoft.com/fwlink/?LinkID=2097119")]
+     [OutputType(typeof(bool), typeof(MatchInfo), ParameterSetName = new[] { ParameterSetFile, ParameterSetObject, ParameterSetLiteralFile })]
+     [OutputType(typeof(string), ParameterSetName = new[] { ParameterSetFileRaw, ParameterSetObjectRaw, ParameterSetLiteralFileRaw })]
+-    public sealed class SelectStringCommand : PSCmdlet
++    public sealed class SelectStringCommand : PSCmdlet, IDisposable
+     {
+         private const string ParameterSetFile = "File";
+         private const string ParameterSetFileRaw = "FileRaw";
+@@ -525,6 +525,13 @@ namespace Microsoft.PowerShell.Commands
+         public string[] Pattern { get; set; }
+ 
+         private SelectStringEngine _engine;
++        private SelectStringPromotion _promotion;
++
++        /// <summary>Drains speculative work in the experimental build.</summary>
++        public void Dispose() => _promotion?.Complete();
++
++        /// <summary>Suppresses further speculative work during pipeline cancellation.</summary>
++        protected override void StopProcessing() => _promotion?.RequestStop();
+ 
+         /// <summary>
+         /// Gets or sets files to read from.
+@@ -771,7 +778,10 @@ namespace Microsoft.PowerShell.Commands
+ 
+             try
+             {
+-                _engine = new SelectStringEngine(Pattern, SimpleMatch, CaseSensitive, AllMatches, NotMatch, _compareInfo, _compareOptions);
++                _engine = new SelectStringEngine(Pattern, SimpleMatch, CaseSensitive, AllMatches, NotMatch, _compareInfo, _compareOptions,
++                    compiledRegex: SelectStringPromotion.Mode == "compiled");
++                _promotion = SelectStringPromotion.Create(_engine, Pattern, SimpleMatch, CaseSensitive, AllMatches, NotMatch, _compareInfo, _compareOptions);
++                if (_promotion != null) { _engine.MatchOverride = _promotion.TryMatch; }
+             }
+             catch (SelectStringEngine.InvalidPatternException e)
+             {

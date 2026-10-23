@@ -192,6 +192,9 @@ Corpus input shape; Mixed cycles through match, absent, short and long near miss
 Use case-sensitive matching for the pattern-family scenarios. Default is insensitive.
 .PARAMETER Culture
 Worker culture for regex construction and matching. Default en-US.
+.PARAMETER PromotionMode
+Optional mode for the isolated promotion build. Other builds ignore this setting.
+Warm modes use the scenario's first authored input as an explicit worker probe.
 .PARAMETER TimeoutSeconds
 Maximum worker lifetime, including validation and warmup (default 60).
 .PARAMETER Artifacts
@@ -234,6 +237,8 @@ param(
     [string] $InputKind = 'Mixed',
     [switch] $CaseSensitive,
     [string] $Culture = 'en-US',
+    [ValidateSet('interpreted','compiled','background','background-warm','delayed-background-warm','delayed-synchronous')]
+    [string] $PromotionMode,
     [ValidateRange(1,3600)] [int] $TimeoutSeconds = 60,
     [string] $Artifacts = (Join-Path $PSScriptRoot 'bin/measurements'),
     [switch] $Worker,
@@ -299,6 +304,10 @@ if (!$Worker) {
                 $start.ArgumentList.Add($arg)
             }
             if ($CaseSensitive) { $start.ArgumentList.Add('-CaseSensitive') }
+            if ($PromotionMode) {
+                $start.ArgumentList.Add('-PromotionMode')
+                $start.ArgumentList.Add($PromotionMode)
+            }
             if ($SkipCounting) { $start.ArgumentList.Add('-SkipCounting') }
             $start.ArgumentList.Add('-LatencyIterations')
             $start.ArgumentList.Add([string]$LatencyIterations)
@@ -399,6 +408,20 @@ $action = switch ($Scenario[0]) {
     default { throw "Unknown scenario: $Scenario" }
 }
 
+$selectStringAssembly = (Get-Command Select-String -CommandType Cmdlet).ImplementingType.Assembly
+$promotionDiagnostics = $selectStringAssembly.GetType('Microsoft.PowerShell.Commands.SelectStringPromotionDiagnostics', $false)
+if ($PromotionMode) { $env:SELECTSTRING_PROMOTION_MODE = $PromotionMode.ToLowerInvariant() }
+if ($promotionDiagnostics -and $PromotionMode -like '*warm') {
+    if ($patternRecords) { $warmInput = $patternRecords[0] }
+    elseif ($pipelineRecords) { $warmInput = $pipelineRecords[0] }
+    elseif ($logManifest) {
+        $reader = [IO.File]::OpenText($logParameters.LiteralPath)
+        try { $warmInput = $reader.ReadLine() }
+        finally { $reader.Dispose() }
+    } else { $warmInput = $records[0] }
+    $env:SELECTSTRING_PROMOTION_WARM_INPUT = $warmInput
+}
+
 # Validate every returned line number and named capture outside all timed phases.
 $validatedPipelineResults = $null
 if ($patternFixture) {
@@ -460,10 +483,17 @@ try {
 $samples = @()
 $allocations = @()
 $collections = @()
+$process = [Diagnostics.Process]::GetCurrentProcess()
+$process.Refresh()
+$cpuBefore = $process.TotalProcessorTime
+$promotionBefore = $promotionDiagnostics ? $promotionDiagnostics::Snapshot() : $null
+$cpuWindow = [Diagnostics.Stopwatch]::StartNew()
 for ($i = 0; $i -lt $Iterations; $i++) {
     if ($markers) { $markers.IterationBegin($i) }
     $before = [GC]::GetTotalAllocatedBytes($true)
-    $g0 = [GC]::CollectionCount(0); $g1 = [GC]::CollectionCount(1); $g2 = [GC]::CollectionCount(2)
+    $g0 = [GC]::CollectionCount(0)
+    $g1 = [GC]::CollectionCount(1)
+    $g2 = [GC]::CollectionCount(2)
     $timer = [Diagnostics.Stopwatch]::StartNew()
     try { & $action > $null }
     finally { $timer.Stop() }
@@ -471,6 +501,24 @@ for ($i = 0; $i -lt $Iterations; $i++) {
     $allocations += [GC]::GetTotalAllocatedBytes($true) - $before
     $collections += ,@(([GC]::CollectionCount(0) - $g0), ([GC]::CollectionCount(1) - $g1), ([GC]::CollectionCount(2) - $g2))
     if ($markers) { $markers.IterationEnd($i) }
+}
+$cpuWindow.Stop()
+$process.Refresh()
+$cpuMs = ($process.TotalProcessorTime - $cpuBefore).TotalMilliseconds
+$promotionCounters = $null
+if ($promotionDiagnostics) {
+    $after = $promotionDiagnostics::Snapshot()
+    if ($after[7] -ne 0 -or $after[5] -ne $promotionBefore[5]) { throw 'Promotion worker survived cleanup or faulted' }
+    $promotionCounters = [ordered]@{
+        Completed = $after[0] - $promotionBefore[0]
+        Admitted = $after[1] - $promotionBefore[1]
+        Started = $after[2] - $promotionBefore[2]
+        Rejected = $after[3] - $promotionBefore[3]
+        Promoted = $after[4] - $promotionBefore[4]
+        Faulted = $after[5] - $promotionBefore[5]
+        DrainMs = ($after[6] - $promotionBefore[6]) * 1000.0 / [Diagnostics.Stopwatch]::Frequency
+        OutstandingWorkers = $after[7]
+    }
 }
 
 # Measure streaming latency separately: the counting sink adds its own overhead.
@@ -513,6 +561,11 @@ $sorted = @($samples | Sort-Object)
     ProcessorCount = [Environment]::ProcessorCount
     Processor = $env:PROCESSOR_IDENTIFIER
     RequestedAffinity = $Affinity
+    PromotionMode = $promotionDiagnostics ? ($env:SELECTSTRING_PROMOTION_MODE ?? 'background') : $null
+    PromotionCounters = $promotionCounters
+    CpuWindowMs = $cpuWindow.Elapsed.TotalMilliseconds
+    CpuMs = $cpuMs
+    CpuMsPerInvocation = $cpuMs / $Iterations
     WarmupIterations = $WarmupIterations
     WorkerPid = $PID
     Sink = 'NullRedirection'
