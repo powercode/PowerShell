@@ -95,7 +95,7 @@ dotnet run -c Release --project test/perf/SelectString/SelectString.Engine.Bench
 
 Every build/scenario gets a separate process with a timeout. Startup, module
 loading, data preparation and warmups (three by default) are excluded. Throughput samples
-discard output with `$null = & $action`. A separate instrumented pass measures first-result
+discard output with `& $action > $null`. A separate instrumented pass measures first-result
 latency and counts results. JSON includes all timing samples, process-wide managed
 allocation deltas, GC counts, peak working set, runtime, hardware and assembly hash.
 Peak working set includes setup and warmup; it is not incremental engine memory.
@@ -152,8 +152,11 @@ profile loads `SelectString.Regions.xml` to expose these phases. Select measured
 iteration regions when comparing builds. Failed iterations may have an unmatched
 begin marker and must not be treated as successful samples.
 
-JSON records `Sink`, `WorkerPid`, `TraceMarkers` and `CountingMeasured`. Historical
-reports used Out-Null: rerun all compared builds with this harness rather than
+JSON records `Sink`, `WorkerPid`, `TraceMarkers` and `CountingMeasured`. Null
+redirection discards streamed output without binding each object to a sink cmdlet.
+Null assignment was also tried, but retained output and produced substantial
+Gen 1/Gen 2 collection activity in dense scans. Historical reports used Out-Null
+or NullAssignment: rerun all compared builds with this harness rather than
 comparing new numbers directly against those old reports. Marker compilation and
 registration happen before warmup and only when requested; untraced runs do not
 load the provider. Actual ETW region pairing still needs validation in WPA.
