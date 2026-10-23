@@ -19,6 +19,9 @@
             <Stop>
               <Event Provider="{e13c0d23-ccbc-4e12-931b-d9cc2eee27e4}" Id="143" Version="1"/> <!-- MethodLoadUnloadVerbose_V1 -->
             </Stop>
+            <Stop>
+              <Event Provider="{e13c0d23-ccbc-4e12-931b-d9cc2eee27e4}" Id="143" Version="2"/> <!-- MethodLoadVerbose_V2: includes ReJITID -->
+            </Stop>
             <Match>
               <Event TID="true"/>
             </Match>

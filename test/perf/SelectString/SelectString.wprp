@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
+<WindowsPerformanceRecorder Version="1.0" Author="PowerShell">
+  <Profiles>
+    <SystemCollector Id="SelectStringSystem" Name="SelectString CPU">
+      <BufferSize Value="256" />
+      <Buffers Value="256" />
+    </SystemCollector>
+    <EventCollector Id="SelectStringEvents" Name="SelectString CLR">
+      <BufferSize Value="256" />
+      <Buffers Value="256" />
+    </EventCollector>
+    <SystemProvider Id="SelectStringKernel">
+      <Keywords>
+        <Keyword Value="ProcessThread" />
+        <Keyword Value="Loader" />
+        <Keyword Value="SampledProfile" />
+      </Keywords>
+      <Stacks>
+        <Stack Value="SampledProfile" />
+      </Stacks>
+    </SystemProvider>
+    <!-- GC (0x1), loader (0x8), JIT method loads (0x10).
+         Verbose includes JIT-start events; event ID 10 (allocation ticks) is excluded.
+         Start recording before launching the worker to capture method loads.
+         No heap dumps, allocation stacks, or JIT inlining diagnostics. -->
+    <EventProvider Id="SelectStringRuntime"
+                   Name="e13c0d23-ccbc-4e12-931b-d9cc2eee27e4"
+                   Level="5" ProcessExeFilter="pwsh.exe">
+      <Keywords>
+        <Keyword Value="0x19" />
+      </Keywords>
+      <EventFilters FilterIn="false">
+        <EventId Value="10" />
+      </EventFilters>
+    </EventProvider>
+    <Profile Id="SelectString.Verbose.File" Name="SelectString"
+             Description="CPU stacks and CLR GC, loader and JIT events without allocation ticks"
+             LoggingMode="File" DetailLevel="Verbose">
+      <Collectors>
+        <SystemCollectorId Value="SelectStringSystem">
+          <SystemProviderId Value="SelectStringKernel" />
+        </SystemCollectorId>
+        <EventCollectorId Value="SelectStringEvents">
+          <EventProviders>
+            <EventProviderId Value="SelectStringRuntime" />
+          </EventProviders>
+        </EventCollectorId>
+      </Collectors>
+    </Profile>
+  </Profiles>
+</WindowsPerformanceRecorder>
