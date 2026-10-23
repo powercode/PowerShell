@@ -27,7 +27,7 @@ namespace Microsoft.PowerShell.Commands
 
         internal SelectStringEngine(string[] patterns, bool simpleMatch = false, bool caseSensitive = false,
             bool allMatches = false, bool notMatch = false, CompareInfo compareInfo = null,
-            CompareOptions? compareOptions = null)
+            CompareOptions? compareOptions = null, bool compiledRegex = false)
         {
             _patterns = (string[])patterns.Clone();
             _allMatches = allMatches;
@@ -36,12 +36,21 @@ namespace Microsoft.PowerShell.Commands
             _compareOptions = compareOptions ?? (caseSensitive ? CompareOptions.None : CompareOptions.IgnoreCase);
             if (!simpleMatch)
             {
+                // Explicit opt-in for controlled experiments. Cmdlet callers retain interpretation;
+                // compilation must amortize construction and first-use JIT before it is beneficial.
+                RegexOptions options = (caseSensitive, compiledRegex) switch
+                {
+                    (true, false) => RegexOptions.None,
+                    (true, true) => RegexOptions.Compiled,
+                    (false, false) => RegexOptions.IgnoreCase,
+                    (false, true) => RegexOptions.IgnoreCase | RegexOptions.Compiled,
+                };
                 _regexes = new Regex[patterns.Length];
                 for (int i = 0; i < patterns.Length; i++)
                 {
                     try
                     {
-                        _regexes[i] = new Regex(patterns[i], caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase);
+                        _regexes[i] = new Regex(patterns[i], options);
                     }
                     catch (Exception e)
                     {
