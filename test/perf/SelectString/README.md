@@ -330,3 +330,18 @@ Select the measured regions (five for this example); validation and startup are
 also in the recording and must be excluded from timed-region analysis.
 
 See [RESULTS-traces.md](RESULTS-traces.md) for the large-log ETW findings and the host-dependent highlighting allocation difference.
+
+### Capturing multiple scenarios
+
+`New-EtwCapture.ps1 -Scenario` accepts an array:
+
+```powershell
+./test/perf/SelectString/New-EtwCapture.ps1 -Scenario LogSparse,LogAllMatches
+```
+
+For each scenario, shipping and candidate are recorded separately, in that order.
+The shared log is resolved/validated once before recording. Duplicate scenarios
+run once. A batch writes each scenario beneath its own directory in the capture
+folder, retaining separate ETLs, stop logs and benchmark JSON. Single-scenario
+runs retain their existing directory layout. Recording or measurement failure
+stops the batch after saving the active trace when possible.

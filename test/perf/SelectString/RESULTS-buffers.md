@@ -30,8 +30,8 @@ Mean wall time per scan. Error is BenchmarkDotNet's 99.9% confidence half-width.
 
 | Scenario | 1 KiB | 16 KiB | 64 KiB |
 | --- | ---: | ---: | ---: |
-| All matches | 557.0 ± 16.08 ms | 465.8 ± 9.50 ms | 447.3 ± 8.54 ms |
-| Sparse matches | 300.4 ± 6.50 ms | 225.0 ± 9.36 ms | 209.9 ± 11.08 ms |
+| All matches | 557.0 +/- 16.08 ms | 465.8 +/- 9.50 ms | 447.3 +/- 8.54 ms |
+| Sparse matches | 300.4 +/- 6.50 ms | 225.0 +/- 9.36 ms | 209.9 +/- 11.08 ms |
 
 Relative to 1 KiB, 16 KiB reduced mean time by 16.4% / 25.1%, and 64 KiB by
 19.7% / 30.1%. The shorter first run showed the same direction. Large-file
@@ -88,11 +88,11 @@ repository restore settings were not changed.
 
 Raw local artifacts (ignored):
 
-- `tmp/SelectString/buffers-bdn` — all 12 exploratory cases.
-- `tmp/SelectString/buffers-confirm` — six large-log confirmation cases.
-- `tmp/SelectString/buffers-tests.log` — 32 engine tests.
-- `tmp/SelectString/buffers-utility-build.log` — Utility build.
-- `tmp/SelectString/buffers-harness-tests.log` — harness checks, fake WPR only.
+- `tmp/SelectString/buffers-bdn` - all 12 exploratory cases.
+- `tmp/SelectString/buffers-confirm` - six large-log confirmation cases.
+- `tmp/SelectString/buffers-tests.log` - 32 engine tests.
+- `tmp/SelectString/buffers-utility-build.log` - Utility build.
+- `tmp/SelectString/buffers-harness-tests.log` - harness checks, fake WPR only.
 
 Source SHA256:
 

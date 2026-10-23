@@ -127,6 +127,34 @@ foreach ($mode in 'Success','StartFailure','WorkerFailure','StopFailure','Loss')
     }
 }
 
+# Verify batch ordering, isolated outputs, one shared fixture resolution, and deduplication.
+& $fakeModule {
+    $script:Calls.Clear()
+    $script:RecorderMode = 'Success'
+    $script:FixtureResolutions = 0
+    $script:Measurements = [Collections.Generic.List[object]]::new()
+    function script:Resolve-SelectStringLogFixture {
+        param($Directory)
+        $script:FixtureResolutions++
+        return 'mock-fixture'
+    }
+    function script:Invoke-SelectStringMeasurement {
+        $path = $args[[Array]::IndexOf($args, '-Artifacts') + 1]
+        $scenario = $args[[Array]::IndexOf($args, '-Scenario') + 1]
+        $revision = $args[[Array]::IndexOf($args, '-Revision') + 1]
+        $script:Measurements.Add([pscustomobject]@{ Scenario = $scenario; Revision = $revision; Path = $path })
+        $null = New-Item -ItemType Directory -Path $path -Force
+        @{ Status = 'Measured' } | ConvertTo-Json | Set-Content (Join-Path $path 'results.json')
+    }
+    Invoke-SelectStringCapture -CandidateDirectory newer -Scenario LogSparse,LogAllMatches,LogSparse -Iterations 1 -WarmupIterations 1
+}
+$batch = @(& $fakeModule { $script:Measurements.ToArray() })
+Assert (($batch | ForEach-Object { "$($_.Scenario)/$($_.Revision)" }) -join ',' -eq 'LogSparse/shipping,LogSparse/candidate,LogAllMatches/shipping,LogAllMatches/candidate') 'Batch scenario/build order failed'
+Assert (@($batch.Path | Select-Object -Unique).Count -eq 4) 'Batch output paths collide'
+Assert ((& $fakeModule { $script:Calls.Count }) -eq 8) 'Batch must create four separate recordings'
+Assert ((& $fakeModule { $script:FixtureResolutions }) -eq 1) 'Batch should resolve its shared fixture once'
+Assert ((Get-Command (Join-Path $source 'New-EtwCapture.ps1')).Parameters.Scenario.ParameterType -eq [string[]]) 'Wrapper Scenario must accept arrays'
+
 $module = Import-Module $modulePath -Force -PassThru
 foreach ($case in @(@{ Code = 'exit 7'; Status = 'Exit 7' }, @{ Code = 'Start-Sleep -Seconds 10'; Status = 'Timeout' })) {
     $result = & $module {
