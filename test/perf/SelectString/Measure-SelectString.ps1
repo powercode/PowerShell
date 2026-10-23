@@ -129,7 +129,7 @@ if ($TraceMarkers) {
     $markers.WarmupBegin($Scenario[0])
 }
 try {
-    for ($warmup = 0; $warmup -lt $WarmupIterations; $warmup++) { $null = & $action }
+    for ($warmup = 0; $warmup -lt $WarmupIterations; $warmup++) { & $action > $null }
 } finally {
     if ($markers) { $markers.WarmupEnd($Scenario[0]) }
 }
@@ -141,7 +141,7 @@ for ($i = 0; $i -lt $Iterations; $i++) {
     $before = [GC]::GetTotalAllocatedBytes($true)
     $g0 = [GC]::CollectionCount(0); $g1 = [GC]::CollectionCount(1); $g2 = [GC]::CollectionCount(2)
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    try { $null = & $action }
+    try { & $action > $null }
     finally { $timer.Stop() }
     $samples += $timer.Elapsed.TotalMilliseconds
     $allocations += [GC]::GetTotalAllocatedBytes($true) - $before
@@ -174,7 +174,7 @@ $sorted = @($samples | Sort-Object)
     Architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
     ProcessorCount = [Environment]::ProcessorCount; Processor = $env:PROCESSOR_IDENTIFIER
     RequestedAffinity = $Affinity; WarmupIterations = $WarmupIterations
-    WorkerPid = $PID; Sink = 'NullAssignment'; TraceMarkers = [bool]$TraceMarkers
+    WorkerPid = $PID; Sink = 'NullRedirection'; TraceMarkers = [bool]$TraceMarkers
     CountingMeasured = !$SkipCounting
     AssemblyHash = (Get-FileHash ([Microsoft.PowerShell.Commands.SelectStringCommand].Assembly.Location)).Hash
     SamplesMs = $samples; MedianMs = $sorted[[int][Math]::Floor($sorted.Count / 2)]
