@@ -595,3 +595,29 @@ small CPU differences as precise. Modes are null for non-experimental builds.
 The paired 300 MiB sparse/dense capture comparison is recorded in
 [RESULTS-background-log.md](RESULTS-background-log.md), including CPU, first-result
 latency and promotion/cleanup validation.
+
+### One file versus many small files
+
+`PatternSmallFiles` splits the pattern corpus's `RecordCount` records into files
+of `LinesPerFile` lines (default 16), with a possibly shorter final file. One
+Select-String invocation receives the complete ordered path array. Fixture and
+path-array construction happen before timing. Validation checks each result's
+file path, local line number, input text and captures, including file boundaries.
+JSON records `PatternFileCount` and `PatternLinesPerFile`.
+
+```powershell
+./test/perf/SelectString/Measure-SelectString.ps1 `
+    -PwshPath ./tmp/SelectString/regex-background/pwsh.exe -Revision background `
+    -PromotionMode background -Scenario PatternFile,PatternSmallFiles `
+    -PatternFamily SqlDuration -InputKind Mixed -CaseSensitive `
+    -RecordCount 4096 -LinesPerFile 16 -LineCount 16 `
+    -WarmupIterations 30 -Iterations 15 -LatencyIterations 5 -Affinity 5 `
+    -TimeoutSeconds 300 -Artifacts ./tmp/SelectString/small-files-example
+```
+
+The two scenarios use identical records, partitioned as one file or 256 files.
+Warm-cache measurements include opening/closing files and cmdlet path handling;
+they do not model cold storage. Choose an affinity appropriate to your machine.
+
+Results for literal hits and mixed SQL captures/near misses are in
+[RESULTS-background-small-files.md](RESULTS-background-small-files.md).

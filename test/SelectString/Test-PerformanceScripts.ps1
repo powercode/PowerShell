@@ -201,17 +201,20 @@ $log = $results | Where-Object Scenario -eq LogAllMatches
 foreach ($inputKind in 'Mixed','Absent') {
     $patternOutput = Join-Path $artifacts "patterns-$inputKind"
     & (Join-Path $source 'Measure-SelectString.ps1') -PwshPath $PwshPath -Revision test `
-        -Scenario PatternFile,PatternRecords -PatternFamily SqlDuration -InputKind $inputKind `
+        -Scenario PatternFile,PatternRecords,PatternSmallFiles -LinesPerFile 3 -PatternFamily SqlDuration -InputKind $inputKind `
         -RecordCount 17 -Culture tr-TR -CaseSensitive -LineCount 16 -PromotionMode BACKGROUND-WARM `
         -Iterations 1 -WarmupIterations 1 -Artifacts $patternOutput
     $patternResults = @(Get-Content (Join-Path $patternOutput 'results.json') -Raw | ConvertFrom-Json)
-    Assert ($patternResults.Count -eq 2) 'Missing pattern scenarios'
+    Assert ($patternResults.Count -eq 3) 'Missing pattern scenarios'
     foreach ($patternResult in $patternResults) {
         Assert ($patternResult.Status -eq 'Measured') 'Pattern measurement failed'
         $expectedCount = $inputKind -eq 'Mixed' ? 5 : 0
         Assert ($patternResult.ResultCount -eq $expectedCount -and $patternResult.ValidatedResults -eq $expectedCount) 'Pattern validation/count incorrect'
         Assert ($patternResult.PatternFamily -eq 'SqlDuration' -and $patternResult.PatternInput -eq $inputKind -and $patternResult.PatternRecordCount -eq 17) 'Pattern parameters not forwarded'
         Assert ($patternResult.PatternCulture -eq 'tr-TR' -and $patternResult.PatternCaseSensitive) 'Pattern options not forwarded'
+        if ($patternResult.Scenario -eq 'PatternSmallFiles') {
+            Assert ($patternResult.PatternFileCount -eq 6 -and $patternResult.PatternLinesPerFile -eq 3) 'Small-file partition/forwarding incorrect'
+        }
         if ($patternResult.PromotionCounters) {
             Assert ($patternResult.PromotionMode -ceq 'background-warm' -and $patternResult.PromotionCounters.Completed -eq 1) 'Promotion mode not forwarded/normalized'
             Assert ($patternResult.PromotionCounters.OutstandingWorkers -eq 0 -and $patternResult.PromotionCounters.Faulted -eq 0) 'Promotion worker not drained'
