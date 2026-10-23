@@ -1,6 +1,28 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+<#
+.SYNOPSIS
+Compares Select-String behavior in two PowerShell builds.
+.DESCRIPTION
+Creates shared fixtures and runs each executable in a fresh process. Compares
+serialized public results, captures, context, errors, formatting and input modes,
+including large-file decoding and early termination. This is not a timing test.
+.PARAMETER Baseline
+Path to the shipping PowerShell executable.
+.PARAMETER Candidate
+Path to the candidate PowerShell executable.
+.PARAMETER Artifacts
+Directory for shared fixtures and comparison snapshots. Existing files are replaced.
+.PARAMETER Worker
+Internal child-process mode.
+.PARAMETER FixtureRoot
+Internal child-process path to shared fixtures.
+.PARAMETER OutputFile
+Internal child-process snapshot path.
+.EXAMPLE
+./test/SelectString/Compare-SelectString.ps1 -Baseline ./tmp/SelectString/baseline/pwsh.exe -Candidate ./tmp/SelectString/candidate/pwsh.exe
+#>
 [CmdletBinding()]
 param(
     [string] $Baseline,
@@ -24,6 +46,12 @@ if (!$Worker) {
     [IO.File]::WriteAllText((Join-Path $FixtureRoot 'literal[1].txt'), 'hit literal')
     [IO.File]::WriteAllText((Join-Path $FixtureRoot 'utf16.txt'), "é`r`nhit café`rfinal", [Text.Encoding]::Unicode)
     [IO.File]::WriteAllBytes((Join-Path $FixtureRoot 'malformed.txt'), [byte[]](0x68,0x69,0x74,0xff,0x0a))
+    $largeText = "hit first`n" + ("ordinary caf$([char]0xe9) " + ('x' * 1000) + "`n") * 2048 + 'hit last'
+    [IO.File]::WriteAllText((Join-Path $FixtureRoot 'buffer-large.txt'), $largeText)
+    [IO.File]::WriteAllText((Join-Path $FixtureRoot 'buffer-large-bom.txt'), $largeText, [Text.Encoding]::Unicode)
+    $strictBytes = [Text.Encoding]::UTF8.GetBytes("hit first`n" + ('x' * 2MB))
+    $strictBytes[8192] = 0xff
+    [IO.File]::WriteAllBytes((Join-Path $FixtureRoot 'buffer-large-invalid.txt'), $strictBytes)
     foreach ($entry in @(@{ Name = 'baseline'; Exe = $Baseline }, @{ Name = 'candidate'; Exe = $Candidate })) {
         & $entry.Exe -NoLogo -NoProfile -File $PSCommandPath -Worker -FixtureRoot $FixtureRoot -OutputFile (Join-Path $Artifacts ($entry.Name + '.json'))
         if ($LASTEXITCODE) { throw "$($entry.Name) worker failed: $LASTEXITCODE" }
@@ -113,6 +141,16 @@ Add-Case 'literal-brackets' { Select-String -LiteralPath ([IO.FileInfo]::new($li
 Add-Case 'wildcards' { Select-String -Path (Join-Path $FixtureRoot '*.txt') -Pattern hit -Include '*one*','*two*' -Exclude '*two*' }
 Add-Case 'utf16-bom-override' { Select-String -LiteralPath (Join-Path $FixtureRoot 'utf16.txt') -Encoding ascii -Pattern hit -Context 1 }
 Add-Case 'malformed-default' { Select-String -LiteralPath (Join-Path $FixtureRoot 'malformed.txt') -Pattern hit }
+foreach ($mode in 'Default','Raw','List','Quiet') {
+    $bufferOptions = @{ Pattern = '(?<word>hit)'; LiteralPath = (Join-Path $FixtureRoot 'buffer-large.txt'); Context = 1 }
+    if ($mode -ne 'Default') { $bufferOptions[$mode] = $true }
+    Add-Case "buffer-large-$mode" { Select-String @bufferOptions }
+}
+Add-Case 'buffer-large-bom' { Select-String -LiteralPath (Join-Path $FixtureRoot 'buffer-large-bom.txt') -Pattern hit -Context 1 }
+$bufferInvalid = Join-Path $FixtureRoot 'buffer-large-invalid.txt'
+Add-Case 'buffer-invalid-replacement' { Select-String -LiteralPath $bufferInvalid -Pattern hit }
+Add-Case 'buffer-invalid-strict-quiet' { Select-String -LiteralPath $bufferInvalid -Pattern hit -Quiet -Encoding ([Text.UTF8Encoding]::new($false, $true)) }
+Add-Case 'buffer-invalid-strict-sink-stop' { Select-String -LiteralPath $bufferInvalid -Pattern hit -Encoding ([Text.UTF8Encoding]::new($false, $true)) | Select-Object -First 1 }
 Add-Case 'null' { $null | Select-String -Pattern '^$' }
 Add-Case 'empty' { '' | Select-String -Pattern '^$' }
 Add-Case 'input-array' { Select-String -InputObject @('hit', 'other') -Pattern hit }

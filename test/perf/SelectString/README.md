@@ -122,7 +122,7 @@ dotnet run -c Release --project test/perf/SelectString/SelectString.Engine.Bench
 
 ## Reader buffer experiment
 
-`ReaderBufferScanning` compares 1 KiB (the unchanged cmdlet default), 16 KiB and
+`ReaderBufferScanning` compares fixed 1 KiB, 16 KiB and
 64 KiB buffers in the complete engine file scan. It covers sparse captures and
 all matches on the shared 300 MiB log, 256 small files, and a first-line match with
 early termination. The FileStream configuration and regex options stay unchanged.
@@ -144,6 +144,26 @@ Larger buffers can decode beyond an early match and encounter invalid bytes that
 the default reader never reaches. A regression test demonstrates this with strict
 UTF-8 decoding. Buffer size therefore affects observable early-exit behavior as
 well as memory and throughput; an unconditional increase is not semantics-neutral.
+
+### File-size sweep and candidate policy
+
+`ReaderBufferFileSizes` generates 4 KiB, 64 KiB, 1 MiB and 16 MiB log fixtures
+outside timing and validates captures for each variant. It needs no shared fixture:
+
+```powershell
+dotnet run -c Release --project test/perf/SelectString/SelectString.Engine.Benchmarks.csproj -- --filter '*ReaderBufferFileSizes*' --job short --affinity 1 --artifacts tmp/SelectString/buffer-sizes
+```
+
+The candidate uses a 16 KiB reader for seekable files of at least 1 MiB when the
+requested encoding is a runtime-provided UTF-8 encoding with replacement fallback
+and the scan is not a List/Quiet early-exit scan. Other cases keep 1 KiB. BOM
+detection remains enabled, so a BOM can still override the requested encoding.
+Strict decoding, custom encoding types and custom fallbacks retain their original
+read-ahead behavior. Explicit buffer arguments in the standalone benchmarks bypass
+selection, keeping the experiment independent of the candidate policy.
+
+The 1 MiB gate is a conservative candidate supported by the size sweep, not a
+universal break-even point. See RESULTS-buffer-policy.md for end-to-end evidence.
 
 ## End-to-end command
 
