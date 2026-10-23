@@ -6,11 +6,12 @@
     GUID = 'ea5b67d8-2ba8-4549-9631-482f41c8d7ed'
     Author = 'PowerShell Contributors'
     Copyright = '(c) Microsoft Corporation. Licensed under the MIT License.'
-    Description = 'Select-String benchmark fixtures, isolated measurements and ETW capture.'
+    Description = 'Select-String benchmark fixtures, compatibility comparisons, isolated measurements and ETW capture.'
     PowerShellVersion = '7.4'
     FunctionsToExport = @(
         'Invoke-SelectStringMeasurement'
         'Invoke-SelectStringCapture'
+        'Invoke-SelectStringComparison'
         'New-SelectStringLogFixture'
         'New-SelectStringScriptParameters'
     )

@@ -28,7 +28,8 @@ assignment; results and context arrays must not be reused after emission.
 
 `SelectString.Performance.psd1` defines the module and its exports. Implementations,
 parameter definitions and full help live in `SelectString.Performance.psm1`.
-The three entry scripts load dynamic parameters from those definitions, force-reload
+`Measure-SelectString.ps1`, `New-EtwCapture.ps1`, `New-LogFixture.ps1`, and
+`test/SelectString/Compare-SelectString.ps1` load dynamic parameters from those definitions, force-reload
 through `Initialize-Performance.ps1`, and delegate. Existing command lines still work.
 The module owns build discovery, worker lifetime and directory completion classes;
 completion uses `IArgumentCompleter` and `IArgumentCompleterFactory`.
@@ -41,6 +42,7 @@ load a dynamic script's help target just to display help):
 Get-Help Invoke-SelectStringMeasurement -Full
 Get-Help ./test/perf/SelectString/New-EtwCapture.ps1 -Full
 Get-Help New-SelectStringLogFixture -Full
+Get-Help Invoke-SelectStringComparison -Full
 ```
 
 The initializer imports globally for interactive use. It is deliberately separate

@@ -300,9 +300,25 @@ namespace Microsoft.PowerShell.Commands
             return found;
         }
 
-        // Keep short reads for early termination and encodings whose decoder/fallback
-        // can have observable behavior. A nonzero ScanFile buffer overrides this policy
-        // for controlled benchmarks. The size gate amortizes per-file buffer allocation.
+        // StreamReader decodes a buffer of bytes before returning a line. Increasing that
+        // buffer can therefore change behavior, not just throughput. For example, a file
+        // may start with "hit\n" and contain an invalid UTF-8 byte at offset 8192. With
+        // strict decoding, a 1 KiB reader can emit the first match and stop; a 16 KiB
+        // reader throws while decoding its first buffer, before returning that match.
+        // A downstream consumer can stop the scan too, so protecting Quiet/List alone
+        // would not preserve this behavior for strict decoders.
+        //
+        // Retain the original 1 KiB buffer for early-exit modes and for strict or custom
+        // decoding. Only runtime-provided UTF-8 encodings with replacement fallback opt
+        // into larger reads: malformed bytes are replaced rather than throwing, and no
+        // user-defined decoder/fallback code observes a different read-ahead boundary.
+        // BOM detection remains enabled and can still select a different encoding.
+        //
+        // Larger buffers allocate more memory per opened file, even for tiny files or
+        // an immediate match. Measurements favored 16 KiB for full scans of large files;
+        // the 1 MiB size gate is conservative, not a universal break-even point. See
+        // test/perf/SelectString/RESULTS-buffer-policy.md for the measured tradeoffs.
+        // A nonzero ScanFile readerBufferSize bypasses selection for controlled benchmarks.
         private static int SelectReaderBufferSize(FileStream stream, Encoding encoding, bool stopAfterFirst)
         {
             if (stopAfterFirst || !stream.CanSeek || stream.Length < 1024 * 1024)

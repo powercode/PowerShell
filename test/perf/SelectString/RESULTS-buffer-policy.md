@@ -105,9 +105,55 @@ of improvement in every metric. Full-scan allocations increased by about 41 KiB
 per large file, while small-file and early-exit allocation costs stayed comparable.
 
 The candidate executable is `tmp/SelectString/candidate/pwsh.exe`; the fixed-buffer
-control is `tmp/SelectString/buffer-control/pwsh.exe`. Next, capture LogSparse and
-LogAllMatches with the candidate to attribute the CPU savings. Compiled regex
+control is `tmp/SelectString/buffer-control/pwsh.exe`. The diagnostic capture below
+confirms the large-log improvement against shipping. Compiled regex
 remains a separate experiment with this buffer policy held constant in both arms.
+
+## ETW confirmation: 20261023-133709
+
+All four traces have zero lost events and buffers. Each contains 25 paired measured
+iterations after 60 warmups, with affinity 1, null redirection and no counting
+phase. Both hosts report virtual-terminal support. Assembly hashes match those
+below; the same validated 300 MiB fixture yielded 925 sparse results/matches and
+924,366 all-match results containing 978,741 matches.
+
+| Scenario | Shipping median ms | Candidate median ms | Wall-time reduction | Shipping MB allocated/call | Candidate MB allocated/call |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| LogSparse | 328.28 | 227.75 | 30.6% | 709.83 | 650.74 |
+| LogAllMatches | 537.69 | 461.64 | 14.1% | 1541.30 | 1504.36 |
+
+Allocations use decimal MB. Summed stopwatch times across all 25 calls fall from
+8670.96 to 6170.64 ms for Sparse (28.8%) and 13940.28 to 11852.93 ms for AllMatches
+(15.0%). Individual calls still have spikes; these are diagnostic traced runs,
+not replacements for the repeated untraced control comparisons above. Shipping
+versus candidate includes earlier engine changes as well as the buffer policy.
+
+Measured-region CPU leaf samples support reduced copying and native overhead:
+
+| Sample category | Sparse shipping / candidate | AllMatches shipping / candidate |
+| --- | ---: | ---: |
+| Total CPU samples | 8476 / 5933 | 13650 / 11591 |
+| ntoskrnl.exe | 2760 / 1469 | 2767 / 1656 |
+| SpanHelpers.Memmove | 516 / 232 | 582 / 277 |
+| RegexInterpreter.TryMatchAtCurrentPosition | 482 / 460 | 2462 / 2462 |
+| Utf8Utility.TranscodeToUtf16 | 397 / 516 | 366 / 527 |
+
+Decoding samples increase rather than decrease; this is not evidence that every
+reader-related operation became faster. Kernel leaf samples also include work
+other than file I/O. Managed method mapping uses JIT address ranges and is
+heuristic; inlining and unresolved symbols limit attribution.
+
+GC suspension totals are 266.74 / 275.78 ms for Sparse and 625.94 / 610.29 ms for
+AllMatches (shipping / candidate). Thus reduced GC pauses do not explain the
+wall-time gains. No Gen2 collections occurred. AllMatches still spends substantial
+CPU in interpreted matching and MatchCollection.GetMatch, supporting the planned
+compiled-regex experiment, including construction and first-use costs.
+
+Raw captures: `tmp/SelectString/traces/20261023-133709/<scenario>/`.
+Local exports, loss statistics, analysis scripts, logs and summaries:
+`%TEMP%/SelectString-133709-analysis/<scenario>/`. Analyses select individual
+measured marker pairs, excluding warmup and gaps. Dumper schema warnings are
+distinct from event loss.
 
 ## Compatibility and provenance
 
