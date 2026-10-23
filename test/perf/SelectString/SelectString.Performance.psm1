@@ -422,7 +422,8 @@ its own recording in finally. Does not cancel another active WPR session.
 Child directory under tmp/SelectString. Omit to select the newest eligible build
 by Utility DLL timestamp, falling back to pwsh.exe timestamp. Supports completion.
 .PARAMETER Scenario
-DenseContext or a large-log scenario; default DenseContext.
+One or more scenarios, run in the supplied order; default DenseContext.
+Duplicate scenarios run once. Each scenario captures shipping, then candidate.
 .PARAMETER LogFixture
 Shared log directory. Omit to reuse/create the default 300 MiB fixture before WPR starts.
 .PARAMETER WarmupIterations
@@ -434,7 +435,11 @@ Maximum benchmark worker lifetime in seconds (default 180).
 .EXAMPLE
 Invoke-SelectStringCapture -Scenario LogAllMatches -WarmupIterations 3 -Iterations 5 -TimeoutSeconds 600
 Captures both builds using the default shared log.
+.EXAMPLE
+Invoke-SelectStringCapture -Scenario LogSparse,LogAllMatches -Iterations 5
+Captures shipping and candidate for each scenario in order, using one shared log.
 .NOTES
+Batches use a subdirectory per scenario; a single scenario retains the existing layout.
 Writes ETLs, stop logs and benchmark JSON under tmp/SelectString/traces/<timestamp>.
 Requires Windows Performance Toolkit. Event loss or benchmark failure aborts later
 captures; startup and validation remain in traces, outside measured markers.
@@ -446,7 +451,8 @@ param(
     [BenchmarkDirectoryCompletion('Candidate')]
     [string] $CandidateDirectory,
     [ValidateSet('DenseContext','LogRare','LogSparse','LogMedium','LogBroad','LogDense','LogAllMatches','LogContext')]
-    [string] $Scenario = 'DenseContext',
+    [ValidateNotNullOrEmpty()]
+    [string[]] $Scenario = @('DenseContext'),
     [BenchmarkDirectoryCompletion('Fixture')]
     [string] $LogFixture,
     [ValidateRange(1,1000)] [int] $WarmupIterations = 60,
@@ -455,6 +461,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$Scenario = @($Scenario | Select-Object -Unique)
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).ProviderPath
 if (!$CandidateDirectory) {
     $latest = [BenchmarkBuildCatalog]::new((Join-Path $repoRoot 'tmp/SelectString')).Newest()
@@ -478,42 +485,49 @@ foreach ($name in @($builds.Keys)) {
     Write-Host "${name}: $($builds[$name])"
 }
 
-foreach ($name in $builds.Keys) {
-    # The custom profile limits CLR keywords/level and filters to pwsh.exe.
-    wpr.exe -start "${profile}!SelectString" -filemode
-    if ($LASTEXITCODE -ne 0) {
-        throw "WPR failed to start. Stop here without cancelling any existing recording."
-    }
-
-    try {
-        Invoke-SelectStringMeasurement `
-            -PwshPath $builds[$name] `
-            -Revision $name `
-            -Scenario $Scenario -LogFixture $LogFixture `
-            -Iterations $Iterations `
-            -WarmupIterations $WarmupIterations `
-            -Affinity 1 `
-            -TraceMarkers -SkipCounting `
-            -TimeoutSeconds $TimeoutSeconds `
-            -Artifacts (Join-Path $out $name)
-
-        if (!$?) { throw "Benchmark failed for $name" }
-        $result = Get-Content (Join-Path $out "$name/results.json") -Raw | ConvertFrom-Json
-        if ($result.Status -ne 'Measured') { throw "Benchmark failed for ${name}: $($result.Status)" }
-    }
-    finally {
-        $stopOutput = @(wpr.exe -stop (Join-Path $out "$name-$Scenario.etl") 2>&1)
-        $stopExitCode = $LASTEXITCODE
-        $stopOutput | Out-Host
-        $stopOutput | Set-Content -LiteralPath (Join-Path $out "$name-wpr-stop.log")
-        if ($stopExitCode -ne 0) {
-            throw "WPR failed to save the trace for $name"
+foreach ($scenarioName in $Scenario) {
+    # Preserve the single-scenario layout; isolate each scenario in a batch.
+    $scenarioOut = if ($Scenario.Count -gt 1) { Join-Path $out $scenarioName } else { $out }
+    $null = New-Item -ItemType Directory -Path $scenarioOut -Force
+    Write-Host "Capturing scenario: $scenarioName"
+    foreach ($name in $builds.Keys) {
+        # The custom profile limits CLR keywords/level and filters to pwsh.exe.
+        wpr.exe -start "${profile}!SelectString" -filemode
+        if ($LASTEXITCODE -ne 0) {
+            throw "WPR failed to start. Stop here without cancelling any existing recording."
         }
 
-        if (($stopOutput -join "`n") -match 'dropped\s+[1-9][0-9,]*\s+events') {
-            throw "WPR reported event loss for $name. Keep the trace and stop log in $out for diagnosis before recording more builds."
+        try {
+            Invoke-SelectStringMeasurement `
+                -PwshPath $builds[$name] `
+                -Revision $name `
+                -Scenario $scenarioName -LogFixture $LogFixture `
+                -Iterations $Iterations `
+                -WarmupIterations $WarmupIterations `
+                -Affinity 1 `
+                -TraceMarkers -SkipCounting `
+                -TimeoutSeconds $TimeoutSeconds `
+                -Artifacts (Join-Path $scenarioOut $name)
+
+            if (!$?) { throw "Benchmark failed for $name" }
+            $result = Get-Content (Join-Path $scenarioOut "$name/results.json") -Raw | ConvertFrom-Json
+            if ($result.Status -ne 'Measured') { throw "Benchmark failed for ${name}: $($result.Status)" }
+        }
+        finally {
+            $stopOutput = @(wpr.exe -stop (Join-Path $scenarioOut "$name-$scenarioName.etl") 2>&1)
+            $stopExitCode = $LASTEXITCODE
+            $stopOutput | Out-Host
+            $stopOutput | Set-Content -LiteralPath (Join-Path $scenarioOut "$name-wpr-stop.log")
+            if ($stopExitCode -ne 0) {
+                throw "WPR failed to save the trace for $name"
+            }
+
+            if (($stopOutput -join "`n") -match 'dropped\s+[1-9][0-9,]*\s+events') {
+                throw "WPR reported event loss for $name. Keep the trace and stop log in $out for diagnosis before recording more builds."
+            }
         }
     }
+
 }
 
 Write-Host "Results saved to: $out"
