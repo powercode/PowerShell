@@ -16,6 +16,7 @@ param(
     [switch] $TraceMarkers,
     [switch] $SkipCounting,
     [string] $FixtureRoot,
+    [string] $LogFixture,
     [string] $OutputFile
 )
 
@@ -25,31 +26,41 @@ if (!$Worker) {
     # .NET's current directory can differ from PowerShell's current location.
     $Artifacts = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Artifacts)
     $PwshPath = @($PwshPath | ForEach-Object { (Resolve-Path -LiteralPath $_ -ErrorAction Stop).ProviderPath })
+    if (@($Scenario | Where-Object { $_ -like 'Log*' }).Count) {
+        if (!$LogFixture) { throw 'Generate a log with New-LogFixture.ps1 and supply -LogFixture <directory>.' }
+        $LogFixture = (Resolve-Path -LiteralPath $LogFixture).ProviderPath
+        $manifest = Get-Content (Join-Path $LogFixture 'manifest.json') -Raw | ConvertFrom-Json
+        if ($manifest.Version -ne 1 -or (Get-FileHash (Join-Path $LogFixture 'application.log')).Hash -ne $manifest.SHA256) {
+            throw 'Log fixture version/hash mismatch. Regenerate the fixture.'
+        }
+    }
     $FixtureRoot = Join-Path $Artifacts 'fixtures'
     $null = New-Item -ItemType Directory -Path $FixtureRoot -Force
-    foreach ($encoding in @(@{ Name = 'large'; Value = [Text.UTF8Encoding]::new($false) }, @{ Name = 'utf16'; Value = [Text.Encoding]::Unicode }, @{ Name = 'utf32'; Value = [Text.Encoding]::UTF32 }, @{ Name = 'legacy'; Value = [Text.Encoding]::GetEncoding(1252) })) {
-        $writer = [IO.StreamWriter]::new((Join-Path $FixtureRoot ($encoding.Name + '.txt')), $false, $encoding.Value)
-        try {
-            for ($i = 0; $i -lt $LineCount; $i++) {
-                $writer.WriteLine($(if ($i % 100 -eq 0) { 'needle café needle' } else { 'ordinary input café without a match' }))
+    if (@($Scenario | Where-Object { $_ -notlike 'Log*' }).Count) {
+        foreach ($encoding in @(@{ Name = 'large'; Value = [Text.UTF8Encoding]::new($false) }, @{ Name = 'utf16'; Value = [Text.Encoding]::Unicode }, @{ Name = 'utf32'; Value = [Text.Encoding]::UTF32 }, @{ Name = 'legacy'; Value = [Text.Encoding]::GetEncoding(1252) })) {
+            $writer = [IO.StreamWriter]::new((Join-Path $FixtureRoot ($encoding.Name + '.txt')), $false, $encoding.Value)
+            try {
+                for ($i = 0; $i -lt $LineCount; $i++) {
+                    $writer.WriteLine($(if ($i % 100 -eq 0) { 'needle café needle' } else { 'ordinary input café without a match' }))
+                }
             }
+            finally { $writer.Dispose() }
         }
-        finally { $writer.Dispose() }
-    }
-    [IO.File]::WriteAllText((Join-Path $FixtureRoot 'long.txt'), ('x' * (4MB)) + 'needle')
-    foreach ($name in 'dense', 'late') {
-        $writer = [IO.StreamWriter]::new((Join-Path $FixtureRoot "$name.txt"))
-        try {
-            for ($i = 0; $i -lt $LineCount; $i++) {
-                if ($name -eq 'dense') { $writer.WriteLine('needle café needle') }
-                else { $writer.Write("ordinary line`n") }
+        [IO.File]::WriteAllText((Join-Path $FixtureRoot 'long.txt'), ('x' * (4MB)) + 'needle')
+        foreach ($name in 'dense', 'late') {
+            $writer = [IO.StreamWriter]::new((Join-Path $FixtureRoot "$name.txt"))
+            try {
+                for ($i = 0; $i -lt $LineCount; $i++) {
+                    if ($name -eq 'dense') { $writer.WriteLine('needle café needle') }
+                    else { $writer.Write("ordinary line`n") }
+                }
+                if ($name -eq 'late') { $writer.Write('needle') }
             }
-            if ($name -eq 'late') { $writer.Write('needle') }
+            finally { $writer.Dispose() }
         }
-        finally { $writer.Dispose() }
+        $smallLines = [string[]](@('needle café needle') + @('ordinary input café without a match') * 15)
+        for ($i = 0; $i -lt 256; $i++) { [IO.File]::WriteAllLines((Join-Path $FixtureRoot "small-$i.txt"), $smallLines) }
     }
-    $smallLines = [string[]](@('needle café needle') + @('ordinary input café without a match') * 15)
-    for ($i = 0; $i -lt 256; $i++) { [IO.File]::WriteAllLines((Join-Path $FixtureRoot "small-$i.txt"), $smallLines) }
     $results = [Collections.Generic.List[object]]::new()
     for ($build = 0; $build -lt $PwshPath.Count; $build++) {
         foreach ($case in $Scenario) {
@@ -63,6 +74,7 @@ if (!$Worker) {
             }
             if ($TraceMarkers) { $start.ArgumentList.Add('-TraceMarkers') }
             if ($SkipCounting) { $start.ArgumentList.Add('-SkipCounting') }
+            if ($LogFixture) { $start.ArgumentList.Add('-LogFixture'); $start.ArgumentList.Add($LogFixture) }
             $process = [Diagnostics.Process]::Start($start)
             try {
                 if ($Affinity) { $process.ProcessorAffinity = [IntPtr]$Affinity }
@@ -84,19 +96,36 @@ if (!$Worker) {
         }
     }
     $results | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $Artifacts 'results.json')
-    $results | Select-Object Revision,Scenario,Status,MedianMs,AllocatedBytes,FirstResultMs,ResultCount | Format-Table -AutoSize
+    $results | Select-Object Revision,Scenario,Status,MedianMs,MiBPerSecond,AllocatedBytes,FirstResultMs,ResultCount | Format-Table -AutoSize
     return
 }
 
 $large = Join-Path $FixtureRoot 'large.txt'
 $records = [Collections.Generic.List[string]]::new()
-foreach ($line in [IO.File]::ReadLines($large)) {
-    $records.Add($line)
-    if ($records.Count -eq 10000) { break }
+if ($Scenario[0] -notlike 'Log*') {
+    foreach ($line in [IO.File]::ReadLines($large)) {
+        $records.Add($line)
+        if ($records.Count -eq 10000) { break }
+    }
+    $small = [IO.Directory]::GetFiles($FixtureRoot, 'small-*.txt')
+    [Array]::Sort($small, [StringComparer]::Ordinal)
 }
-$small = [IO.Directory]::GetFiles($FixtureRoot, 'small-*.txt')
-[Array]::Sort($small, [StringComparer]::Ordinal)
+$logManifest = $null
+$validator = $null
+if ($Scenario[0] -like 'Log*') {
+    if ($Scenario[0] -notin 'LogRare','LogSparse','LogMedium','LogBroad','LogDense','LogAllMatches','LogContext') { throw 'Unknown log scenario' }
+    Add-Type -Path (Join-Path $PSScriptRoot 'LogFixture.cs')
+    $logManifest = Get-Content (Join-Path $LogFixture 'manifest.json') -Raw | ConvertFrom-Json
+    $logParameters = @{
+        LiteralPath = Join-Path $LogFixture 'application.log'
+        Pattern = [SelectStringLogFixture]::Pattern($Scenario[0])
+        CaseSensitive = $true
+    }
+    if ($Scenario[0] -eq 'LogAllMatches') { $logParameters.AllMatches = $true }
+    if ($Scenario[0] -eq 'LogContext') { $logParameters.Context = 2 }
+}
 $action = switch ($Scenario[0]) {
+    { $_ -like 'Log*' } { { Select-String @logParameters } }
     String { { 'needle café needle' | Select-String needle } }
     Records { { $records | Select-String needle } }
     SmallFiles { { Select-String -LiteralPath $small -Pattern needle } }
@@ -118,6 +147,13 @@ $action = switch ($Scenario[0]) {
     Legacy { { Select-String -LiteralPath (Join-Path $FixtureRoot 'legacy.txt') -Encoding 1252 -Pattern needle } }
     Formatting { { Select-String -LiteralPath $large -Pattern needle -Context 2 | ForEach-Object { $_.ToString($FixtureRoot) } } }
     default { throw "Unknown scenario: $Scenario" }
+}
+
+# Validate every returned line number and named capture outside all timed phases.
+if ($logManifest) {
+    $validator = [SelectStringLogValidator]::new($Scenario[0], $logManifest.Lines)
+    & $action | ForEach-Object { $validator.Accept($_.LineNumber, $_.Matches) }
+    $validator.Complete()
 }
 
 # Startup, fixture creation, module loading and warmup are outside timed samples.
@@ -177,6 +213,10 @@ $sorted = @($samples | Sort-Object)
     WorkerPid = $PID; Sink = 'NullRedirection'; TraceMarkers = [bool]$TraceMarkers
     CountingMeasured = !$SkipCounting
     AssemblyHash = (Get-FileHash ([Microsoft.PowerShell.Commands.SelectStringCommand].Assembly.Location)).Hash
+    Fixture = $logManifest
+    ValidatedResults = $(if ($validator) { $validator.Count } else { $null })
+    ValidatedMatches = $(if ($validator) { $validator.Captures } else { $null })
+    MiBPerSecond = $(if ($logManifest) { $logManifest.Bytes / 1MB / ($sorted[[int][Math]::Floor($sorted.Count / 2)] / 1000) } else { $null })
     SamplesMs = $samples; MedianMs = $sorted[[int][Math]::Floor($sorted.Count / 2)]
     AllocatedBytes = ($allocations | Measure-Object -Average).Average; Collections = $collections
     FirstResultMs = $script:first; ResultCount = $script:count
