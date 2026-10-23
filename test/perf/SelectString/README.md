@@ -606,6 +606,18 @@ path-array construction happen before timing. Validation checks each result's
 file path, local line number, input text and captures, including file boundaries.
 JSON records `PatternFileCount` and `PatternLinesPerFile`.
 
+The same scenario can represent several large files by increasing `LinesPerFile`.
+It supports `-PatternOutput Context`, with validation bounded by each file's edges.
+For a constrained consumer, add `-SinkDelayMilliseconds 1 -SinkDelayEvery 128`.
+Throughput samples then include a `ForEach-Object` consumer that discards results
+and sleeps after every 128 results. This measures downstream binding and blocking
+as well as scanning; actual sleep duration depends on the scheduler. The JSON
+identifies this sink and its settings. Validation and first-result measurements
+use the ordinary undelayed consumer, so first-result latency does not describe
+the delayed sink. Leave affinity unrestricted when testing multi-core scaling.
+The first ordered-parallel comparison is recorded in
+[RESULTS-parallel-files.md](RESULTS-parallel-files.md).
+
 ```powershell
 ./test/perf/SelectString/Measure-SelectString.ps1 `
     -PwshPath ./tmp/SelectString/regex-background/pwsh.exe -Revision background `

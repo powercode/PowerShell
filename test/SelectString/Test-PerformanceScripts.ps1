@@ -263,7 +263,17 @@ Add-Content (Join-Path $fixture 'application.log') 'corruption'
 Assert-Throws { & (Join-Path $source 'Measure-SelectString.ps1') -PwshPath $PwshPath -Revision test -Scenario LogSparse -LogFixture $fixture -Artifacts (Join-Path $artifacts 'invalid') } 'Invalid fixture accepted'
 
 # Exercise comparison workers through the wrapper and verify the function export.
+$slowOutput = Join-Path $artifacts 'slow-consumer'
+& (Join-Path $source 'Measure-SelectString.ps1') -PwshPath $PwshPath -Revision test `
+    -Scenario PatternSmallFiles -PatternFamily SqlDuration -InputKind Match `
+    -PatternOutput Context -RecordCount 8 -LinesPerFile 2 -LineCount 16 -SinkDelayMilliseconds 1 -SinkDelayEvery 2 `
+    -Iterations 1 -WarmupIterations 1 -Artifacts $slowOutput
+$slow = Get-Content (Join-Path $slowOutput 'results.json') -Raw | ConvertFrom-Json
+Assert ($slow.Status -eq 'Measured' -and $slow.Sink -eq 'PeriodicBlockingConsumer') 'Blocking sink was not selected'
+Assert ($slow.SinkDelayMilliseconds -eq 1 -and $slow.SinkDelayEvery -eq 2) 'Blocking sink settings were not forwarded'
+Assert ($slow.ValidatedResults -eq 8 -and $slow.ResultCount -eq 8 -and $null -ne $slow.FirstResultMs) 'Blocking sink changed validation or latency counting'
+
 $comparison = & (Join-Path $repo 'test/SelectString/Compare-SelectString.ps1') -Baseline $PwshPath -Candidate $PwshPath -Artifacts (Join-Path $artifacts 'comparison')
-Assert ($comparison -match 'Passed 146 baseline comparisons') 'Comparison wrapper/worker delegation failed'
+Assert ($comparison -match 'Passed 152 baseline comparisons') 'Comparison wrapper/worker delegation failed'
 Assert ($null -ne (Get-Command Invoke-SelectStringComparison -Module SelectString.Performance)) 'Comparison implementation is not exported'
 Write-Host "Performance script checks passed. Artifacts: $artifacts"
