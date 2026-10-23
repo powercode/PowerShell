@@ -361,7 +361,12 @@ namespace Microsoft.PowerShell.Commands
                     AllowSynchronousContinuations = false,
                 });
                 Output = channel.Reader;
-                Completion = Task.Run(async () =>
+                // Do not cancel task scheduling: the delegate must run its finally
+                // block to complete the channel, even if cancellation precedes startup.
+                // The scan token still cancels file scanning and capacity waits below.
+                Completion = Task.Run(ScanFileAsync, CancellationToken.None);
+
+                async Task ScanFileAsync()
                 {
                     try
                     {
@@ -389,7 +394,7 @@ namespace Microsoft.PowerShell.Commands
                     {
                         channel.Writer.TryComplete();
                     }
-                });
+                }
             }
 
             internal string Path { get; }
