@@ -164,6 +164,14 @@ result is timed in a separate instrumented pass. Fixtures and capture validation
 are outside timing. These options do not change the historical `Records` scenario.
 JSON records the pipeline parameters and validated result count.
 
+Use `-LatencyIterations 25` to repeat the separate instrumented counting pass.
+`FirstResultMs` is the median, and `FirstResultSamplesMs` retains every observation
+(including null for an invocation with no output). The default remains one call;
+`-SkipCounting` skips every latency call. Latency sampling follows throughput
+measurement and includes the counting sink's overhead, so it is not directly
+comparable with the null-redirection total time. Repetition exposes outliers but
+does not remove instrumentation bias. Result counts must agree across samples.
+
 `RegexScanning` compares interpreted and compiled regexes with the same production
 reader-buffer policy. `ConstructAndScan` creates a fresh engine on every timed
 operation, including regex compilation and first-use JIT. `ReuseAndScan` uses an

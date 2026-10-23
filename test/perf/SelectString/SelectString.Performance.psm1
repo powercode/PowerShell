@@ -193,6 +193,8 @@ Internal child-process mode. Do not use for ordinary comparisons.
 Emit warmup, iteration and counting ETW boundaries outside measured calls.
 .PARAMETER SkipCounting
 Skip the separate latency/counting pass. Log capture validation still runs.
+.PARAMETER LatencyIterations
+Repeated instrumented latency/counting calls (default 1). FirstResultMs reports their median.
 .PARAMETER FixtureRoot
 Internal child-process path to small fixtures.
 .PARAMETER LogFixture
@@ -222,6 +224,7 @@ param(
     [switch] $Worker,
     [switch] $TraceMarkers,
     [switch] $SkipCounting,
+    [ValidateRange(1,100)] [int] $LatencyIterations = 1,
     [string] $FixtureRoot,
     [BenchmarkDirectoryCompletion('Fixture')]
     [string] $LogFixture,
@@ -278,6 +281,8 @@ if (!$Worker) {
             if ($TraceMarkers) { $start.ArgumentList.Add('-TraceMarkers') }
             foreach ($arg in @('-RecordCount', [string]$RecordCount, '-MatchEvery', [string]$MatchEvery)) { $start.ArgumentList.Add($arg) }
             if ($SkipCounting) { $start.ArgumentList.Add('-SkipCounting') }
+            $start.ArgumentList.Add('-LatencyIterations')
+            $start.ArgumentList.Add([string]$LatencyIterations)
             if ($LogFixture) { $start.ArgumentList.Add('-LogFixture'); $start.ArgumentList.Add($LogFixture) }
             $result = [BenchmarkWorker]::Run($start, $TimeoutSeconds, $Affinity, $case, $output)
             $result | Add-Member Revision $Revision[$build]
@@ -410,29 +415,47 @@ for ($i = 0; $i -lt $Iterations; $i++) {
 # Measure streaming latency separately: the counting sink adds its own overhead.
 $script:count = $null
 $script:first = $null
+$latencySamples = @()
 if (!$SkipCounting) {
     if ($markers) { $markers.CountingBegin($Scenario[0]) }
-    $script:count = 0
-    $latency = [Diagnostics.Stopwatch]::StartNew()
+    $previousCount = $null
     try {
-        & $action | ForEach-Object {
-            if ($script:count -eq 0) { $script:first = $latency.Elapsed.TotalMilliseconds }
-            $script:count++
+        for ($sample = 0; $sample -lt $LatencyIterations; $sample++) {
+            $script:count = 0
+            $script:first = $null
+            $latency = [Diagnostics.Stopwatch]::StartNew()
+            try {
+                & $action | ForEach-Object {
+                    if ($script:count -eq 0) { $script:first = $latency.Elapsed.TotalMilliseconds }
+                    $script:count++
+                }
+            } finally { $latency.Stop() }
+            if ($null -ne $previousCount -and $previousCount -ne $script:count) { throw 'Result count changed between latency samples' }
+            $previousCount = $script:count
+            $latencySamples += ,$script:first
         }
     } finally {
-        $latency.Stop()
         if ($markers) { $markers.CountingEnd($Scenario[0]) }
     }
 }
+$sortedLatency = @($latencySamples | Where-Object { $null -ne $_ } | Sort-Object)
+$firstResultMedian = $sortedLatency.Count ? $sortedLatency[[int][Math]::Floor($sortedLatency.Count / 2)] : $null
 $sorted = @($samples | Sort-Object)
 [ordered]@{
-    Scenario = $Scenario[0]; Status = 'Measured'; Cache = 'Warm'; PowerShell = $PSVersionTable.PSVersion.ToString()
+    Scenario = $Scenario[0]
+    Status = 'Measured'
+    Cache = 'Warm'
+    PowerShell = $PSVersionTable.PSVersion.ToString()
     Runtime = [Runtime.InteropServices.RuntimeInformation]::FrameworkDescription
     OS = [Runtime.InteropServices.RuntimeInformation]::OSDescription
     Architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
-    ProcessorCount = [Environment]::ProcessorCount; Processor = $env:PROCESSOR_IDENTIFIER
-    RequestedAffinity = $Affinity; WarmupIterations = $WarmupIterations
-    WorkerPid = $PID; Sink = 'NullRedirection'; TraceMarkers = [bool]$TraceMarkers
+    ProcessorCount = [Environment]::ProcessorCount
+    Processor = $env:PROCESSOR_IDENTIFIER
+    RequestedAffinity = $Affinity
+    WarmupIterations = $WarmupIterations
+    WorkerPid = $PID
+    Sink = 'NullRedirection'
+    TraceMarkers = [bool]$TraceMarkers
     CountingMeasured = !$SkipCounting
     HostSupportsVirtualTerminal = $Host.UI.SupportsVirtualTerminal
     AssemblyHash = (Get-FileHash ([Microsoft.PowerShell.Commands.SelectStringCommand].Assembly.Location)).Hash
@@ -442,9 +465,14 @@ $sorted = @($samples | Sort-Object)
     ValidatedResults = $validator ? $validator.Count : $validatedPipelineResults
     ValidatedMatches = $validator ? $validator.Captures : $null
     MiBPerSecond = !$logManifest ? $null : $logManifest.Bytes / 1MB / ($sorted[[int][Math]::Floor($sorted.Count / 2)] / 1000)
-    SamplesMs = $samples; MedianMs = $sorted[[int][Math]::Floor($sorted.Count / 2)]
-    AllocatedBytes = ($allocations | Measure-Object -Average).Average; Collections = $collections
-    FirstResultMs = $script:first; ResultCount = $script:count
+    SamplesMs = $samples
+    MedianMs = $sorted[[int][Math]::Floor($sorted.Count / 2)]
+    AllocatedBytes = ($allocations | Measure-Object -Average).Average
+    Collections = $collections
+    FirstResultMs = $firstResultMedian
+    FirstResultSamplesMs = $latencySamples
+    LatencyIterations = $SkipCounting ? 0 : $LatencyIterations
+    ResultCount = $script:count
     PeakWorkingSetBytes = [Diagnostics.Process]::GetCurrentProcess().PeakWorkingSet64
 } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $OutputFile -Encoding utf8
 

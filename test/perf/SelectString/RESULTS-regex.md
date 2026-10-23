@@ -186,3 +186,58 @@ No ETW recording was needed for this comparison.
 Next: evaluate a compilation policy using per-invocation work and acceptable
 absolute startup cost. Repeat latency sampling and investigate variable sparse
 pipeline results before choosing a threshold or changing production behavior.
+
+## Repeated latency and sparse-pipeline follow-up
+
+Completed 27 additional worker cases with 200 warmups, 100 throughput calls and
+25 separately instrumented first-result observations each. The three build orders
+were shipping/current/compiled, compiled/shipping/current, current/compiled/shipping.
+All builds occupy every position once. Affinity, binaries and runtime match the
+previous comparison; terminal support remained false. All cases passed count and
+capture validation. Pipeline input contains 100,000 records with 1% matching.
+
+| Scenario / measurement | Shipping ms | Current ms | Compiled ms |
+| --- | ---: | ---: | ---: |
+| Sparse pipeline, total median | 52.92–56.22 | 53.39–55.68 | 54.76–57.62 |
+| Sparse pipeline, first-result median | 0.11–0.11 | 0.11–0.11 | 2.23–2.27 |
+| Pipeline downstream stop, total median | 0.08–0.09 | 0.08–0.09 | 1.93–1.99 |
+| Pipeline downstream stop, first-result median | 0.07–0.07 | 0.07–0.07 | 1.92–2.01 |
+| File downstream stop, total median | 0.13–0.14 | 0.14–0.15 | 0.98–1.00 |
+| File downstream stop, first-result median | 0.12–0.14 | 0.13–0.14 | 0.96–0.98 |
+
+Ranges span the three worker medians, not confidence intervals. Compilation does
+not show a consistent sparse-pipeline throughput benefit: it is about 2% faster
+than current in one rotation and 6–7% slower in the others. Within-worker medians
+also move: current round 0 falls from 55.01 ms for the first 25 samples to 51.78 ms
+for the last 25; compiled round 2 falls from 56.98 to 52.63 ms. Longer warmup and
+rotated order narrow the earlier spread but do not establish its cause. Do not
+attribute it specifically to JIT, GC or scheduling without further diagnostics.
+
+Repeated first-result sampling reduces the influence of the first counting-sink
+invocation, explaining why these medians are lower than the previous single
+observations. All samples, including spikes, remain in FirstResultSamplesMs.
+Instrumentation bias remains; these are not cold-process latency distributions.
+The approximately 2.1 ms extra latency for the capturing pipeline remains clear.
+PowerShell downstream termination does not conceal that cost in these cases.
+
+### Policy assessment
+
+Construction is correctly amortized per invocation, and dense long pipelines and
+large logs benefit. However, even 100,000 inputs need not recover compilation cost
+when most inputs reject cheaply. Input count or file size alone cannot express
+this tradeoff. A small absolute startup penalty may be acceptable interactively,
+but making every short invocation pay it is a separate product choice.
+
+Retain interpreted production behavior for now. The next useful experiment is
+delayed compilation based on work actually observed within an invocation, with
+configurable benchmark-only promotion points rather than a production threshold.
+Compare it with both always-interpreted and always-compiled execution. Include
+the initial interpreted work plus compilation in timing; test culture captured
+at construction, pattern precedence/captures, early termination and streaming.
+Investigate whether any promotion rule retains dense/large gains while avoiding
+short/sparse costs; the present data do not establish such a rule.
+
+Raw follow-up data: tmp/SelectString/regex-latency-0, -1 and -2, plus
+regex-latency-summary.json and Run-RegexLatency.ps1. The harness keeps the historical
+one-observation default; -LatencyIterations opts into repeated sampling. No new
+cmdlet binary, production policy or ETW trace was introduced in this follow-up.
