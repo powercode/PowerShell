@@ -149,6 +149,37 @@ well as memory and throughput; an unconditional increase is not semantics-neutra
 
 ### Compiled-regex experiment
 
+`PatternFamilyScanning` tests literal text, `alpha.*omega`, `alpha.+omega`, SQL
+durations, order IDs, image extensions, PR references, Markdown headings and secret
+assignments. `PatternFamilies.cs` records source URLs and authored inputs with
+expected spans and groups. Standalone tests cover both compilation/case settings
+and both AllMatches settings; benchmark setup validates its own selected variant.
+These catalog expressions are search workloads, not complete domain validators.
+
+```powershell
+dotnet run -c Release --project test/perf/SelectString/SelectString.Engine.Benchmarks.csproj -- --filter '*PatternFamilyScanning*Records: 10000,*CaseSensitive: True,*Input: Mixed*' --job short --affinity 1 --artifacts tmp/SelectString/pattern-families
+```
+
+This selects 36 cases: nine families, interpreted/compiled, fresh/reused engines.
+Each operation matches 10,000 prepared records. Mixed cycles equally through a
+successful match, an absent prefix, a short near miss and a roughly 4 KiB near miss.
+This deliberately exercises failure paths; it is not a measured real-world input
+distribution. The enum also supports each input kind separately; Records accepts
+1 or 10000 and CaseSensitive accepts both settings. Filter these dimensions to
+keep runs focused. Whole-line anchors are preserved. There is no file/pipeline
+overhead in these benchmarks; confirm promising cases end-to-end before adoption.
+
+The focused controls in RESULTS-patterns.md can be repeated with:
+
+```powershell
+$filters = foreach ($family in 'Literal','DotStar','DotPlus') {
+    foreach ($inputKind in 'Match','Absent','LongNearMiss') {
+        "*PatternFamilyScanning.ConstructAndMatch*Records: 10000,*CaseSensitive: True,*Family: $family, Input: $inputKind*"
+    }
+}
+dotnet run -c Release --project test/perf/SelectString/SelectString.Engine.Benchmarks.csproj -- --filter $filters --job short --affinity 1 --artifacts tmp/SelectString/pattern-controls
+```
+
 End-to-end pipeline workloads are available through `Measure-SelectString.ps1`:
 
 ```powershell
