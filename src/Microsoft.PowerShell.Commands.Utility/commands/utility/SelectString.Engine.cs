@@ -74,9 +74,7 @@ namespace Microsoft.PowerShell.Commands
         }
 
         // Strings and regex matches own their storage. No result borrows reader buffers.
-        // The PowerShell adapter derives a result for existing MatchInfo objects.
-#pragma warning disable CA1852
-        internal class Result
+        internal sealed class Result
         {
             internal string Line { get; set; }
 
@@ -91,15 +89,72 @@ namespace Microsoft.PowerShell.Commands
             internal Match[] Matches { get; set; } = Array.Empty<Match>();
 
             internal ResultContext Context { get; set; }
-
-            internal bool Emphasize { get; set; }
         }
 
-#pragma warning restore CA1852
-
-        internal bool TryMatch(string line, out Result result)
+        /// <summary>
+        /// Matching metadata only. Text ownership and output representation belong to the caller.
+        /// </summary>
+        internal readonly struct MatchData(int patternIndex, int simpleMatchIndex, Match[] matches)
         {
-            result = null;
+            internal int PatternIndex { get; } = patternIndex;
+
+            internal int SimpleMatchIndex { get; } = simpleMatchIndex;
+
+            internal Match[] Matches { get; } = matches;
+        }
+
+        /// <summary>
+        /// Constructs and accesses a caller-owned result. Context trackers share the same
+        /// reference, so logical and display context updates reach the final output object.
+        /// Implementations must not retain borrowed buffers or reuse emitted results.
+        /// </summary>
+        internal interface IResultFactory<T> where T : class
+        {
+            T Create(string line, string path, ulong lineNumber, in MatchData match, bool context);
+
+            string GetLine(T result);
+
+            bool HasContext(T result);
+
+            void SetLogicalContext(T result, string[] before, string[] after);
+
+            void SetDisplayContext(T result, string[] before, string[] after);
+        }
+
+        // Default representation for standalone callers and lightweight output modes.
+        internal readonly struct ResultFactory : IResultFactory<Result>
+        {
+            public Result Create(string line, string path, ulong lineNumber, in MatchData match, bool context) => new()
+            {
+                Line = line,
+                Path = path,
+                LineNumber = lineNumber,
+                PatternIndex = match.PatternIndex,
+                SimpleMatchIndex = match.SimpleMatchIndex,
+                Matches = match.Matches,
+                Context = context ? new ResultContext() : null,
+            };
+
+            public string GetLine(Result result) => result.Line;
+
+            public bool HasContext(Result result) => result.Context != null;
+
+            public void SetLogicalContext(Result result, string[] before, string[] after)
+            {
+                result.Context.PreContext = before;
+                result.Context.PostContext = after;
+            }
+
+            public void SetDisplayContext(Result result, string[] before, string[] after)
+            {
+                result.Context.DisplayPreContext = before;
+                result.Context.DisplayPostContext = after;
+            }
+        }
+
+        internal bool TryMatch(string line, out MatchData result)
+        {
+            result = default;
             bool matched = false;
             int patternIndex = 0;
             int simpleIndex = -1;
@@ -148,29 +203,33 @@ namespace Microsoft.PowerShell.Commands
                 return false;
             }
 
-            result = new Result
-            {
-                Line = line,
-                PatternIndex = patternIndex,
-                SimpleMatchIndex = simpleIndex,
-                Matches = matches ?? Array.Empty<Match>(),
-            };
+            result = new MatchData(patternIndex, simpleIndex, matches ?? Array.Empty<Match>());
             return true;
         }
 
-        internal static IContextTracker CreateContextTracker(int preContext, int postContext) =>
-            preContext == 0 && postContext == 0 ? new NoContextTracker() : new ContextTracker(preContext, postContext);
+        internal static IContextTracker<T> CreateContextTracker<T, TFactory>(int preContext, int postContext, TFactory factory)
+            where T : class
+            where TFactory : struct, IResultFactory<T> =>
+            preContext == 0 && postContext == 0 ? new NoContextTracker<T>() : new ContextTracker<T, TFactory>(preContext, postContext, factory);
+
+        internal bool ScanFile(string path, Encoding encoding, int preContext, int postContext,
+            bool stopAfterFirst, Func<Result, bool> emit, Func<bool> shouldStop = null,
+            CancellationToken cancellationToken = default) =>
+            ScanFile<Result, ResultFactory>(path, encoding, preContext, postContext, stopAfterFirst,
+                default, emit, shouldStop, cancellationToken);
 
         /// <summary>
         /// Scans decoded file lines in order. A false sink result stops reading.
         /// With stopAfterFirst the file is closed before the completed result is emitted.
         /// The sink runs synchronously on the caller's thread; no whole-file buffering occurs.
         /// </summary>
-        internal bool ScanFile(string path, Encoding encoding, int preContext, int postContext,
-            bool stopAfterFirst, Func<Result, bool> emit, Func<bool> shouldStop = null,
+        internal bool ScanFile<T, TFactory>(string path, Encoding encoding, int preContext, int postContext,
+            bool stopAfterFirst, TFactory factory, Func<T, bool> emit, Func<bool> shouldStop = null,
             CancellationToken cancellationToken = default)
+            where T : class
+            where TFactory : struct, IResultFactory<T>
         {
-            IContextTracker tracker = CreateContextTracker(preContext, postContext);
+            IContextTracker<T> tracker = CreateContextTracker<T, TFactory>(preContext, postContext, factory);
             bool found = false;
             using (FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             using (StreamReader reader = new(stream, encoding))
@@ -191,15 +250,9 @@ namespace Microsoft.PowerShell.Commands
                     }
 
                     lineNumber++;
-                    if (TryMatch(line, out Result result))
+                    if (TryMatch(line, out MatchData match))
                     {
-                        result.Path = path;
-                        result.LineNumber = lineNumber;
-                        if (preContext > 0 || postContext > 0)
-                        {
-                            result.Context = new ResultContext();
-                        }
-
+                        T result = factory.Create(line, path, lineNumber, in match, preContext > 0 || postContext > 0);
                         tracker.TrackMatch(result);
                     }
                     else
@@ -215,7 +268,7 @@ namespace Microsoft.PowerShell.Commands
                             break;
                         }
 
-                        foreach (Result ready in tracker.EmitQueue)
+                        foreach (T ready in tracker.EmitQueue)
                         {
                             if (!emit(ready))
                             {
@@ -235,7 +288,7 @@ namespace Microsoft.PowerShell.Commands
             }
 
             tracker.TrackEOF();
-            foreach (Result ready in tracker.EmitQueue)
+            foreach (T ready in tracker.EmitQueue)
             {
                 found = true;
                 if (!emit(ready) || stopAfterFirst)
@@ -427,13 +480,13 @@ namespace Microsoft.PowerShell.Commands
         /// <summary>
         /// An interface to a context tracking algorithm.
         /// </summary>
-        internal interface IContextTracker
+        internal interface IContextTracker<T> where T : class
         {
             /// <summary>
             /// Gets matches with completed context information
             /// that are ready to be emitted into the pipeline.
             /// </summary>
-            IList<Result> EmitQueue { get; }
+            IList<T> EmitQueue { get; }
 
             /// <summary>
             /// Track a non-matching line for context.
@@ -445,7 +498,7 @@ namespace Microsoft.PowerShell.Commands
             /// Track a matching line.
             /// </summary>
             /// <param name="match">The line to track.</param>
-            void TrackMatch(Result match);
+            void TrackMatch(T match);
 
             /// <summary>
             /// Track having reached the end of the file,
@@ -458,8 +511,12 @@ namespace Microsoft.PowerShell.Commands
         /// <summary>
         /// A state machine to track display context for each match.
         /// </summary>
-        private sealed class DisplayContextTracker : IContextTracker
+        private sealed class DisplayContextTracker<T, TFactory> : IContextTracker<T>
+            where T : class
+            where TFactory : struct, IResultFactory<T>
         {
+            private readonly TFactory _factory;
+
             private enum ContextState
             {
                 InitialState,
@@ -480,28 +537,30 @@ namespace Microsoft.PowerShell.Commands
             // Current match info we are tracking postcontext for.
             // At any given time, if set, this value will not be
             // in the emitQueue but will be the next to be added.
-            private Result _matchInfo = null;
+            private T _matchInfo = null;
 
             /// <summary>
-            /// Initializes a new instance of the <see cref="DisplayContextTracker"/> class.
+            /// Initializes a new instance of the <see cref="DisplayContextTracker{T, TFactory}"/> class.
             /// </summary>
             /// <param name="preContext">How much preContext to collect at most.</param>
             /// <param name="postContext">How much postContext to collect at most.</param>
-            public DisplayContextTracker(int preContext, int postContext)
+            /// <param name="factory">Access to the caller-owned result and its context.</param>
+            public DisplayContextTracker(int preContext, int postContext, TFactory factory)
             {
+                _factory = factory;
                 _preContext = preContext;
                 _postContext = postContext;
 
                 _collectedPreContext = new CircularBuffer<string>(preContext);
                 _collectedPostContext = new List<string>(postContext);
-                _emitQueue = new List<Result>();
+                _emitQueue = new List<T>();
                 Reset();
             }
 
-            #region IContextTracker implementation
-            public IList<Result> EmitQueue => _emitQueue;
+            #region IContextTracker<T> implementation
+            public IList<T> EmitQueue => _emitQueue;
 
-            private readonly List<Result> _emitQueue;
+            private readonly List<T> _emitQueue;
 
             // Track non-matching line
             public void TrackLine(string line)
@@ -528,7 +587,7 @@ namespace Microsoft.PowerShell.Commands
             }
 
             // Track matching line
-            public void TrackMatch(Result match)
+            public void TrackMatch(T match)
             {
                 // Update the queue in case we were in the middle
                 // of collecting postcontext for an older match...
@@ -578,10 +637,9 @@ namespace Microsoft.PowerShell.Commands
                 {
                     _emitQueue.Add(_matchInfo);
 
-                    if (_matchInfo.Context != null)
+                    if (_factory.HasContext(_matchInfo))
                     {
-                        _matchInfo.Context.DisplayPreContext = _collectedPreContext.ToArray();
-                        _matchInfo.Context.DisplayPostContext = _collectedPostContext.ToArray();
+                        _factory.SetDisplayContext(_matchInfo, _collectedPreContext.ToArray(), _collectedPostContext.ToArray());
                     }
 
                     Reset();
@@ -615,27 +673,31 @@ namespace Microsoft.PowerShell.Commands
         /// and other matching lines (since they will appear
         /// as their own match entries.).
         /// </remarks>
-        private sealed class LogicalContextTracker : IContextTracker
+        private sealed class LogicalContextTracker<T, TFactory> : IContextTracker<T>
+            where T : class
+            where TFactory : struct, IResultFactory<T>
         {
-            // A union: string | Result. Needed since
+            private readonly TFactory _factory;
+
+            // A union: string | T. Needed since
             // context lines could be either proper matches
             // or non-matching lines.
-            private sealed class ContextEntry
+            private readonly struct ContextEntry
             {
                 public readonly string Line;
-                public readonly Result Match;
+                public readonly T Match;
 
                 public ContextEntry(string line)
                 {
                     Line = line;
                 }
 
-                public ContextEntry(Result match)
+                public ContextEntry(T match)
                 {
                     Match = match;
                 }
 
-                public override string ToString() => Match?.Line ?? Line;
+                public string GetLine(TFactory factory) => Match != null ? factory.GetLine(Match) : Line;
             }
 
             // Whether or not early entries found
@@ -663,22 +725,24 @@ namespace Microsoft.PowerShell.Commands
             private readonly CircularBuffer<ContextEntry> _collectedContext;
 
             /// <summary>
-            /// Initializes a new instance of the <see cref="LogicalContextTracker"/> class.
+            /// Initializes a new instance of the <see cref="LogicalContextTracker{T, TFactory}"/> class.
             /// </summary>
             /// <param name="preContext">How much preContext to collect at most.</param>
             /// <param name="postContext">How much postContext to collect at most.</param>
-            public LogicalContextTracker(int preContext, int postContext)
+            /// <param name="factory">Access to the caller-owned result and its context.</param>
+            public LogicalContextTracker(int preContext, int postContext, TFactory factory)
             {
+                _factory = factory;
                 _preContext = preContext;
                 _postContext = postContext;
                 _collectedContext = new CircularBuffer<ContextEntry>(preContext + postContext + 1);
-                _emitQueue = new List<Result>();
+                _emitQueue = new List<T>();
             }
 
-            #region IContextTracker implementation
-            public IList<Result> EmitQueue => _emitQueue;
+            #region IContextTracker<T> implementation
+            public IList<T> EmitQueue => _emitQueue;
 
-            private readonly List<Result> _emitQueue;
+            private readonly List<T> _emitQueue;
 
             public void TrackLine(string line)
             {
@@ -687,7 +751,7 @@ namespace Microsoft.PowerShell.Commands
                 UpdateQueue();
             }
 
-            public void TrackMatch(Result match)
+            public void TrackMatch(T match)
             {
                 ContextEntry entry = new(match);
                 _collectedContext.Add(entry);
@@ -726,7 +790,7 @@ namespace Microsoft.PowerShell.Commands
             {
                 for (int i = startIndex; i <= endIndex; i++)
                 {
-                    Result match = _collectedContext[i].Match;
+                    T match = _collectedContext[i].Match;
                     if (match != null)
                     {
                         int preStart = Math.Max(i - _preContext, 0);
@@ -784,12 +848,11 @@ namespace Microsoft.PowerShell.Commands
             /// <param name="preLength">The length of the preContext range.</param>
             /// <param name="postStartIndex">The start index of the postContext range.</param>
             /// <param name="postLength">The length of the postContext range.</param>
-            private void Emit(Result match, int preStartIndex, int preLength, int postStartIndex, int postLength)
+            private void Emit(T match, int preStartIndex, int preLength, int postStartIndex, int postLength)
             {
-                if (match.Context != null)
+                if (_factory.HasContext(match))
                 {
-                    match.Context.PreContext = CopyContext(preStartIndex, preLength);
-                    match.Context.PostContext = CopyContext(postStartIndex, postLength);
+                    _factory.SetLogicalContext(match, CopyContext(preStartIndex, preLength), CopyContext(postStartIndex, postLength));
                 }
 
                 _emitQueue.Add(match);
@@ -810,7 +873,7 @@ namespace Microsoft.PowerShell.Commands
 
                 for (int i = 0; i < length; i++)
                 {
-                    result[i] = _collectedContext[startIndex + i].ToString();
+                    result[i] = _collectedContext[startIndex + i].GetLine(_factory);
                 }
 
                 return result;
@@ -820,25 +883,28 @@ namespace Microsoft.PowerShell.Commands
         /// <summary>
         /// A class to track both logical and display contexts.
         /// </summary>
-        internal sealed class ContextTracker : IContextTracker
+        internal sealed class ContextTracker<T, TFactory> : IContextTracker<T>
+            where T : class
+            where TFactory : struct, IResultFactory<T>
         {
-            private readonly IContextTracker _displayTracker;
-            private readonly IContextTracker _logicalTracker;
+            private readonly IContextTracker<T> _displayTracker;
+            private readonly IContextTracker<T> _logicalTracker;
 
             /// <summary>
-            /// Initializes a new instance of the <see cref="ContextTracker"/> class.
+            /// Initializes a new instance of the <see cref="ContextTracker{T, TFactory}"/> class.
             /// </summary>
             /// <param name="preContext">How much preContext to collect at most.</param>
             /// <param name="postContext">How much postContext to collect at most.</param>
-            public ContextTracker(int preContext, int postContext)
+            /// <param name="factory">Access to the caller-owned result and its context.</param>
+            public ContextTracker(int preContext, int postContext, TFactory factory)
             {
-                _displayTracker = new DisplayContextTracker(preContext, postContext);
-                _logicalTracker = new LogicalContextTracker(preContext, postContext);
-                EmitQueue = new List<Result>();
+                _displayTracker = new DisplayContextTracker<T, TFactory>(preContext, postContext, factory);
+                _logicalTracker = new LogicalContextTracker<T, TFactory>(preContext, postContext, factory);
+                EmitQueue = new List<T>();
             }
 
-            #region IContextTracker implementation
-            public IList<Result> EmitQueue { get; }
+            #region IContextTracker<T> implementation
+            public IList<T> EmitQueue { get; }
 
             public void TrackLine(string line)
             {
@@ -847,7 +913,7 @@ namespace Microsoft.PowerShell.Commands
                 UpdateQueue();
             }
 
-            public void TrackMatch(Result match)
+            public void TrackMatch(T match)
             {
                 _displayTracker.TrackMatch(match);
                 _logicalTracker.TrackMatch(match);
@@ -876,7 +942,7 @@ namespace Microsoft.PowerShell.Commands
                 // time as the logical tracker, so we can
                 // be sure the matches will have both logical
                 // and display context already populated.
-                foreach (Result match in _logicalTracker.EmitQueue)
+                foreach (T match in _logicalTracker.EmitQueue)
                 {
                     EmitQueue.Add(match);
                 }
@@ -889,19 +955,19 @@ namespace Microsoft.PowerShell.Commands
         /// <summary>
         /// ContextTracker that does not work for the case when pre- and post context is 0.
         /// </summary>
-        internal sealed class NoContextTracker : IContextTracker
+        internal sealed class NoContextTracker<T> : IContextTracker<T> where T : class
         {
-            private readonly IList<Result> _matches = new List<Result>(1);
+            private readonly IList<T> _matches = new List<T>(1);
 
-            IList<Result> IContextTracker.EmitQueue => _matches;
+            IList<T> IContextTracker<T>.EmitQueue => _matches;
 
-            void IContextTracker.TrackLine(string line)
+            void IContextTracker<T>.TrackLine(string line)
             {
             }
 
-            void IContextTracker.TrackMatch(Result match) => _matches.Add(match);
+            void IContextTracker<T>.TrackMatch(T match) => _matches.Add(match);
 
-            void IContextTracker.TrackEOF()
+            void IContextTracker<T>.TrackEOF()
             {
             }
         }

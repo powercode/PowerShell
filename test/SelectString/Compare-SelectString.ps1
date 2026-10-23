@@ -137,6 +137,27 @@ Add-Case 'filter-cloning' {
     $original
     $filtered
 }
+foreach ($mode in @('Raw', 'Quiet', 'List', 'ListQuiet')) {
+    $filterOptions = @{ Pattern = 'hit'; Context = @(2,1) }
+    if ($mode -eq 'ListQuiet') { $filterOptions.List = $true; $filterOptions.Quiet = $true }
+    else { $filterOptions[$mode] = $true }
+    Add-Case "filter-mode-$mode" {
+        Select-String -LiteralPath $one -Pattern hit -Context 1 | Select-String @filterOptions
+    }
+    Add-Case "mixed-filter-mode-$mode" {
+        $existing = 'hit existing' | Select-String hit
+        'before', $existing, 'hit record', 'after' | Select-String @filterOptions
+    }
+}
+Add-Case 'downstream-line-mutation' {
+    'hit first','hit second','hit third' | Select-String hit -Context 1,0 | ForEach-Object {
+        $_.Line = $_.Line.ToUpperInvariant()
+        $_
+    }
+}
+Add-Case 'context-ring-wraparound' {
+    0..49 | ForEach-Object { if ($_ % 7 -lt 2) { "hit $_" } else { "line $_" } } | Select-String hit -Context 3
+}
 Add-Case 'downstream-stop' { Select-String -LiteralPath $one -Pattern hit | Select-Object -First 1 }
 Add-Case 'list-file-closed' {
     Select-String -LiteralPath $one -Pattern hit -List | ForEach-Object {
