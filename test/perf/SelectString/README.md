@@ -530,3 +530,64 @@ excludes native generated code. Foreground time deliberately excludes drain time
 it does not claim a cmdlet could abandon workers without lifecycle consequences.
 Match counts are checked every call, with corpus span/capture validation before
 measurement. These results omit pipeline/file/output costs and concurrent callers.
+
+### Isolated cmdlet promotion experiment
+
+The files under `experiment/` are applied only to a separate worktree. The main
+production cmdlet and engine remain unchanged. Starting from commit `2f9c17760`,
+create the worktree and apply the narrow matching/lifecycle hook:
+
+```powershell
+$sourceRoot = 'E:/repos/PowerShell.worktrees/SelectString-promotion-experiment'
+git worktree add --detach $sourceRoot 2f9c17760
+$patch = (Resolve-Path ./test/perf/SelectString/experiment/CmdletPromotion.patch).Path
+git -C $sourceRoot apply $patch
+$utility = Join-Path $sourceRoot 'src/Microsoft.PowerShell.Commands.Utility/commands/utility'
+Copy-Item ./test/perf/SelectString/experiment/SelectStringPromotion.cs $utility
+$background = Get-Content ./test/perf/SelectString/BackgroundCompilation.cs -Raw
+$background = $background.Replace('_active.TryMatch(', '_active.TryMatchCore(')
+$background = $background.Replace('replacement.TryMatch(', 'replacement.TryMatchCore(')
+[IO.File]::WriteAllText((Join-Path $utility 'BackgroundCompilation.cs'), $background)
+./test/SelectString/Build-Comparison.ps1 -SourceRoot $sourceRoot `
+    -OutputDirectory (Join-Path $PWD 'tmp/SelectString/regex-background')
+```
+
+The adapter calls the unhooked core to avoid recursively re-entering promotion.
+The existing reader, trackers and output code stay in the scanner. Workers capture
+argument values rather than accessing cmdlet state. The build helper generates
+resources/types. Preserve existing baseline/current/compiled binaries.
+
+The experimental build defaults to background constructor-only compilation.
+`Measure-SelectString.ps1 -PromotionMode` selects `interpreted`, `compiled`,
+`background`, `background-warm`, `delayed-synchronous` or `delayed-background-warm`
+in an isolated worker. The delayed modes use the exploratory 128-record control.
+Warm modes take the scenario's first authored input; they are for these fixtures
+only. Internally the experiment reads SELECTSTRING_PROMOTION_MODE and
+SELECTSTRING_PROMOTION_WARM_INPUT. These are not production settings.
+
+```powershell
+./tmp/SelectString/regex-background/pwsh.exe -NoProfile `
+    -File ./test/SelectString/Test-PromotionLifecycle.ps1
+./test/perf/SelectString/Measure-SelectString.ps1 `
+    -PwshPath ./tmp/SelectString/regex-background/pwsh.exe -Revision background `
+    -PromotionMode background -Scenario PatternFile,PatternRecords,PipelineStop,FileStop `
+    -PatternFamily DotStar -InputKind LongNearMiss -CaseSensitive -RecordCount 10000 `
+    -WarmupIterations 30 -Iterations 15 -LatencyIterations 5 -Affinity 1 `
+    -TimeoutSeconds 300 -Artifacts ./tmp/SelectString/promotion-cmdlet-example
+```
+
+The lifecycle test holds an admitted compiler, checks rejected concurrent callers,
+then exercises downstream termination, injected worker failure and cancellation.
+It verifies exactly-once disposal and no remaining worker. Its barriers/fault flag
+are null/false during measurement. The experimental diagnostics type is not a
+supported API. Disposal drains work; stop suppresses further admission/publication.
+This deliberately measures joined cleanup, not a final production cancellation
+policy. Regex compilation already in progress cannot be forcibly cancelled.
+
+Worker JSON includes cumulative deltas for completed invocations, admitted/started/
+rejected/promoted/faulted work and drain milliseconds. Timed calls include disposal.
+Warmup and separate latency passes are excluded from these counters. Unexpected
+worker faults or workers remaining after timing fail the measurement.
+CPU is measured over the full timing loop, including harness bookkeeping, with
+CpuWindowMs, CpuMs and CpuMsPerInvocation. Short windows remain coarse; do not treat
+small CPU differences as precise. Modes are null for non-experimental builds.

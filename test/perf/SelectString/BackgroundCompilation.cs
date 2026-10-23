@@ -27,6 +27,7 @@ internal sealed class BackgroundCompilation
     private int _closed;
     private int _records;
     private int _compilationStarted;
+    private int _stopRequested;
 
     internal BackgroundCompilation(SelectStringEngine initial, Func<SelectStringEngine> compile,
         int startAfter = 0, string warmInput = null, SemaphoreSlim gate = null)
@@ -42,6 +43,8 @@ internal sealed class BackgroundCompilation
     }
 
     internal bool Admitted => _pending != null;
+
+    internal static int ActiveWorkers => 1 - s_worker.CurrentCount;
 
     internal bool PreparationFinished => _pending?.IsCompleted ?? false;
 
@@ -68,11 +71,11 @@ internal sealed class BackgroundCompilation
                 CultureInfo previous = CultureInfo.CurrentCulture;
                 try
                 {
-                    if (Volatile.Read(ref _closed) != 0) { return null; }
+                    if (Volatile.Read(ref _closed) != 0 || Volatile.Read(ref _stopRequested) != 0) { return null; }
                     CultureInfo.CurrentCulture = _culture;
                     Volatile.Write(ref _compilationStarted, 1);
                     var replacement = _compile();
-                    if (Volatile.Read(ref _closed) != 0) { return null; }
+                    if (Volatile.Read(ref _closed) != 0 || Volatile.Read(ref _stopRequested) != 0) { return null; }
                     // Explicit controlled-fixture probe only. Production code must not
                     // run arbitrary user patterns on invented input to force JIT.
                     if (_warmInput != null) { replacement.TryMatch(_warmInput, out _); }
@@ -95,10 +98,11 @@ internal sealed class BackgroundCompilation
     internal bool TryMatch(string line, out SelectStringEngine.MatchData result)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _closed) != 0, this);
-        if (_records == _startAfter && _startAfter != 0) { Start(); }
+        bool stopped = Volatile.Read(ref _stopRequested) != 0;
+        if (!stopped && _records == _startAfter && _startAfter != 0) { Start(); }
         // Task completion publishes the entire engine. Never replace part of a
         // pattern array or change an engine while a matching call is using it.
-        if (PromotedAtRecord == null && _pending is { IsCompletedSuccessfully: true }
+        if (!stopped && PromotedAtRecord == null && _pending is { IsCompletedSuccessfully: true }
             && _pending.Result is { } replacement)
         {
             _active = replacement;
@@ -117,4 +121,6 @@ internal sealed class BackgroundCompilation
         try { _pending?.GetAwaiter().GetResult(); }
         catch (Exception error) { CompilationError = error; }
     }
+
+    internal void RequestStop() => Volatile.Write(ref _stopRequested, 1);
 }

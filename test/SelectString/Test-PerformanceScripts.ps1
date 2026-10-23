@@ -179,6 +179,10 @@ Assert ($results.Count -eq 5 -and @($results | Where-Object Status -ne Measured)
 Assert (($results | Where-Object Scenario -eq DenseContext).ResultCount -eq 100) 'Dense count incorrect'
 Assert (($results | Where-Object Scenario -eq NoMatchContext).ResultCount -eq 0) 'No-match count incorrect'
 Assert ($results[0].HostSupportsVirtualTerminal -is [bool]) 'Terminal capability not recorded'
+Assert ($results[0].CpuWindowMs -gt 0 -and $results[0].CpuMs -ge 0) 'CPU window missing'
+if ($results[0].PromotionCounters) {
+    Assert ($results[0].PromotionCounters.Completed -eq 1 -and $results[0].PromotionCounters.OutstandingWorkers -eq 0) 'Promotion cleanup counters incorrect'
+}
 & (Join-Path $source 'Measure-SelectString.ps1') -PwshPath $PwshPath -Revision test `
     -Scenario PipelineCaptures,PipelineStop,FileStop -RecordCount 37 -MatchEvery 4 `
     -LineCount 100 -Iterations 1 -WarmupIterations 1 -LatencyIterations 3 -Artifacts (Join-Path $artifacts 'pipelines')
@@ -198,7 +202,7 @@ foreach ($inputKind in 'Mixed','Absent') {
     $patternOutput = Join-Path $artifacts "patterns-$inputKind"
     & (Join-Path $source 'Measure-SelectString.ps1') -PwshPath $PwshPath -Revision test `
         -Scenario PatternFile,PatternRecords -PatternFamily SqlDuration -InputKind $inputKind `
-        -RecordCount 17 -Culture tr-TR -CaseSensitive -LineCount 16 `
+        -RecordCount 17 -Culture tr-TR -CaseSensitive -LineCount 16 -PromotionMode BACKGROUND-WARM `
         -Iterations 1 -WarmupIterations 1 -Artifacts $patternOutput
     $patternResults = @(Get-Content (Join-Path $patternOutput 'results.json') -Raw | ConvertFrom-Json)
     Assert ($patternResults.Count -eq 2) 'Missing pattern scenarios'
@@ -208,6 +212,10 @@ foreach ($inputKind in 'Mixed','Absent') {
         Assert ($patternResult.ResultCount -eq $expectedCount -and $patternResult.ValidatedResults -eq $expectedCount) 'Pattern validation/count incorrect'
         Assert ($patternResult.PatternFamily -eq 'SqlDuration' -and $patternResult.PatternInput -eq $inputKind -and $patternResult.PatternRecordCount -eq 17) 'Pattern parameters not forwarded'
         Assert ($patternResult.PatternCulture -eq 'tr-TR' -and $patternResult.PatternCaseSensitive) 'Pattern options not forwarded'
+        if ($patternResult.PromotionCounters) {
+            Assert ($patternResult.PromotionMode -ceq 'background-warm' -and $patternResult.PromotionCounters.Completed -eq 1) 'Promotion mode not forwarded/normalized'
+            Assert ($patternResult.PromotionCounters.OutstandingWorkers -eq 0 -and $patternResult.PromotionCounters.Faulted -eq 0) 'Promotion worker not drained'
+        }
         if ($expectedCount -eq 0) { Assert ($null -eq $patternResult.FirstResultMs) 'Absent pattern must not have first-result latency' }
     }
 }
