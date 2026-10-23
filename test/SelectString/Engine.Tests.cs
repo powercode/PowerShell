@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -15,6 +16,75 @@ namespace PSTests.SelectString;
 
 public sealed class SelectStringEngineTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SlowFirstFileAndConsumerBoundReadAheadAndAdmission(bool stopEarly)
+    {
+        WithFile(first => WithFile(second => WithFile(third =>
+        {
+            foreach (string path in new[] { first, second, third })
+            {
+                File.WriteAllLines(path, Enumerable.Repeat("hit", 20));
+            }
+
+            using var laterFull = new ManualResetEventSlim();
+            using var firstFull = new ManualResetEventSlim();
+            var started = new ConcurrentDictionary<string, bool>();
+            var waits = new ConcurrentDictionary<string, ulong>();
+            var observer = new ScanObserver(path =>
+            {
+                started[path] = true;
+                // Hold the earliest scanner until a later file fills its own queue.
+                // This would deadlock if later output consumed the earliest quota.
+                if (path == first) { Assert.True(laterFull.Wait(TimeSpan.FromSeconds(10))); }
+            }, (path, lines) =>
+            {
+                waits[path] = lines;
+                if (path == second) { laterFull.Set(); }
+                if (path == first && lines == 3) { firstFull.Set(); }
+            });
+            var output = new List<string>();
+            new SelectStringEngine(new[] { "hit" }).ScanFiles(new[] { first, second, third }, Encoding.UTF8,
+                result =>
+                {
+                    output.Add(result.Path);
+                    if (output.Count == 1)
+                    {
+                        // With one result held by this consumer, the first worker may
+                        // scan two more. The later worker has no consumer yet: only two.
+                        Assert.True(firstFull.Wait(TimeSpan.FromSeconds(10)));
+                        Assert.Equal(3UL, waits[first]);
+                        Assert.Equal(2UL, waits[second]);
+                        Assert.False(started.ContainsKey(third));
+                        Assert.Equal(first, result.Path);
+                    }
+
+                    return !stopEarly;
+                }, (_, error) => throw error, concurrency: 2, queuedBatches: 2,
+                maxResults: 1, observer: observer);
+
+            if (stopEarly) { Assert.Single(output); }
+            else
+            {
+                Assert.Equal(Enumerable.Repeat(first, 20).Concat(Enumerable.Repeat(second, 20))
+                    .Concat(Enumerable.Repeat(third, 20)), output);
+            }
+
+            foreach (string path in new[] { first, second, third })
+            {
+                using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            }
+        })));
+    }
+
+    private sealed class ScanObserver(Action<string> starting, Action<string, ulong> waiting) : SelectStringEngine.IScanObserver
+    {
+        public void Starting(string path) => starting(path);
+
+        public void WaitingForCapacity(string path, ulong linesRead) => waiting(path, linesRead);
+    }
+
     [Fact]
     public void ParallelFilesPreserveOrderDuplicatesContextAndCallbackThread()
     {

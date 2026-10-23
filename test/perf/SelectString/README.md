@@ -78,6 +78,7 @@ git worktree add --detach ../SelectString-first-extraction 41b3169b4
 ./test/SelectString/Build-Comparison.ps1 -SourceRoot . -OutputDirectory ./tmp/SelectString/candidate
 
 dotnet test test/SelectString/SelectString.Engine.Tests.csproj -c Release
+./tmp/SelectString/candidate/pwsh.exe -NoProfile -File ./test/SelectString/Test-ParallelStop.ps1
 ./test/SelectString/Compare-SelectString.ps1 -Baseline ./tmp/SelectString/baseline/pwsh.exe -Candidate ./tmp/SelectString/candidate/pwsh.exe
 
 & ./tmp/SelectString/candidate/pwsh.exe -NoProfile -Command {
