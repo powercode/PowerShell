@@ -591,3 +591,7 @@ worker faults or workers remaining after timing fail the measurement.
 CPU is measured over the full timing loop, including harness bookkeeping, with
 CpuWindowMs, CpuMs and CpuMsPerInvocation. Short windows remain coarse; do not treat
 small CPU differences as precise. Modes are null for non-experimental builds.
+
+The paired 300 MiB sparse/dense capture comparison is recorded in
+[RESULTS-background-log.md](RESULTS-background-log.md), including CPU, first-result
+latency and promotion/cleanup validation.
