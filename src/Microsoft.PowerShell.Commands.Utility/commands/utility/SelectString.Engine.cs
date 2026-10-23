@@ -486,7 +486,9 @@ namespace Microsoft.PowerShell.Commands
             /// Gets matches with completed context information
             /// that are ready to be emitted into the pipeline.
             /// </summary>
-            IList<T> EmitQueue { get; }
+            // Keep the concrete type so draining a queue uses List<T>'s struct
+            // enumerator without boxing it through IEnumerable<T>.
+            List<T> EmitQueue { get; }
 
             /// <summary>
             /// Track a non-matching line for context.
@@ -558,7 +560,7 @@ namespace Microsoft.PowerShell.Commands
             }
 
             #region IContextTracker<T> implementation
-            public IList<T> EmitQueue => _emitQueue;
+            public List<T> EmitQueue => _emitQueue;
 
             private readonly List<T> _emitQueue;
 
@@ -740,7 +742,7 @@ namespace Microsoft.PowerShell.Commands
             }
 
             #region IContextTracker<T> implementation
-            public IList<T> EmitQueue => _emitQueue;
+            public List<T> EmitQueue => _emitQueue;
 
             private readonly List<T> _emitQueue;
 
@@ -887,8 +889,8 @@ namespace Microsoft.PowerShell.Commands
             where T : class
             where TFactory : struct, IResultFactory<T>
         {
-            private readonly IContextTracker<T> _displayTracker;
-            private readonly IContextTracker<T> _logicalTracker;
+            private readonly DisplayContextTracker<T, TFactory> _displayTracker;
+            private readonly LogicalContextTracker<T, TFactory> _logicalTracker;
 
             /// <summary>
             /// Initializes a new instance of the <see cref="ContextTracker{T, TFactory}"/> class.
@@ -904,7 +906,7 @@ namespace Microsoft.PowerShell.Commands
             }
 
             #region IContextTracker<T> implementation
-            public IList<T> EmitQueue { get; }
+            public List<T> EmitQueue { get; }
 
             public void TrackLine(string line)
             {
@@ -957,9 +959,9 @@ namespace Microsoft.PowerShell.Commands
         /// </summary>
         internal sealed class NoContextTracker<T> : IContextTracker<T> where T : class
         {
-            private readonly IList<T> _matches = new List<T>(1);
+            private readonly List<T> _matches = new List<T>(1);
 
-            IList<T> IContextTracker<T>.EmitQueue => _matches;
+            List<T> IContextTracker<T>.EmitQueue => _matches;
 
             void IContextTracker<T>.TrackLine(string line)
             {
