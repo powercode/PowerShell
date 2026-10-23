@@ -15,6 +15,9 @@
   <ItemGroup>
     <Compile Include="$(SelectStringEngineSource)" Link="SelectString.Engine.cs" />
     <Compile Include="Engine.Benchmarks.cs" />
+    <!-- Historical engines do not expose reader buffer selection. -->
+    <Compile Include="ReaderBuffer.Benchmarks.cs" Condition="'$(SELECTSTRING_ENGINE_SOURCE)' == ''" />
+    <Compile Include="LogFixture.cs" />
     <!-- .NET 11 support is required by the repository target framework. -->
     <PackageReference Include="BenchmarkDotNet" Version="0.16.0-preview.2" />
   </ItemGroup>
