@@ -11,9 +11,6 @@ using System.Management.Automation;
 using System.Management.Automation.Internal;
 using System.Text;
 using System.Text.RegularExpressions;
-using IContextTracker = Microsoft.PowerShell.Commands.SelectStringEngine.IContextTracker;
-using ContextTracker = Microsoft.PowerShell.Commands.SelectStringEngine.ContextTracker;
-using NoContextTracker = Microsoft.PowerShell.Commands.SelectStringEngine.NoContextTracker;
 using SearchResult = Microsoft.PowerShell.Commands.SelectStringEngine.Result;
 
 namespace Microsoft.PowerShell.Commands
@@ -738,21 +735,11 @@ namespace Microsoft.PowerShell.Commands
 
         private int _postContext = 0;
 
-        // When we are in Raw mode or pre- and postcontext are zero, use the _noContextTracker, since we will not be needing trackedLines.
-        private IContextTracker GetContextTracker() => (Raw || (_preContext == 0 && _postContext == 0))
-            ? _noContextTracker
-            : new ContextTracker(_preContext, _postContext);
+        private bool LightweightOutput => Raw || (Quiet && !List);
 
-        // This context tracker is only used for strings which are piped
-        // directly into the cmdlet. File processing doesn't need
-        // to track state between calls to ProcessRecord, and so
-        // allocates its own tracker. The reason we can't
-        // use a single global tracker for both is that in the case of
-        // a mixed list of strings and FileInfo, the context tracker
-        // would get reset after each file.
-        private IContextTracker _globalContextTracker;
-
-        private IContextTracker _noContextTracker;
+        // Pipeline context persists across records; files use their own trackers.
+        private SelectStringEngine.IContextTracker<MatchInfo> _matchContextTracker;
+        private SelectStringEngine.IContextTracker<SearchResult> _lightContextTracker;
 
         /// <summary>
         /// This is used to handle the case were we're done processing input objects.
@@ -793,8 +780,16 @@ namespace Microsoft.PowerShell.Commands
                 throw;
             }
 
-            _noContextTracker = new NoContextTracker();
-            _globalContextTracker = GetContextTracker();
+            if (LightweightOutput)
+            {
+                _lightContextTracker = SelectStringEngine.CreateContextTracker<SearchResult, LightweightFactory>(
+                    Raw ? 0 : _preContext, Raw ? 0 : _postContext, new LightweightFactory(this));
+            }
+            else
+            {
+                _matchContextTracker = SelectStringEngine.CreateContextTracker<MatchInfo, MatchInfoFactory>(
+                    _preContext, _postContext, new MatchInfoFactory(this));
+            }
         }
 
         private readonly List<string> _inputObjectFileList = new(1) { string.Empty };
@@ -859,49 +854,72 @@ namespace Microsoft.PowerShell.Commands
             }
             else
             {
-                // Set the line number in the matched object to be the record number
-                _inputRecordNumber++;
-
-                bool matched;
-                SearchResult result;
-                MatchInfo matchInfo = null;
-                if (_inputObject.BaseObject is string line)
+                if (LightweightOutput)
                 {
-                    matched = DoMatch(line, out result);
+                    ProcessInputRecord(ref _lightContextTracker, new LightweightFactory(this));
                 }
                 else
                 {
-                    matchInfo = _inputObject.BaseObject as MatchInfo;
-                    object objectToCheck = matchInfo ?? (object)_inputObject;
-                    matched = DoMatch(objectToCheck, out result, out line);
+                    ProcessInputRecord(ref _matchContextTracker, new MatchInfoFactory(this));
                 }
+            }
+        }
 
-                if (matched)
+        private void ProcessInputRecord<T, TFactory>(ref SelectStringEngine.IContextTracker<T> tracker, TFactory factory)
+            where T : class
+            where TFactory : struct, IOutputFactory<T>
+        {
+            _inputRecordNumber++;
+            MatchInfo original = _inputObject.BaseObject as MatchInfo;
+            string line;
+            if (original != null)
+            {
+                line = original.Line;
+                if (_preContext > 0 || _postContext > 0)
                 {
-                    // Don't re-write the line number if it was already set...
-                    if (matchInfo == null)
+                    _preContext = 0;
+                    _postContext = 0;
+                    // Deliberately retain a zero-width context tracker here: the
+                    // shipped filter clears logical as well as display context.
+                    tracker = new SelectStringEngine.ContextTracker<T, TFactory>(0, 0, factory);
+                    WarnFilterContext();
+                }
+            }
+            else
+            {
+                line = _inputObject.BaseObject as string
+                    ?? (string)LanguagePrimitives.ConvertTo(_inputObject, typeof(string), CultureInfo.InvariantCulture);
+            }
+
+            if (_engine.TryMatch(line, out var match))
+            {
+                T result;
+                if (original != null)
+                {
+                    if (original.Context != null)
                     {
-                        result.LineNumber = _inputRecordNumber;
+                        original = original.Clone();
+                        original.Context.DisplayPreContext = Array.Empty<string>();
+                        original.Context.DisplayPostContext = Array.Empty<string>();
                     }
 
-                    // doMatch will have already set the pattern and line text...
-                    _globalContextTracker.TrackMatch(result);
+                    result = factory.FromExisting(original);
                 }
                 else
                 {
-                    _globalContextTracker.TrackLine(line);
+                    result = factory.Create(line, null, _inputRecordNumber, in match, _preContext > 0 || _postContext > 0);
                 }
 
-                // Emit any queued up objects...
-                if (FlushTrackerQueue(_globalContextTracker))
-                {
-                    // If we're in quiet mode, go ahead and stop processing
-                    // now.
-                    if (Quiet)
-                    {
-                        _doneProcessing = true;
-                    }
-                }
+                tracker.TrackMatch(result);
+            }
+            else
+            {
+                tracker.TrackLine(line);
+            }
+
+            if (FlushTrackerQueue(tracker, factory) && Quiet)
+            {
+                _doneProcessing = true;
             }
         }
 
@@ -920,29 +938,9 @@ namespace Microsoft.PowerShell.Commands
                     return false;
                 }
 
-                bool emphasize = !NoEmphasis && Host.UI.SupportsVirtualTerminal;
-                return _engine.ScanFile(
-                    filename, Encoding, Raw ? 0 : _preContext, Raw ? 0 : _postContext,
-                    Quiet || List,
-                    result =>
-                    {
-                        if (Stopping)
-                        {
-                            return false;
-                        }
-
-                        result.Emphasize = emphasize;
-                        // Raw ignores tracking, but the shipped matcher still creates
-                        // an empty Context when the parameter was supplied.
-                        if (Raw && (_preContext > 0 || _postContext > 0))
-                        {
-                            result.Context = new SelectStringEngine.ResultContext();
-                        }
-
-                        WriteResult(result);
-                        return true;
-                    },
-                    shouldStop: () => Stopping);
+                return LightweightOutput
+                    ? ScanFile<SearchResult, LightweightFactory>(filename, new LightweightFactory(this))
+                    : ScanFile<MatchInfo, MatchInfoFactory>(filename, new MatchInfoFactory(this));
             }
             catch (NotSupportedException nse)
             {
@@ -964,225 +962,181 @@ namespace Microsoft.PowerShell.Commands
             return false;
         }
 
-        /// <summary>
-        /// Emit any objects which have been queued up, and clear the queue.
-        /// </summary>
-        /// <param name="contextTracker">The context tracker to operate on.</param>
-        /// <returns>Whether or not any objects were emitted.</returns>
-        private bool FlushTrackerQueue(IContextTracker contextTracker)
+        private bool ScanFile<T, TFactory>(string filename, TFactory factory)
+            where T : class
+            where TFactory : struct, IOutputFactory<T>
         {
-            // Do we even have any matches to emit?
-            if (contextTracker.EmitQueue.Count < 1)
+            return _engine.ScanFile<T, TFactory>(
+                filename, Encoding, Raw ? 0 : _preContext, Raw ? 0 : _postContext,
+                Quiet || List, factory,
+                result =>
+                {
+                    if (Stopping)
+                    {
+                        return false;
+                    }
+
+                    factory.Write(result);
+                    return true;
+                },
+                shouldStop: () => Stopping);
+        }
+
+        private bool FlushTrackerQueue<T, TFactory>(SelectStringEngine.IContextTracker<T> tracker, TFactory factory)
+            where T : class
+            where TFactory : struct, IOutputFactory<T>
+        {
+            if (tracker.EmitQueue.Count == 0)
             {
                 return false;
             }
 
             if (Quiet || List)
             {
-                WriteResult(contextTracker.EmitQueue[0]);
+                factory.Write(tracker.EmitQueue[0]);
             }
             else
             {
-                foreach (SearchResult match in contextTracker.EmitQueue)
+                foreach (T result in tracker.EmitQueue)
                 {
-                    WriteResult(match);
+                    factory.Write(result);
                 }
             }
 
-            contextTracker.EmitQueue.Clear();
+            tracker.EmitQueue.Clear();
             return true;
         }
 
         /// <summary>
-        /// Complete processing. Emits any objects which have been queued up
-        /// due to -context tracking.
+        /// Emits matches still awaiting context when pipeline input ends.
         /// </summary>
         protected override void EndProcessing()
         {
-            // Check for a leftover match that was still tracking context.
-            _globalContextTracker.TrackEOF();
-            if (!_doneProcessing)
+            if (LightweightOutput)
             {
-                FlushTrackerQueue(_globalContextTracker);
-            }
-        }
-
-        private bool DoMatch(string operandString, out SearchResult matchResult)
-        {
-            return DoMatchWorker(operandString, null, out matchResult);
-        }
-
-        private bool DoMatch(object operand, out SearchResult matchResult, out string operandString)
-        {
-            MatchInfo matchInfo = operand as MatchInfo;
-            if (matchInfo != null)
-            {
-                // We're operating in filter mode. Match
-                // against the provided MatchInfo's line.
-                // If the user has specified context tracking,
-                // inform them that it is not allowed in filter
-                // mode and disable it. Also, reset the global
-                // context tracker used for processing pipeline
-                // objects to use the new settings.
-                operandString = matchInfo.Line;
-
-                if (_preContext > 0 || _postContext > 0)
+                _lightContextTracker.TrackEOF();
+                if (!_doneProcessing)
                 {
-                    _preContext = 0;
-                    _postContext = 0;
-                    _globalContextTracker = new ContextTracker(_preContext, _postContext);
-                    WarnFilterContext();
+                    FlushTrackerQueue(_lightContextTracker, new LightweightFactory(this));
                 }
             }
             else
             {
-                operandString = (string)LanguagePrimitives.ConvertTo(operand, typeof(string), CultureInfo.InvariantCulture);
-            }
-
-            return DoMatchWorker(operandString, matchInfo, out matchResult);
-        }
-
-        /// <summary>
-        /// Check the operand and see if it matches, if this.quiet is not set, then
-        /// return a partially populated MatchInfo object with Line, Pattern, IgnoreCase set.
-        /// </summary>
-        /// <param name="operandString">The result of converting operand to a string.</param>
-        /// <param name="matchInfo">The input object in filter mode.</param>
-        /// <param name="matchResult">The match info object - this will be null if this.quiet is set.</param>
-        /// <returns>True if the input object matched.</returns>
-        private bool DoMatchWorker(string operandString, MatchInfo matchInfo, out SearchResult matchResult)
-        {
-            if (!_engine.TryMatch(operandString, out matchResult))
-            {
-                return false;
-            }
-
-            if (matchInfo != null)
-            {
-                if (matchInfo.Context != null)
+                _matchContextTracker.TrackEOF();
+                if (!_doneProcessing)
                 {
-                    matchInfo = matchInfo.Clone();
-                    matchInfo.Context.DisplayPreContext = Array.Empty<string>();
-                    matchInfo.Context.DisplayPostContext = Array.Empty<string>();
-                }
-
-                matchResult = new FilteredMatch(matchInfo);
-            }
-            else
-            {
-                matchResult.Emphasize = !NoEmphasis && Host.UI.SupportsVirtualTerminal;
-                if (_preContext > 0 || _postContext > 0)
-                {
-                    matchResult.Context = new SelectStringEngine.ResultContext();
+                    FlushTrackerQueue(_matchContextTracker, new MatchInfoFactory(this));
                 }
             }
-
-            return true;
         }
 
-        // Only the adapter knows about existing pipeline objects. The engine
-        // carries this result through without changing object identity.
-        private sealed class FilteredMatch : SearchResult
+        private interface IOutputFactory<T> : SelectStringEngine.IResultFactory<T> where T : class
         {
-            internal FilteredMatch(MatchInfo value)
+            T FromExisting(MatchInfo value);
+
+            void Write(T result);
+        }
+
+        private readonly struct MatchInfoFactory(SelectStringCommand command) : IOutputFactory<MatchInfo>
+        {
+            private readonly bool _emphasize = !command.NoEmphasis && command.Host.UI.SupportsVirtualTerminal;
+
+            public MatchInfo Create(string line, string path, ulong lineNumber, in SelectStringEngine.MatchData data, bool context)
             {
-                Value = value;
-                Line = value.Line;
-                LineNumber = value.LineNumber;
-                if (value.Context != null)
+                MatchInfo result;
+                if (_emphasize)
                 {
-                    Context = new SelectStringEngine.ResultContext
+                    List<int> indexes = new();
+                    List<int> lengths = new();
+                    if (data.SimpleMatchIndex >= 0)
                     {
-                        PreContext = value.Context.PreContext,
-                        PostContext = value.Context.PostContext,
-                        DisplayPreContext = value.Context.DisplayPreContext,
-                        DisplayPostContext = value.Context.DisplayPostContext,
-                    };
-                }
-            }
+                        indexes.Add(data.SimpleMatchIndex);
+                        lengths.Add(command.Pattern[data.PatternIndex].Length);
+                    }
+                    else
+                    {
+                        foreach (Match match in data.Matches)
+                        {
+                            indexes.Add(match.Index);
+                            lengths.Add(match.Length);
+                        }
+                    }
 
-            internal MatchInfo Value { get; }
-        }
-
-        private void WriteResult(SearchResult result)
-        {
-            if (Raw)
-            {
-                WriteObject(result.Line);
-            }
-            else if (Quiet && !List)
-            {
-                WriteObject(true);
-            }
-            else
-            {
-                WriteObject(ToMatchInfo(result));
-            }
-        }
-
-        private MatchInfo ToMatchInfo(SearchResult result)
-        {
-            if (result is FilteredMatch filtered)
-            {
-                if (result.Context != null)
-                {
-                    filtered.Value.Context.PreContext = result.Context.PreContext;
-                    filtered.Value.Context.PostContext = result.Context.PostContext;
-                    filtered.Value.Context.DisplayPreContext = result.Context.DisplayPreContext;
-                    filtered.Value.Context.DisplayPostContext = result.Context.DisplayPostContext;
-                }
-
-                return filtered.Value;
-            }
-
-            MatchInfo match;
-            if (result.Emphasize)
-            {
-                List<int> indexes = new();
-                List<int> lengths = new();
-                if (result.SimpleMatchIndex >= 0)
-                {
-                    indexes.Add(result.SimpleMatchIndex);
-                    lengths.Add(Pattern[result.PatternIndex].Length);
+                    result = new MatchInfo(indexes, lengths);
                 }
                 else
                 {
-                    foreach (Match capture in result.Matches)
-                    {
-                        indexes.Add(capture.Index);
-                        lengths.Add(capture.Length);
-                    }
+                    result = new MatchInfo();
                 }
 
-                match = new MatchInfo(indexes, lengths);
-            }
-            else
-            {
-                match = new MatchInfo();
-            }
-
-            match.IgnoreCase = !CaseSensitive;
-            match.Line = result.Line;
-            match.LineNumber = result.LineNumber;
-            match.Pattern = Pattern[result.PatternIndex];
-            match.Matches = result.Matches;
-            if (result.Path != null)
-            {
-                match.Path = result.Path;
-            }
-
-            if (result.Context != null)
-            {
-                match.Context = new MatchInfoContext
+                result.IgnoreCase = !command.CaseSensitive;
+                result.Line = line;
+                result.LineNumber = lineNumber;
+                result.Pattern = command.Pattern[data.PatternIndex];
+                result.Matches = data.Matches;
+                if (path != null)
                 {
-                    PreContext = result.Context.PreContext,
-                    PostContext = result.Context.PostContext,
-                    DisplayPreContext = result.Context.DisplayPreContext,
-                    DisplayPostContext = result.Context.DisplayPostContext,
-                };
+                    result.Path = path;
+                }
+
+                if (context)
+                {
+                    result.Context = new MatchInfoContext();
+                }
+
+                return result;
             }
 
-            return match;
+            public MatchInfo FromExisting(MatchInfo value) => value;
+
+            public string GetLine(MatchInfo result) => result.Line;
+
+            public bool HasContext(MatchInfo result) => result.Context != null;
+
+            public void SetLogicalContext(MatchInfo result, string[] before, string[] after)
+            {
+                result.Context.PreContext = before;
+                result.Context.PostContext = after;
+            }
+
+            public void SetDisplayContext(MatchInfo result, string[] before, string[] after)
+            {
+                result.Context.DisplayPreContext = before;
+                result.Context.DisplayPostContext = after;
+            }
+
+            public void Write(MatchInfo result) => command.WriteObject(result);
+        }
+
+        private readonly struct LightweightFactory(SelectStringCommand command) : IOutputFactory<SearchResult>
+        {
+            public SearchResult Create(string line, string path, ulong lineNumber, in SelectStringEngine.MatchData data, bool context) =>
+                default(SelectStringEngine.ResultFactory).Create(line, path, lineNumber, in data, context);
+
+            public SearchResult FromExisting(MatchInfo value) => new()
+            {
+                Line = value.Line,
+                LineNumber = value.LineNumber,
+                Context = value.Context == null ? null : new SelectStringEngine.ResultContext
+                {
+                    PreContext = value.Context.PreContext,
+                    PostContext = value.Context.PostContext,
+                    DisplayPreContext = value.Context.DisplayPreContext,
+                    DisplayPostContext = value.Context.DisplayPostContext,
+                },
+            };
+
+            public string GetLine(SearchResult result) => result.Line;
+
+            public bool HasContext(SearchResult result) => result.Context != null;
+
+            public void SetLogicalContext(SearchResult result, string[] before, string[] after) =>
+                default(SelectStringEngine.ResultFactory).SetLogicalContext(result, before, after);
+
+            public void SetDisplayContext(SearchResult result, string[] before, string[] after) =>
+                default(SelectStringEngine.ResultFactory).SetDisplayContext(result, before, after);
+
+            public void Write(SearchResult result) => command.WriteObject(command.Raw ? (object)result.Line : true);
         }
 
         /// <summary>

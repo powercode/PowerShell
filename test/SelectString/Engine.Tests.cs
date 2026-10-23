@@ -21,7 +21,7 @@ public sealed class SelectStringEngineTests
         string text = "before\nmatch\nafter";
         var engine = new SelectStringEngine(new[] { "match" });
         Assert.True(engine.TryMatch(text, out var result));
-        Assert.Same(text, result.Line);
+        Assert.Same(text, new SelectStringEngine.ResultFactory().Create(text, null, 1, in result, false).Line);
         Assert.Equal(7, Assert.Single(result.Matches).Index);
     }
 
@@ -181,6 +181,116 @@ public sealed class SelectStringEngineTests
             File.WriteAllText(path, text);
             Assert.Equal(text, Assert.Single(Scan(path, new SelectStringEngine(new[] { "hit" }), Encoding.UTF8)).Line);
         });
+    }
+
+    [Theory]
+    [InlineData(0, 3)]
+    [InlineData(3, 0)]
+    [InlineData(3, 3)]
+    public void CallerOwnedResultsReceiveBothContextsAcrossRingWraparound(int pre, int post)
+    {
+        WithFile(path =>
+        {
+            string[] lines = Enumerable.Range(0, 50).Select(i => i % 7 < 2 ? $"hit {i}" : $"line {i}").ToArray();
+            File.WriteAllLines(path, lines);
+            var created = new List<OwnedMatch>();
+            var emitted = new List<OwnedMatch>();
+            var engine = new SelectStringEngine(new[] { "hit" });
+            engine.ScanFile<OwnedMatch, OwnedMatchFactory>(path, Encoding.UTF8, pre, post, false,
+                new OwnedMatchFactory(created), result => { emitted.Add(result); return true; });
+
+            int[] positions = Enumerable.Range(0, lines.Length).Where(i => i % 7 < 2).ToArray();
+            Assert.Equal(positions.Length, emitted.Count);
+            Assert.Equal(created.Count, emitted.Count);
+            for (int i = 0; i < emitted.Count; i++)
+            {
+                var result = emitted[i];
+                Assert.Same(created[i], result);
+                Assert.Equal(lines[positions[i]], result.Line);
+                Assert.Equal(lines.Skip(Math.Max(0, positions[i] - pre)).Take(Math.Min(pre, positions[i])), result.Before);
+                Assert.Equal(lines.Skip(positions[i] + 1).Take(post), result.After);
+                Assert.NotNull(result.DisplayBefore);
+                Assert.NotNull(result.DisplayAfter);
+                Assert.DoesNotContain(result.DisplayBefore, line => line.StartsWith("hit", StringComparison.Ordinal));
+                Assert.DoesNotContain(result.DisplayAfter, line => line.StartsWith("hit", StringComparison.Ordinal));
+            }
+
+            // Subsequent scans must not reuse emitted result objects or their context arrays.
+            var first = emitted[0];
+            var before = first.Before;
+            var after = first.After;
+            File.WriteAllText(path, "hit replacement");
+            engine.ScanFile<OwnedMatch, OwnedMatchFactory>(path, Encoding.UTF8, pre, post, false,
+                new OwnedMatchFactory(created), _ => true);
+            Assert.Equal("hit 0", first.Line);
+            Assert.Same(before, first.Before);
+            Assert.Same(after, first.After);
+        });
+    }
+
+    [Fact]
+    public void EmittedCallerOwnedContextSurvivesCancellation()
+    {
+        WithFile(path =>
+        {
+            File.WriteAllText(path, "before\nhit\nafter\nhit later\ntail");
+            var created = new List<OwnedMatch>();
+            OwnedMatch emitted = null;
+            using var cancellation = new CancellationTokenSource();
+            Assert.Throws<OperationCanceledException>(() => new SelectStringEngine(new[] { "hit" })
+                .ScanFile<OwnedMatch, OwnedMatchFactory>(path, Encoding.UTF8, 1, 1, false,
+                    new OwnedMatchFactory(created), result =>
+                    {
+                        emitted = result;
+                        cancellation.Cancel();
+                        return true;
+                    }, cancellationToken: cancellation.Token));
+            Assert.Same(Assert.Single(created), emitted);
+            Assert.Equal(new[] { "before" }, emitted.Before);
+            Assert.Equal(new[] { "after" }, emitted.After);
+            Assert.Equal(new[] { "before" }, emitted.DisplayBefore);
+            Assert.Equal(new[] { "after" }, emitted.DisplayAfter);
+            using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        });
+    }
+
+    private sealed class OwnedMatch
+    {
+        internal string Line { get; init; }
+
+        internal string[] Before { get; set; }
+
+        internal string[] After { get; set; }
+
+        internal string[] DisplayBefore { get; set; }
+
+        internal string[] DisplayAfter { get; set; }
+    }
+
+    private readonly struct OwnedMatchFactory(List<OwnedMatch> created) : SelectStringEngine.IResultFactory<OwnedMatch>
+    {
+        public OwnedMatch Create(string line, string path, ulong lineNumber, in SelectStringEngine.MatchData match, bool context)
+        {
+            var result = new OwnedMatch { Line = line };
+            created.Add(result);
+            return result;
+        }
+
+        public string GetLine(OwnedMatch result) => result.Line;
+
+        public bool HasContext(OwnedMatch result) => true;
+
+        public void SetLogicalContext(OwnedMatch result, string[] before, string[] after)
+        {
+            result.Before = before;
+            result.After = after;
+        }
+
+        public void SetDisplayContext(OwnedMatch result, string[] before, string[] after)
+        {
+            result.DisplayBefore = before;
+            result.DisplayAfter = after;
+        }
     }
 
     private static List<SelectStringEngine.Result> Scan(string path, SelectStringEngine engine, Encoding encoding, int pre = 0, int post = 0)
