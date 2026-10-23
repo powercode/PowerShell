@@ -188,6 +188,9 @@ Records per file in PatternSmallFiles (default 16); the last file may be shorter
 One matching record per this many inputs in PipelineCaptures and PipelineStop (default 100).
 .PARAMETER PatternFamily
 Shared corpus pattern for PatternFile, PatternSmallFiles and PatternRecords (default Literal).
+.PARAMETER PatternSet
+Single (default), TargetFirst or TargetLast. Multi-pattern controls add OrderId,
+PrReference and Assignment patterns that do not match the Literal/SqlDuration inputs.
 .PARAMETER PatternOutput
 Output mode for PatternFile: Matches (default), Context (two lines each side), Raw, List or Quiet.
 Other pattern scenarios currently require Matches.
@@ -239,6 +242,8 @@ param(
     [ValidateRange(1,2147483647)] [int] $MatchEvery = 100,
     [ValidateSet('Literal','DotStar','DotPlus','SqlDuration','OrderId','FileExtension','PrReference','Markdown','Assignment')]
     [string] $PatternFamily = 'Literal',
+    [ValidateSet('Single','TargetFirst','TargetLast')]
+    [string] $PatternSet = 'Single',
     [ValidateSet('Matches','Context','Raw','List','Quiet')]
     [string] $PatternOutput = 'Matches',
     [ValidateSet('Match','Absent','NearMiss','LongNearMiss','Mixed')]
@@ -260,6 +265,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($PatternSet -ne 'Single' -and ($PatternFamily -notin 'Literal','SqlDuration' -or @($Scenario | Where-Object { $_ -notin 'PatternFile','PatternRecords','PatternSmallFiles' }).Count)) {
+    throw 'Multi-pattern controls require Literal/SqlDuration pattern scenarios.'
+}
 if ($PatternOutput -ne 'Matches' -and @($Scenario | Where-Object { $_ -ne 'PatternFile' }).Count) {
     throw 'PatternOutput modes require PatternFile.'
 }
@@ -311,7 +319,7 @@ if (!$Worker) {
             }
             if ($TraceMarkers) { $start.ArgumentList.Add('-TraceMarkers') }
             foreach ($arg in @('-RecordCount', [string]$RecordCount, '-MatchEvery', [string]$MatchEvery, '-LinesPerFile', [string]$LinesPerFile)) { $start.ArgumentList.Add($arg) }
-            foreach ($arg in @('-PatternFamily', $PatternFamily, '-InputKind', $InputKind, '-Culture', $Culture, '-PatternOutput', $PatternOutput)) {
+            foreach ($arg in @('-PatternFamily', $PatternFamily, '-InputKind', $InputKind, '-Culture', $Culture, '-PatternOutput', $PatternOutput, '-PatternSet', $PatternSet)) {
                 $start.ArgumentList.Add($arg)
             }
             if ($CaseSensitive) { $start.ArgumentList.Add('-CaseSensitive') }
@@ -360,8 +368,15 @@ if ($Scenario[0] -in 'PatternFile','PatternRecords','PatternSmallFiles') {
         $index = $InputKind -eq 'Mixed' ? $i % $patternFixture.Examples.Length : $inputIndex
         $patternRecords[$i] = $patternFixture.Examples[$index].Input
     }
+    $searchPatterns = @($patternFixture.Pattern)
+    if ($PatternSet -ne 'Single') {
+        $otherPatterns = @(foreach ($family in 'OrderId','PrReference','Assignment') {
+            [PowerShell.Benchmarks.SelectString.SearchPatternFixture]::Create($family).Pattern
+        })
+        $searchPatterns = $PatternSet -eq 'TargetFirst' ? @($patternFixture.Pattern) + $otherPatterns : $otherPatterns + @($patternFixture.Pattern)
+    }
     $patternParameters = @{
-        Pattern = $patternFixture.Pattern
+        Pattern = $searchPatterns
         CaseSensitive = [bool]$CaseSensitive
     }
     switch ($PatternOutput) {
@@ -499,6 +514,9 @@ if ($patternFixture) {
         }
         $index = $InputKind -eq 'Mixed' ? $recordIndex % $patternFixture.Examples.Length : $inputIndex
         if ($_.Line -cne $patternFixture.Examples[$index].Input) { throw 'Incorrect pattern input line' }
+        if ($_.Pattern -cne $patternFixture.Pattern) {
+            throw 'Incorrect winning pattern'
+        }
         [PowerShell.Benchmarks.SelectString.SearchPatternFixture]::ValidateResult($patternFixture.Examples[$index], $_.Matches)
         if ($PatternOutput -eq 'Context') {
             $before = @()
@@ -663,6 +681,8 @@ $sorted = @($samples | Sort-Object)
     PipelineMatchEvery = $pipelineRecords ? $MatchEvery : $null
     PatternFamily = $patternFixture ? $PatternFamily : $null
     PatternOutput = $patternFixture ? $PatternOutput : $null
+    PatternSet = $patternFixture ? $PatternSet : $null
+    SearchPatterns = $patternFixture ? $searchPatterns : $null
     PatternInput = $patternFixture ? $InputKind : $null
     PatternRecordCount = $patternFixture ? $RecordCount : $null
     PatternFileCount = $Scenario[0] -eq 'PatternSmallFiles' ? $patternFiles.Count : $null

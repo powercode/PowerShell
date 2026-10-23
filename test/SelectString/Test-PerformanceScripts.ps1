@@ -222,6 +222,20 @@ foreach ($inputKind in 'Mixed','Absent') {
         if ($expectedCount -eq 0) { Assert ($null -eq $patternResult.FirstResultMs) 'Absent pattern must not have first-result latency' }
     }
 }
+foreach ($patternSet in 'TargetFirst','TargetLast') {
+    $multiOutput = Join-Path $artifacts "multi-$patternSet"
+    & (Join-Path $source 'Measure-SelectString.ps1') -PwshPath $PwshPath -Revision test `
+        -Scenario PatternFile,PatternRecords -PatternFamily SqlDuration -InputKind Mixed `
+        -PatternSet $patternSet -RecordCount 17 -LineCount 16 -PromotionMode background-warm `
+        -Iterations 1 -WarmupIterations 1 -Artifacts $multiOutput
+    $multiResults = @(Get-Content (Join-Path $multiOutput 'results.json') -Raw | ConvertFrom-Json)
+    foreach ($multiResult in $multiResults) {
+        Assert ($multiResult.Status -eq 'Measured' -and $multiResult.ValidatedResults -eq 5 -and $multiResult.ResultCount -eq 5) 'Multiple-pattern validation failed'
+        Assert ($multiResult.PatternSet -eq $patternSet -and $multiResult.SearchPatterns.Count -eq 4) 'Pattern set not forwarded'
+        $targetIndex = $patternSet -eq 'TargetFirst' ? 0 : 3
+        Assert ($multiResult.SearchPatterns[$targetIndex] -ceq $multiResult.Pattern) 'Pattern order incorrect'
+    }
+}
 foreach ($outputMode in 'Context','Raw','List','Quiet') {
     foreach ($inputKind in 'Mixed','Absent') {
         $modeOutput = Join-Path $artifacts "mode-$outputMode-$inputKind"
