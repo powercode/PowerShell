@@ -8,6 +8,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <OutputType>Exe</OutputType>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants Condition="'$(SELECTSTRING_ENGINE_SOURCE)' == ''">$(DefineConstants);SELECTSTRING_CURRENT_ENGINE</DefineConstants>
     <!-- Environment variables propagate to BenchmarkDotNet's generated builds. -->
     <SelectStringEngineSource>$(SELECTSTRING_ENGINE_SOURCE)</SelectStringEngineSource>
     <SelectStringEngineSource Condition="'$(SelectStringEngineSource)' == ''">../../../src/Microsoft.PowerShell.Commands.Utility/commands/utility/SelectString.Engine.cs</SelectStringEngineSource>
@@ -20,6 +21,8 @@
     <Compile Include="Regex.Benchmarks.cs" Condition="'$(SELECTSTRING_ENGINE_SOURCE)' == ''" />
     <Compile Include="PatternFamilies.cs" Condition="'$(SELECTSTRING_ENGINE_SOURCE)' == ''" />
     <Compile Include="PatternFamilies.Benchmarks.cs" Condition="'$(SELECTSTRING_ENGINE_SOURCE)' == ''" />
+    <Compile Include="BackgroundCompilation.cs" Condition="'$(SELECTSTRING_ENGINE_SOURCE)' == ''" />
+    <Compile Include="BackgroundCompilation.Probe.cs" Condition="'$(SELECTSTRING_ENGINE_SOURCE)' == ''" />
     <Compile Include="LogFixture.cs" />
     <!-- .NET 11 support is required by the repository target framework. -->
     <PackageReference Include="BenchmarkDotNet" Version="0.16.0-preview.2" />

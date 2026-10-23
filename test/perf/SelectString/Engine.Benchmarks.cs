@@ -12,7 +12,17 @@ namespace PowerShell.Benchmarks.SelectString;
 
 public static class Program
 {
-    public static void Main(string[] args) => BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
+    public static void Main(string[] args)
+    {
+#if SELECTSTRING_CURRENT_ENGINE
+        if (args.Length > 0 && args[0] == "--promotion-probe")
+        {
+            BackgroundCompilationProbe.Run(args);
+            return;
+        }
+#endif
+        BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
+    }
 }
 
 [MemoryDiagnoser]
