@@ -147,6 +147,37 @@ the default reader never reaches. A regression test demonstrates this with stric
 UTF-8 decoding. Buffer size therefore affects observable early-exit behavior as
 well as memory and throughput; an unconditional increase is not semantics-neutral.
 
+### Compiled-regex experiment
+
+`RegexScanning` compares interpreted and compiled regexes with the same production
+reader-buffer policy. `ConstructAndScan` creates a fresh engine on every timed
+operation, including regex compilation and first-use JIT. `ReuseAndScan` uses an
+engine warmed during setup. Neither benchmark changes the cmdlet's regex policy.
+These measure engine work; cmdlet startup, binding and output costs are excluded.
+
+The matrix includes sparse captures, all matches, three patterns, a literal regex,
+first-match termination, 256 small files, and a single string. File sizes range
+from 4 KiB to 300 MiB. String and small-file controls have fixed inputs: select
+SizeKiB 4 for those cases to avoid redundant runs. Setup generates deterministic
+logs and validates named captures outside timing; no existing fixture is needed.
+The early case models the shared engine stop-after-first path, not all the
+differences between the cmdlet's Quiet and List output modes.
+
+```powershell
+dotnet run -c Release --project test/perf/SelectString/SelectString.Engine.Benchmarks.csproj -- --filter '*RegexScanning*SizeKiB: 4,*String*' '*RegexScanning*SizeKiB: 307200,*LogAllMatches*' '*RegexScanning*SizeKiB: 307200,*LogSparse*' --job short --affinity 1 --artifacts tmp/SelectString/regex-initial
+```
+
+Use the size sweep to investigate amortization before proposing a selection rule.
+Short runs are exploratory. Confirm any promising choice with repeated end-to-end
+shipping/current/experimental comparisons, including compilation in each timed
+cmdlet invocation and preserving first-result measurements.
+
+The construction-inclusive sweep used in RESULTS-regex.md is:
+
+```powershell
+dotnet run -c Release --project test/perf/SelectString/SelectString.Engine.Benchmarks.csproj -- --filter '*RegexScanning.ConstructAndScan*SizeKiB: 4,*' '*RegexScanning.ConstructAndScan*SizeKiB: 1024,*Log*' '*RegexScanning.ConstructAndScan*SizeKiB: 16384,*Log*' '*RegexScanning.ConstructAndScan*SizeKiB: 307200,*Early*' '*RegexScanning.ConstructAndScan*SizeKiB: 16384,*Multiple*' '*RegexScanning.ConstructAndScan*SizeKiB: 16384,*Literal*' --job short --affinity 1 --artifacts tmp/SelectString/regex-sweep
+```
+
 ### File-size sweep and candidate policy
 
 `ReaderBufferFileSizes` generates 4 KiB, 64 KiB, 1 MiB and 16 MiB log fixtures

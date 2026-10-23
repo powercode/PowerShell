@@ -105,15 +105,41 @@ public sealed class SelectStringEngineTests
         Assert.Equal(7, Assert.Single(result.Matches).Index);
     }
 
-    [Fact]
-    public void FirstMatchingPatternWinsAndAllCapturesSurvive()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FirstMatchingPatternWinsAndAllCapturesSurvive(bool compiled)
     {
-        var engine = new SelectStringEngine(new[] { "missing", "(?<word>a)+", "b" }, allMatches: true);
+        var engine = new SelectStringEngine(new[] { "missing", "(?<word>a)+", "b" }, allMatches: true, compiledRegex: compiled);
         Assert.True(engine.TryMatch("aa b a", out var result));
         Assert.Equal(1, result.PatternIndex);
         Assert.Equal(2, result.Matches.Length);
         Assert.Equal(2, result.Matches[0].Groups["word"].Captures.Count);
         Assert.Equal(5, result.Matches[1].Index);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RegexCompilationPreservesCultureCaseAndPatternErrors(bool compiled)
+    {
+        CultureInfo original = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
+            var engine = new SelectStringEngine(new[] { "I" }, compiledRegex: compiled);
+            Assert.True(engine.TryMatch("ı", out _));
+            Assert.False(engine.TryMatch("i", out _));
+            Assert.False(new SelectStringEngine(new[] { "I" }, caseSensitive: true, compiledRegex: compiled).TryMatch("ı", out _));
+            var error = Assert.Throws<SelectStringEngine.InvalidPatternException>(() =>
+                new SelectStringEngine(new[] { "ok", "[" }, compiledRegex: compiled));
+            Assert.Equal(1, error.PatternIndex);
+            Assert.IsAssignableFrom<ArgumentException>(error.InnerException);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
     }
 
     [Fact]
