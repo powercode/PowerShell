@@ -123,6 +123,8 @@ search throughput scenarios; `Formatting` measures context rendering separately.
 
 See [RESULTS.md](RESULTS.md) for the initial measurements and
 [RESULTS-allocations.md](RESULTS-allocations.md) for the allocation phase.
+The [queue experiment](RESULTS-queues.md) and subsequent
+[full workload validation](RESULTS-matrix.md) use the null-redirection harness.
 
 ## Focused Windows tracing
 
