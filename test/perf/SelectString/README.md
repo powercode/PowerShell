@@ -487,3 +487,46 @@ culture. An absent-only workload validates zero results and has null first-resul
 latency. Use a separate artifact directory for each parameter combination; reruns
 replace the files in that directory. Repeat with reversed executable order before
 interpreting small timing differences.
+
+### Background compilation probe
+
+This is a standalone, benchmark-only prototype; it does not change the cmdlet.
+Build the benchmark project, then run the probe in separate processes:
+
+```powershell
+dotnet build test/perf/SelectString/SelectString.Engine.Benchmarks.csproj -c Release
+$probe = './test/perf/SelectString/bin/Release/net11.0/SelectString.Engine.Benchmarks.dll'
+dotnet $probe --promotion-probe ./tmp/SelectString/promotion-one-core 1
+dotnet $probe --promotion-probe ./tmp/SelectString/promotion-unrestricted 0
+```
+
+The final argument is a Windows affinity mask; zero retains OS affinity.
+Unrestricted affinity permits spare cores but does not pin specific physical cores.
+Use different directories for repeats: the probe replaces its per-case JSON files.
+Repeat in reversed affinity order before interpreting scheduling differences.
+
+This is an exploratory measurement loop, not a BenchmarkDotNet job. It exercises
+one and 10,000 records for literal, wildcard and SQL patterns, with successful,
+absent-prefix and long-near-miss inputs. Each case rotates six modes through three
+warmup and nine measured rounds: interpreted, compiled, synchronous compilation
+after 128 records, immediate background constructor-only, immediate background
+with first execution, and background first execution after 128 records. The 128
+record gate is a control for this experiment, not a proposed production threshold.
+The first-execution probe uses only the selected authored fixture input.
+
+Each operation constructs its own engine. Background work captures construction
+culture and publishes a whole replacement between matching calls. A shared single
+worker slot rejects busy admissions without queuing. Completion suppresses work
+that has not begun and joins work already running. Worker failures are observed;
+the measurement fails if speculative compilation fails. Concurrency admission,
+faults, draining, culture, retained captures and the delayed gate have unit tests.
+
+JSON retains foreground and total wall time, process CPU, managed allocations,
+first-result latency, admission/rejection, whether compilation started, promotion
+record index and time observed after that matching call, and unused compilations.
+Totals include draining the worker; no admitted work carries into the next call.
+Process CPU is coarse, especially for sub-millisecond calls, and managed allocation
+excludes native generated code. Foreground time deliberately excludes drain time;
+it does not claim a cmdlet could abandon workers without lifecycle consequences.
+Match counts are checked every call, with corpus span/capture validation before
+measurement. These results omit pipeline/file/output costs and concurrent callers.

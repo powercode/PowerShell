@@ -10,6 +10,8 @@
     <Compile Include="Engine.Tests.cs" />
     <Compile Include="../perf/SelectString/PatternFamilies.cs" Link="PatternFamilies.cs" />
     <Compile Include="PatternFamilies.Tests.cs" />
+    <Compile Include="../perf/SelectString/BackgroundCompilation.cs" Link="BackgroundCompilation.cs" />
+    <Compile Include="BackgroundCompilation.Tests.cs" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" PrivateAssets="all" />
