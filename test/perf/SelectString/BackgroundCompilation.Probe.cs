@@ -20,14 +20,19 @@ namespace PowerShell.Benchmarks.SelectString;
 /// </summary>
 internal static class BackgroundCompilationProbe
 {
-    private enum Mode { Interpreted, Compiled, DelayedSynchronous, BackgroundConstructor, BackgroundWarm, BackgroundDelayedWarm }
+    private enum Mode { Interpreted, Compiled, DelayedSynchronous, BackgroundConstructor, BackgroundWarm, BackgroundDelayedWarm, WrapperOnly, TimingEveryCall, TimingSampled, WorkEveryCall, WorkSampled }
 
     private sealed record Sample(double ForegroundMs, double TotalMs, double CpuMs, long AllocatedBytes,
-        double? FirstResultMs, double? PublicationObservedMs, int Matches, bool Admitted, bool CompilationStarted, bool Rejected, int? PromotedAtRecord);
+        double? FirstResultMs, double? PublicationObservedMs, int Matches, bool Admitted, bool CompilationStarted, bool Rejected, int? PromotedAtRecord, int? AdmissionAttemptedAtRecord, double ObservedMatchingMs, int TimedMatchingCalls);
 
     internal static void Run(string[] args)
     {
-        if (args.Length != 3) { throw new ArgumentException("Usage: --promotion-probe output-directory affinity-mask"); }
+        if (args.Length is < 3 or > 4 || (args.Length == 4 && args[3] != "admission"))
+        {
+            throw new ArgumentException("Usage: --promotion-probe output-directory affinity-mask [admission]");
+        }
+
+        bool admission = args.Length == 4;
         string directory = Path.GetFullPath(args[1]);
         Directory.CreateDirectory(directory);
         long affinity = long.Parse(args[2], CultureInfo.InvariantCulture);
@@ -41,7 +46,10 @@ internal static class BackgroundCompilationProbe
         CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
         const int warmups = 3;
         const int iterations = 9;
-        foreach (SearchPatternFamily family in new[] { SearchPatternFamily.Literal, SearchPatternFamily.DotStar, SearchPatternFamily.DotPlus, SearchPatternFamily.SqlDuration })
+        SearchPatternFamily[] families = admission
+            ? new[] { SearchPatternFamily.Literal, SearchPatternFamily.SqlDuration }
+            : new[] { SearchPatternFamily.Literal, SearchPatternFamily.DotStar, SearchPatternFamily.DotPlus, SearchPatternFamily.SqlDuration };
+        foreach (SearchPatternFamily family in families)
         {
             var fixture = SearchPatternFixture.Create(family);
             // Validate interpreted/compiled spans and groups independently of the probe.
@@ -51,11 +59,11 @@ internal static class BackgroundCompilationProbe
                 fixture.Validate(input => engine.TryMatch(input, out var result) ? result.Matches : null);
             }
 
-            foreach (SearchInputKind input in new[] { SearchInputKind.Match, SearchInputKind.Absent, SearchInputKind.LongNearMiss })
+            foreach (SearchInputKind input in admission ? new[] { SearchInputKind.Match, SearchInputKind.LongNearMiss } : new[] { SearchInputKind.Match, SearchInputKind.Absent, SearchInputKind.LongNearMiss })
             {
-                foreach (int records in new[] { 1, 10000 })
+                foreach (int records in new[] { 1, admission ? 4096 : 10000 })
                 {
-                    var modes = Enum.GetValues<Mode>();
+                    var modes = Enum.GetValues<Mode>().Where(mode => admission || mode <= Mode.BackgroundDelayedWarm).ToArray();
                     var samples = modes.ToDictionary(mode => mode, _ => new List<Sample>());
                     for (int round = -warmups; round < iterations; round++)
                     {
@@ -72,6 +80,9 @@ internal static class BackgroundCompilationProbe
                     {
                         Family = family.ToString(), Input = input.ToString(), Records = records,
                         Mode = mode.ToString(), fixture.Pattern, fixture.Source,
+                        AdmissionProfile = admission,
+                        WorkThresholdMs = mode is Mode.WorkEveryCall or Mode.WorkSampled ? 0.5 : (double?)null,
+                        SampleEvery = mode is Mode.TimingSampled or Mode.WorkSampled ? 16 : 1,
                         Warmups = warmups, Iterations = iterations, Affinity = affinity,
                         ProcessorCount = Environment.ProcessorCount,
                         Runtime = RuntimeInformation.FrameworkDescription,
@@ -107,6 +118,7 @@ internal static class BackgroundCompilationProbe
         TimeSpan cpuBefore = process.TotalProcessorTime;
         long allocatedBefore = GC.GetTotalAllocatedBytes(true);
         BackgroundCompilation background = null;
+        MatchingWorkGate work = null;
         int count = 0;
         double? first = null;
         double? publication = null;
@@ -114,12 +126,21 @@ internal static class BackgroundCompilationProbe
         double foreground;
         try
         {
+            work = mode switch
+            {
+                Mode.TimingEveryCall => new(long.MaxValue),
+                Mode.TimingSampled => new(long.MaxValue, sampleEvery: 16),
+                Mode.WorkEveryCall => new(Math.Max(1, Stopwatch.Frequency / 2000)),
+                Mode.WorkSampled => new(Math.Max(1, Stopwatch.Frequency / 2000), sampleEvery: 16),
+                _ => null,
+            };
             var engine = mode == Mode.Compiled ? compile() : new SelectStringEngine(new[] { fixture.Pattern }, caseSensitive: true);
-            if (mode is Mode.BackgroundConstructor or Mode.BackgroundWarm or Mode.BackgroundDelayedWarm)
+            if (mode is Mode.BackgroundConstructor or Mode.BackgroundWarm or Mode.BackgroundDelayedWarm or Mode.WrapperOnly || work != null)
             {
                 background = new(engine, compile,
-                    startAfter: mode == Mode.BackgroundDelayedWarm ? 128 : 0,
-                    warmInput: mode == Mode.BackgroundConstructor ? null : example.Input);
+                    startAfter: mode == Mode.WrapperOnly ? int.MaxValue : mode == Mode.BackgroundDelayedWarm ? 128 : 0,
+                    warmInput: mode == Mode.BackgroundConstructor ? null : example.Input,
+                    workGate: work);
             }
 
             for (int i = 0; i < records; i++)
@@ -144,6 +165,7 @@ internal static class BackgroundCompilationProbe
         if (background?.CompilationError != null) { throw new InvalidOperationException("Speculative compilation failed", background.CompilationError); }
         if (count != (example.Value == null ? 0 : records)) { throw new InvalidDataException("Probe result count mismatch"); }
         return new(foreground, timer.Elapsed.TotalMilliseconds, cpu, allocated, first, publication, count,
-            background?.Admitted ?? false, background?.CompilationStarted ?? false, background?.Rejected ?? false, background?.PromotedAtRecord);
+            background?.Admitted ?? false, background?.CompilationStarted ?? false, background?.Rejected ?? false, background?.PromotedAtRecord, background?.AdmissionAttemptedAtRecord,
+            (work?.ObservedTicks ?? 0) * 1000.0 / Stopwatch.Frequency, work?.Samples ?? 0);
     }
 }
