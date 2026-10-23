@@ -179,6 +179,15 @@ Assert ($results.Count -eq 5 -and @($results | Where-Object Status -ne Measured)
 Assert (($results | Where-Object Scenario -eq DenseContext).ResultCount -eq 100) 'Dense count incorrect'
 Assert (($results | Where-Object Scenario -eq NoMatchContext).ResultCount -eq 0) 'No-match count incorrect'
 Assert ($results[0].HostSupportsVirtualTerminal -is [bool]) 'Terminal capability not recorded'
+& (Join-Path $source 'Measure-SelectString.ps1') -PwshPath $PwshPath -Revision test `
+    -Scenario PipelineCaptures,PipelineStop,FileStop -RecordCount 37 -MatchEvery 4 `
+    -LineCount 100 -Iterations 1 -WarmupIterations 1 -Artifacts (Join-Path $artifacts 'pipelines')
+$pipelineResults = @(Get-Content (Join-Path $artifacts 'pipelines/results.json') -Raw | ConvertFrom-Json)
+Assert (@($pipelineResults | Where-Object Status -ne Measured).Count -eq 0) 'Pipeline measurement failed'
+Assert ($pipelineResults.Count -eq 3) 'Missing pipeline cases'
+Assert ($pipelineResults[0].ResultCount -eq 10 -and $pipelineResults[0].ValidatedResults -eq 10) 'Pipeline density/count incorrect'
+Assert ($pipelineResults[0].PipelineRecordCount -eq 37 -and $pipelineResults[0].PipelineMatchEvery -eq 4) 'Pipeline metadata/worker forwarding incorrect'
+Assert ($pipelineResults[1].ResultCount -eq 1 -and $pipelineResults[2].ResultCount -eq 1) 'Downstream termination incorrect'
 $log = $results | Where-Object Scenario -eq LogAllMatches
 Assert ($log.ValidatedResults -eq $log.ResultCount -and $log.ValidatedMatches -gt $log.ResultCount) 'Capture validation missing'
 & (Join-Path $source 'Measure-SelectString.ps1') -PwshPath $PwshPath -Revision test `

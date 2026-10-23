@@ -179,6 +179,10 @@ Unmeasured calls before sampling (default 3).
 Optional process CPU affinity mask; zero leaves scheduling unchanged.
 .PARAMETER LineCount
 Number of lines generated for the small-fixture matrix (default 100000).
+.PARAMETER RecordCount
+Input records for PipelineCaptures and PipelineStop (default 10000), shared by one cmdlet invocation.
+.PARAMETER MatchEvery
+One matching record per this many inputs in PipelineCaptures and PipelineStop (default 100).
 .PARAMETER TimeoutSeconds
 Maximum worker lifetime, including validation and warmup (default 60).
 .PARAMETER Artifacts
@@ -211,6 +215,8 @@ param(
     [ValidateRange(1,1000)] [int] $WarmupIterations = 3,
     [ValidateRange(0,9223372036854775807)] [long] $Affinity = 0,
     [ValidateRange(16,2147483647)] [int] $LineCount = 100000,
+    [ValidateRange(1,2147483647)] [int] $RecordCount = 10000,
+    [ValidateRange(1,2147483647)] [int] $MatchEvery = 100,
     [ValidateRange(1,3600)] [int] $TimeoutSeconds = 60,
     [string] $Artifacts = (Join-Path $PSScriptRoot 'bin/measurements'),
     [switch] $Worker,
@@ -270,6 +276,7 @@ if (!$Worker) {
                 $start.ArgumentList.Add($arg)
             }
             if ($TraceMarkers) { $start.ArgumentList.Add('-TraceMarkers') }
+            foreach ($arg in @('-RecordCount', [string]$RecordCount, '-MatchEvery', [string]$MatchEvery)) { $start.ArgumentList.Add($arg) }
             if ($SkipCounting) { $start.ArgumentList.Add('-SkipCounting') }
             if ($LogFixture) { $start.ArgumentList.Add('-LogFixture'); $start.ArgumentList.Add($LogFixture) }
             $result = [BenchmarkWorker]::Run($start, $TimeoutSeconds, $Affinity, $case, $output)
@@ -296,6 +303,15 @@ if ($Scenario[0] -notlike 'Log*') {
 }
 $logManifest = $null
 $validator = $null
+$pipelineRecords = $null
+if ($Scenario[0] -in 'PipelineCaptures','PipelineStop') {
+    $pipelineRecords = [string[]]::new($RecordCount)
+    for ($i = 0; $i -lt $RecordCount; $i++) {
+        $level = if ($i % $MatchEvery -eq 0) { 'ERROR' } else { 'INFO' }
+        $pipelineRecords[$i] = "level=$level request=$i duration=$($i % 5000)ms"
+    }
+    $pipelinePattern = 'level=(?<level>ERROR) request=(?<request>[0-9]+) duration=(?<duration>[0-9]+)ms'
+}
 if ($Scenario[0] -like 'Log*') {
     if ($Scenario[0] -notin 'LogRare','LogSparse','LogMedium','LogBroad','LogDense','LogAllMatches','LogContext') { throw 'Unknown log scenario' }
     Add-Type -Path (Join-Path $PSScriptRoot 'LogFixture.cs')
@@ -312,6 +328,9 @@ $action = switch ($Scenario[0]) {
     { $_ -like 'Log*' } { { Select-String @logParameters } }
     String { { 'needle café needle' | Select-String needle } }
     Records { { $records | Select-String needle } }
+    PipelineCaptures { { $pipelineRecords | Select-String -Pattern $pipelinePattern } }
+    PipelineStop { { $pipelineRecords | Select-String -Pattern $pipelinePattern | Select-Object -First 1 } }
+    FileStop { { Select-String -LiteralPath $large -Pattern '(?<word>needle)' | Select-Object -First 1 } }
     SmallFiles { { Select-String -LiteralPath $small -Pattern needle } }
     LargeFile { { Select-String -LiteralPath $large -Pattern needle } }
     LongLine { { Select-String -LiteralPath (Join-Path $FixtureRoot 'long.txt') -Pattern needle } }
@@ -334,6 +353,25 @@ $action = switch ($Scenario[0]) {
 }
 
 # Validate every returned line number and named capture outside all timed phases.
+$validatedPipelineResults = $null
+if ($Scenario[0] -in 'PipelineCaptures','PipelineStop','FileStop') {
+    $script:validatedCount = 0
+    & $action | ForEach-Object {
+        if ($Scenario[0] -eq 'FileStop') {
+            if ($_.LineNumber -ne 1 -or $_.Matches[0].Groups['word'].Value -ne 'needle') { throw 'Incorrect file termination result' }
+        } else {
+            $index = [long]$script:validatedCount * $MatchEvery
+            if ($_.LineNumber -ne ($index + 1) -or $_.Matches.Count -ne 1 -or
+                $_.Matches[0].Groups['level'].Value -ne 'ERROR' -or
+                $_.Matches[0].Groups['request'].Value -ne [string]$index -or
+                $_.Matches[0].Groups['duration'].Value -ne [string]($index % 5000)) { throw 'Incorrect pipeline capture' }
+        }
+        $script:validatedCount++
+    }
+    $expected = if ($Scenario[0] -eq 'PipelineCaptures') { [long][Math]::Ceiling($RecordCount / [double]$MatchEvery) } else { 1 }
+    if ($script:validatedCount -ne $expected) { throw 'Incorrect pipeline result count' }
+    $validatedPipelineResults = $script:validatedCount
+}
 if ($logManifest) {
     $validator = [SelectStringLogValidator]::new($Scenario[0], $logManifest.Lines)
     & $action | ForEach-Object { $validator.Accept($_.LineNumber, $_.Matches) }
@@ -399,9 +437,11 @@ $sorted = @($samples | Sort-Object)
     HostSupportsVirtualTerminal = $Host.UI.SupportsVirtualTerminal
     AssemblyHash = (Get-FileHash ([Microsoft.PowerShell.Commands.SelectStringCommand].Assembly.Location)).Hash
     Fixture = $logManifest
-    ValidatedResults = $(if ($validator) { $validator.Count } else { $null })
-    ValidatedMatches = $(if ($validator) { $validator.Captures } else { $null })
-    MiBPerSecond = $(if ($logManifest) { $logManifest.Bytes / 1MB / ($sorted[[int][Math]::Floor($sorted.Count / 2)] / 1000) } else { $null })
+    PipelineRecordCount = $pipelineRecords ? $RecordCount : $null
+    PipelineMatchEvery = $pipelineRecords ? $MatchEvery : $null
+    ValidatedResults = $validator ? $validator.Count : $validatedPipelineResults
+    ValidatedMatches = $validator ? $validator.Captures : $null
+    MiBPerSecond = !$logManifest ? $null : $logManifest.Bytes / 1MB / ($sorted[[int][Math]::Floor($sorted.Count / 2)] / 1000)
     SamplesMs = $samples; MedianMs = $sorted[[int][Math]::Floor($sorted.Count / 2)]
     AllocatedBytes = ($allocations | Measure-Object -Average).Average; Collections = $collections
     FirstResultMs = $script:first; ResultCount = $script:count
