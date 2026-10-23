@@ -37,12 +37,12 @@ git worktree add --detach ../SelectString-first-extraction 41b3169b4
 
 ./test/SelectString/Build-Comparison.ps1 -SourceRoot ../SelectString-baseline -OutputDirectory ./tmp/SelectString/baseline
 ./test/SelectString/Build-Comparison.ps1 -SourceRoot ../SelectString-first-extraction -OutputDirectory ./tmp/SelectString/first-extraction
-./test/SelectString/Build-Comparison.ps1 -SourceRoot . -OutputDirectory ./tmp/SelectString/candidate
+./test/SelectString/Build-Comparison.ps1 -SourceRoot . -OutputDirectory ./tmp/SelectString/concrete-queues
 
 dotnet test test/SelectString/SelectString.Engine.Tests.csproj -c Release
-./test/SelectString/Compare-SelectString.ps1 -Baseline ./tmp/SelectString/baseline/pwsh.exe -Candidate ./tmp/SelectString/candidate/pwsh.exe
+./test/SelectString/Compare-SelectString.ps1 -Baseline ./tmp/SelectString/baseline/pwsh.exe -Candidate ./tmp/SelectString/concrete-queues/pwsh.exe
 
-& ./tmp/SelectString/candidate/pwsh.exe -NoProfile -Command {
+& ./tmp/SelectString/concrete-queues/pwsh.exe -NoProfile -Command {
     Import-Module Pester -RequiredVersion 4.10.1
     $result = Invoke-Pester -Script ./test/powershell/Modules/Microsoft.PowerShell.Utility/Select-String.Tests.ps1 -PassThru
     if ($result.FailedCount) { exit 1 }
@@ -88,8 +88,8 @@ dotnet run -c Release --project test/perf/SelectString/SelectString.Engine.Bench
 
 ```powershell
 ./test/perf/SelectString/Measure-SelectString.ps1 `
-    -PwshPath ./tmp/SelectString/baseline/pwsh.exe,./tmp/SelectString/first-extraction/pwsh.exe,./tmp/SelectString/candidate/pwsh.exe `
-    -Revision 17f1446e5,41b3169b4,candidate `
+    -PwshPath ./tmp/SelectString/baseline/pwsh.exe,./tmp/SelectString/first-extraction/pwsh.exe,./tmp/SelectString/concrete-queues/pwsh.exe `
+    -Revision 17f1446e5,41b3169b4,concrete-queues `
     -Iterations 25 -WarmupIterations 15 -Affinity 1
 ```
 
@@ -128,8 +128,18 @@ The [queue experiment](RESULTS-queues.md) and subsequent
 
 ## Focused Windows tracing
 
+For the large-log scenarios, use the generation and capture commands in the
+section below. Existing DenseContext captures keep their previous defaults.
+
 Run `New-EtwCapture.ps1` from an elevated PowerShell after building the three
-comparison executables. It writes separate DenseContext traces and benchmark JSON
+comparison executables: baseline, first-extraction and concrete-queues. The old
+candidate directory is not used. Run from the repository root:
+
+```powershell
+./test/perf/SelectString/New-EtwCapture.ps1
+```
+
+It writes separate DenseContext traces and benchmark JSON
 under `tmp/SelectString/traces/<timestamp>` and retains WPR stop logs. Do not run
 it alongside another recording. Reported event loss stops further captures.
 
@@ -170,3 +180,77 @@ in the resulting trace. Traced timings are diagnostic, not benchmark claims.
 Open traces with `tools/performance/SelectString.wpaProfile` for CPU stacks,
 engine-oriented stack tags and GC/JIT regions. See that directory's README for
 the opening command and interpretation limits.
+
+## Large synthetic application log
+
+See [RESULTS-log.md](RESULTS-log.md) for initial measurements and validation.
+
+Generate one deterministic UTF-8 file and reuse it across builds and densities:
+
+```powershell
+./test/perf/SelectString/New-LogFixture.ps1 -SizeMiB 300
+
+./test/perf/SelectString/Measure-SelectString.ps1 `
+    -PwshPath ./tmp/SelectString/baseline/pwsh.exe,./tmp/SelectString/first-extraction/pwsh.exe,./tmp/SelectString/concrete-queues/pwsh.exe `
+    -Revision shipping,extraction,queues `
+    -Scenario LogRare,LogSparse,LogMedium,LogBroad,LogDense,LogAllMatches,LogContext `
+    -LogFixture ./tmp/SelectString/log-fixture `
+    -WarmupIterations 3 -Iterations 5 -Affinity 1 -TimeoutSeconds 600 `
+    -Artifacts ./tmp/SelectString/log-300-results
+```
+
+The default directory is `tmp/SelectString/log-fixture`; `-Directory` can select
+another location. Generation overwrites `application.log` and `manifest.json` in
+that directory. The file reaches at least the requested size, ending at a complete
+line. The manifest records actual bytes, line count, generator version and SHA256.
+The benchmark checks the hash before launching workers and never regenerates the
+shared log. Use `-SizeMiB 1` and a separate directory for smoke checks.
+
+Entries vary timestamp, worker, route, request ID, duration and message length
+(including Unicode). A four-digit bucket supplies multiple densities in the same
+file; queries capture named `level`, `request` and `duration` groups. Matching is
+case-sensitive. Density refers to matching lines, not capture count:
+
+| Scenario | Matching lines | Behavior |
+| --- | ---: | --- |
+| LogRare | 0.01% | Default detailed output |
+| LogSparse | 0.1% | Default detailed output |
+| LogMedium | 1% | Default detailed output |
+| LogBroad | 10% | Default detailed output |
+| LogDense | 100% | Default detailed output |
+| LogAllMatches | 100% | Every seventeenth line has a second matching record |
+| LogContext | 0.1% | Two lines of pre/post context |
+
+Percentages are approximate at a partial final bucket cycle. Bucket selection is
+regularly spaced; this is a reproducible synthetic workload, not evidence of
+production representativeness. It does not model clustered error bursts, multiline
+exceptions or cold storage. A representative anonymized log is still useful.
+
+Before warmup, each worker streams a validation pass checking every result's line
+number, match count and named capture values against arithmetic expectations.
+Validation failures prevent a successful measurement. `ValidatedResults` and
+`ValidatedMatches` distinguish line counts from multiple regex matches. Existing
+differential tests remain the checks for complete context semantics. Validation
+also runs with `-SkipCounting`, outside measured ETW regions; it warms the cache
+and exercises the runtime before explicit warmup. Add-Type compilation is outside
+timing as well.
+
+JSON includes the fixture manifest, MiB/s, allocation/GC samples and optional
+first-result latency. Peak working set includes setup, validation and counting;
+it is not incremental scan memory. Five calls/three explicit warmups are an
+initial exploration, not a stable performance claim; repeat comparisons and
+inspect runtime tiering before drawing conclusions.
+
+For a focused capture, run from elevated PowerShell after generation:
+
+```powershell
+./test/perf/SelectString/New-EtwCapture.ps1 `
+    -Scenario LogContext -LogFixture ./tmp/SelectString/log-fixture `
+    -WarmupIterations 3 -Iterations 5 -TimeoutSeconds 600
+```
+
+Choose another log scenario to vary density or exercise AllMatches. The script
+captures shipping, extraction and concrete-queues using the same file, with
+markers enabled and counting disabled. ETL filenames include the scenario.
+Select the measured regions (five for this example); validation and startup are
+also in the recording and must be excluded from timed-region analysis.
