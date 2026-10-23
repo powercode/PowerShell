@@ -771,7 +771,9 @@ namespace Microsoft.PowerShell.Commands
 
             try
             {
-                _engine = new SelectStringEngine(Pattern, SimpleMatch, CaseSensitive, AllMatches, NotMatch, _compareInfo, _compareOptions);
+                // Reuse the compiled patterns across every record and file in this
+                // invocation. SimpleMatch does not construct regular expressions.
+                _engine = new SelectStringEngine(Pattern, SimpleMatch, CaseSensitive, AllMatches, NotMatch, _compareInfo, _compareOptions, compiledRegex: true);
             }
             catch (SelectStringEngine.InvalidPatternException e)
             {
