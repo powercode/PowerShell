@@ -452,3 +452,38 @@ run once. A batch writes each scenario beneath its own directory in the capture
 folder, retaining separate ETLs, stop logs and benchmark JSON. Single-scenario
 runs retain their existing directory layout. Recording or measurement failure
 stops the batch after saving the active trace when possible.
+
+### Pattern families in actual cmdlet invocations
+
+`PatternFile` scans a generated UTF-8 file; `PatternRecords` feeds the same lines
+through one pipeline invocation. Both use the corpus in `PatternFamilies.cs`,
+shared with the standalone benchmarks, and include per-invocation regex setup.
+Generation, Add-Type, validation and warmup are outside timing. Validation checks
+all returned line numbers, order, spans and capture groups against authored
+expectations. Output is discarded during throughput measurement.
+
+```powershell
+./test/perf/SelectString/Measure-SelectString.ps1 `
+    -PwshPath ./tmp/SelectString/baseline/pwsh.exe,./tmp/SelectString/candidate/pwsh.exe `
+    -Revision shipping,current -Scenario PatternFile,PatternRecords `
+    -PatternFamily DotStar -InputKind LongNearMiss -RecordCount 10000 `
+    -CaseSensitive -Culture en-US -WarmupIterations 30 -Iterations 15 `
+    -LatencyIterations 5 -Affinity 1 -TimeoutSeconds 300 `
+    -Artifacts ./tmp/SelectString/pattern-dotstar-long
+```
+
+`PatternFamily` accepts Literal, DotStar, DotPlus, SqlDuration, OrderId,
+FileExtension, PrReference, Markdown and Assignment. `InputKind` accepts Match,
+Absent, NearMiss, LongNearMiss and Mixed. Mixed cycles equally through the four
+inputs, including 4 KiB near misses; this is a diagnostic distribution, not a
+claim about production traffic. RecordCount applies to both file and pipeline.
+Case-insensitive matching is the default; Culture defaults to en-US and is set
+before cmdlet construction in the isolated worker. The supplied ASCII fixtures
+are not themselves comprehensive culture tests; engine tests separately exercise
+Turkish I and preservation of construction-time culture.
+
+JSON records the pattern, family, input kind, record count, case mode and actual
+culture. An absent-only workload validates zero results and has null first-result
+latency. Use a separate artifact directory for each parameter combination; reruns
+replace the files in that directory. Repeat with reversed executable order before
+interpreting small timing differences.
