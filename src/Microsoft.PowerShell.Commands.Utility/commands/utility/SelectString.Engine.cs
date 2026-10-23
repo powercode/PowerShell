@@ -36,8 +36,8 @@ namespace Microsoft.PowerShell.Commands
             _compareOptions = compareOptions ?? (caseSensitive ? CompareOptions.None : CompareOptions.IgnoreCase);
             if (!simpleMatch)
             {
-                // Explicit opt-in for controlled experiments. Cmdlet callers retain interpretation;
-                // compilation must amortize construction and first-use JIT before it is beneficial.
+                // The cmdlet compiles once per invocation; standalone callers can
+                // also select interpretation for comparisons and short-lived searches.
                 RegexOptions options = (caseSensitive, compiledRegex) switch
                 {
                     (true, false) => RegexOptions.None,
