@@ -6,6 +6,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -36,28 +37,35 @@ namespace Microsoft.PowerShell.Commands
             _compareOptions = compareOptions ?? (caseSensitive ? CompareOptions.None : CompareOptions.IgnoreCase);
             if (!simpleMatch)
             {
-                // The cmdlet compiles once per invocation; standalone callers can
-                // also select interpretation for comparisons and short-lived searches.
-                RegexOptions options = (caseSensitive, compiledRegex) switch
+                _regexes = CreateRegexes(patterns, caseSensitive, compiledRegex);
+            }
+        }
+
+        private static Regex[] CreateRegexes(string[] patterns, bool caseSensitive, bool compiledRegex)
+        {
+            // The cmdlet compiles once per invocation; standalone callers can
+            // also select interpretation for comparisons and short-lived searches.
+            RegexOptions options = (caseSensitive, compiledRegex) switch
+            {
+                (true, false) => RegexOptions.None,
+                (true, true) => RegexOptions.Compiled,
+                (false, false) => RegexOptions.IgnoreCase,
+                (false, true) => RegexOptions.IgnoreCase | RegexOptions.Compiled,
+            };
+            var regexes = new Regex[patterns.Length];
+            for (int i = 0; i < patterns.Length; i++)
+            {
+                try
                 {
-                    (true, false) => RegexOptions.None,
-                    (true, true) => RegexOptions.Compiled,
-                    (false, false) => RegexOptions.IgnoreCase,
-                    (false, true) => RegexOptions.IgnoreCase | RegexOptions.Compiled,
-                };
-                _regexes = new Regex[patterns.Length];
-                for (int i = 0; i < patterns.Length; i++)
+                    regexes[i] = new Regex(patterns[i], options);
+                }
+                catch (Exception e)
                 {
-                    try
-                    {
-                        _regexes[i] = new Regex(patterns[i], options);
-                    }
-                    catch (Exception e)
-                    {
-                        throw new InvalidPatternException(i, e);
-                    }
+                    throw new InvalidPatternException(i, e);
                 }
             }
+
+            return regexes;
         }
 
         internal sealed class InvalidPatternException : Exception
@@ -95,7 +103,7 @@ namespace Microsoft.PowerShell.Commands
 
             internal int SimpleMatchIndex { get; set; } = -1;
 
-            internal Match[] Matches { get; set; } = Array.Empty<Match>();
+            internal Match[] Matches { get; set; } = [];
 
             internal ResultContext Context { get; set; }
         }
@@ -117,6 +125,10 @@ namespace Microsoft.PowerShell.Commands
         /// reference, so logical and display context updates reach the final output object.
         /// Implementations must not retain borrowed buffers or reuse emitted results.
         /// </summary>
+        // The factory keeps output types out of the scanner: the cmdlet can construct
+        // MatchInfo directly without this assembly-independent code knowing that type.
+        // Context tracking uses the same factory to update that final object, avoiding
+        // a separate engine result and a later copy for every matching line.
         internal interface IResultFactory<T> where T : class
         {
             T Create(string line, string path, ulong lineNumber, in MatchData match, bool context);
@@ -191,7 +203,7 @@ namespace Microsoft.PowerShell.Commands
                     matched = match.Success;
                     if (matched)
                     {
-                        matches = new[] { match };
+                        matches = [match];
                     }
                 }
 
@@ -212,7 +224,7 @@ namespace Microsoft.PowerShell.Commands
                 return false;
             }
 
-            result = new MatchData(patternIndex, simpleIndex, matches ?? Array.Empty<Match>());
+            result = new MatchData(patternIndex, simpleIndex, matches ?? []);
             return true;
         }
 
@@ -221,6 +233,9 @@ namespace Microsoft.PowerShell.Commands
             where TFactory : struct, IResultFactory<T> =>
             preContext == 0 && postContext == 0 ? new NoContextTracker<T>() : new ContextTracker<T, TFactory>(preContext, postContext, factory);
 
+        // Standalone tests and benchmarks use the engine's Result representation.
+        // This convenience overload supplies its factory and delegates to the same
+        // scanner used by the cmdlet, so decoding and context behavior cannot diverge.
         internal bool ScanFile(string path, Encoding encoding, int preContext, int postContext,
             bool stopAfterFirst, Func<Result, bool> emit, Func<bool> shouldStop = null,
             int readerBufferSize = 0, CancellationToken cancellationToken = default) =>
@@ -232,81 +247,286 @@ namespace Microsoft.PowerShell.Commands
         /// With stopAfterFirst the file is closed before the completed result is emitted.
         /// The sink runs synchronously on the caller's thread; no whole-file buffering occurs.
         /// </summary>
+        // The generic overload lets the cmdlet create MatchInfo directly, or use a
+        // lightweight result for output modes that do not need MatchInfo. TFactory
+        // is a struct type parameter so factory calls need not box an interface value
+        // and can be specialized by the JIT in this per-match path.
         internal bool ScanFile<T, TFactory>(string path, Encoding encoding, int preContext, int postContext,
             bool stopAfterFirst, TFactory factory, Func<T, bool> emit, Func<bool> shouldStop = null,
             int readerBufferSize = 0, CancellationToken cancellationToken = default)
             where T : class
             where TFactory : struct, IResultFactory<T>
         {
-            IContextTracker<T> tracker = CreateContextTracker<T, TFactory>(preContext, postContext, factory);
-            bool found = false;
-            using (FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-            using (StreamReader reader = new(stream, encoding, detectEncodingFromByteOrderMarks: true, bufferSize: readerBufferSize == 0 ? SelectReaderBufferSize(stream, encoding, stopAfterFirst) : readerBufferSize))
+            using var session = new ScanSession<T, TFactory>(this, path, encoding, preContext, postContext,
+                stopAfterFirst, factory, shouldStop, readerBufferSize, cancellationToken);
+            while (session.TryRead(out T result))
             {
-                ulong lineNumber = 0;
-                while (true)
+                if (!emit(result)) { break; }
+            }
+
+            return session.Found;
+        }
+
+        // Unlike the callback API above, this pull API lets a worker pause between
+        // batches while awaiting output capacity. Both APIs share ScanSession so
+        // adding backpressure does not introduce a second decoding/matching loop.
+        internal FileScanSession OpenFileScan(string path, Encoding encoding,
+            int preContext = 0, int postContext = 0, int maxResults = 32, long byteTarget = 32768,
+            CancellationToken cancellationToken = default) =>
+            new(this, path, encoding, preContext, postContext, maxResults, byteTarget, cancellationToken);
+
+        /// <summary>
+        /// A result batch owns its array and all results. Byte size is an approximate
+        /// payload estimate, not a managed-heap bound; a final large result can exceed
+        /// the target. Readers and context retained by a session are separate costs.
+        /// </summary>
+        internal sealed class ScanBatch
+        {
+            internal ScanBatch(Result[] results, int count, long estimatedBytes)
+            {
+                Results = results;
+                Count = count;
+                EstimatedBytes = estimatedBytes;
+            }
+
+            internal Result[] Results { get; }
+
+            internal int Count { get; }
+
+            internal long EstimatedBytes { get; }
+        }
+
+        /// <summary>
+        /// Pulls bounded batches from a file. No scan advances between ReadBatch calls;
+        /// a coordinator can await channel capacity outside this synchronous method.
+        /// StreamReader may read ahead internally using the existing encoding policy.
+        /// </summary>
+        internal sealed class FileScanSession : IDisposable
+        {
+            private readonly ScanSession<Result, ResultFactory> _scan;
+            private readonly int _maxResults;
+            private readonly long _byteTarget;
+            private bool _first = true;
+            private ExceptionDispatchInfo _pendingError;
+            private bool _disposed;
+
+            internal FileScanSession(SelectStringEngine engine, string path, Encoding encoding,
+                int preContext = 0, int postContext = 0, int maxResults = 32, long byteTarget = 32768,
+                CancellationToken cancellationToken = default)
+            {
+                ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxResults);
+                ArgumentOutOfRangeException.ThrowIfNegativeOrZero(byteTarget);
+                _maxResults = maxResults;
+                _byteTarget = byteTarget;
+                _scan = new ScanSession<Result, ResultFactory>(engine, path, encoding, preContext, postContext,
+                    false, default, cancellationToken: cancellationToken);
+            }
+
+            internal ulong LinesRead => _scan.LinesRead;
+
+            internal ScanBatch ReadBatch()
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                _pendingError?.Throw();
+                // Publish the first ready result without scanning for a full batch.
+                int limit = _first ? 1 : _maxResults;
+                if (!_scan.TryRead(out Result result)) { return null; }
+                var results = new Result[limit];
+                int count = 0;
+                long bytes = 0;
+                try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (shouldStop?.Invoke() == true)
+                    do
                     {
-                        return found;
+                        results[count++] = result;
+                        bytes += EstimateBytes(result);
                     }
+                    while (count < limit && bytes < _byteTarget && _scan.TryRead(out result));
+                }
+                catch (Exception error) when (count > 0 && error is not OperationCanceledException)
+                {
+                    // Preserve the sequential order: completed results precede a read
+                    // or matching failure. Cancellation instead abandons the batch.
+                    _pendingError = ExceptionDispatchInfo.Capture(error);
+                }
 
-                    string line = reader.ReadLine();
-                    if (line == null)
-                    {
-                        break;
-                    }
+                _first = false;
+                return new ScanBatch(results, count, bytes);
+            }
 
-                    lineNumber++;
-                    if (TryMatch(line, out MatchData match))
-                    {
-                        T result = factory.Create(line, path, lineNumber, in match, preContext > 0 || postContext > 0);
-                        tracker.TrackMatch(result);
-                    }
-                    else
-                    {
-                        tracker.TrackLine(line);
-                    }
+            private static long EstimateBytes(Result result)
+            {
+                // Avoid accessing Match.Groups/Captures here: doing so can allocate.
+                // Count referenced text conservatively, even if context strings overlap.
+                long bytes = 128L + result.Line.Length * 2L + result.Matches.Length * 128L;
+                if (result.Context is { } context)
+                {
+                    bytes += EstimateContext(context.PreContext) + EstimateContext(context.PostContext)
+                        + EstimateContext(context.DisplayPreContext) + EstimateContext(context.DisplayPostContext);
+                }
 
-                    if (tracker.EmitQueue.Count > 0)
+                return bytes;
+            }
+
+            private static long EstimateContext(string[] lines)
+            {
+                if (lines == null) { return 0; }
+                long bytes = 24L + lines.Length * 8L;
+                foreach (string line in lines) { bytes += 24L + line.Length * 2L; }
+                return bytes;
+            }
+
+            public void Dispose()
+            {
+                _scan.Dispose();
+                _pendingError = null;
+                _disposed = true;
+            }
+        }
+
+        /// <summary>
+        /// A single-owner scan that advances only on demand. Results own their text;
+        /// callers must dispose the session when abandoning it between reads.
+        /// </summary>
+        internal sealed class ScanSession<T, TFactory> : IDisposable
+            where T : class
+            where TFactory : struct, IResultFactory<T>
+        {
+            private readonly SelectStringEngine _engine;
+            private readonly string _path;
+            private readonly TFactory _factory;
+            private IContextTracker<T> _tracker;
+            private readonly bool _context;
+            private readonly bool _stopAfterFirst;
+            private readonly Func<bool> _shouldStop;
+            private readonly CancellationToken _cancellation;
+            private StreamReader _reader;
+            private ulong _lineNumber;
+            private int _readyIndex;
+            private bool _finished;
+            private bool _disposed;
+
+            internal ScanSession(SelectStringEngine engine, string path, Encoding encoding,
+                int preContext, int postContext, bool stopAfterFirst, TFactory factory,
+                Func<bool> shouldStop = null, int readerBufferSize = 0, CancellationToken cancellationToken = default)
+            {
+                _engine = engine;
+                _path = path;
+                _factory = factory;
+                _tracker = CreateContextTracker<T, TFactory>(preContext, postContext, factory);
+                _context = preContext > 0 || postContext > 0;
+                _stopAfterFirst = stopAfterFirst;
+                _shouldStop = shouldStop;
+                _cancellation = cancellationToken;
+                var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                try
+                {
+                    _reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: true,
+                        bufferSize: readerBufferSize == 0 ? SelectReaderBufferSize(stream, encoding, stopAfterFirst) : readerBufferSize);
+                }
+                catch
+                {
+                    stream.Dispose();
+                    throw;
+                }
+            }
+
+            internal bool Found { get; private set; }
+
+            // Diagnostics and tests can distinguish scanner progress from reader read-ahead.
+            internal ulong LinesRead => _lineNumber;
+
+            internal bool TryRead(out T result)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                result = null;
+                try
+                {
+                    while (true)
                     {
-                        found = true;
-                        if (stopAfterFirst)
+                        _cancellation.ThrowIfCancellationRequested();
+                        if (_shouldStop?.Invoke() == true)
                         {
-                            break;
+                            CloseReader();
+                            _finished = true;
+                            _tracker.EmitQueue.Clear();
+                            return false;
                         }
 
-                        foreach (T ready in tracker.EmitQueue)
+                        if (_readyIndex < _tracker.EmitQueue.Count)
                         {
-                            if (!emit(ready))
+                            Found = true;
+                            result = _tracker.EmitQueue[_readyIndex];
+                            _tracker.EmitQueue[_readyIndex++] = null;
+                            if (_stopAfterFirst || _readyIndex == _tracker.EmitQueue.Count)
                             {
-                                return true;
+                                _tracker.EmitQueue.Clear();
+                                _readyIndex = 0;
                             }
+
+                            return true;
                         }
 
-                        tracker.EmitQueue.Clear();
+                        if (_finished) { return false; }
+                        string line = _reader.ReadLine();
+                        if (line == null)
+                        {
+                            Finish();
+                            continue;
+                        }
+
+                        _lineNumber++;
+                        if (_engine.TryMatch(line, out MatchData match))
+                        {
+                            _tracker.TrackMatch(_factory.Create(line, _path, _lineNumber, in match, _context));
+                        }
+                        else
+                        {
+                            _tracker.TrackLine(line);
+                        }
+
+                        if (_tracker.EmitQueue.Count > 0)
+                        {
+                            Found = true;
+                            // Quiet/List close the handle and finalize context before emission.
+                            if (_stopAfterFirst) { Finish(); }
+                        }
                     }
                 }
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-            if (shouldStop?.Invoke() == true)
-            {
-                return found;
-            }
-
-            tracker.TrackEOF();
-            foreach (T ready in tracker.EmitQueue)
-            {
-                found = true;
-                if (!emit(ready) || stopAfterFirst)
+                catch
                 {
-                    break;
+                    Dispose();
+                    throw;
                 }
             }
 
-            return found;
+            private void Finish()
+            {
+                CloseReader();
+                _finished = true;
+                _cancellation.ThrowIfCancellationRequested();
+                if (_shouldStop?.Invoke() == true)
+                {
+                    _tracker.EmitQueue.Clear();
+                    return;
+                }
+
+                _tracker.TrackEOF();
+            }
+
+            private void CloseReader()
+            {
+                _reader?.Dispose();
+                _reader = null;
+            }
+
+            public void Dispose()
+            {
+                CloseReader();
+                _tracker?.EmitQueue.Clear();
+                _tracker = null;
+                _disposed = true;
+            }
         }
 
         // StreamReader decodes a buffer of bytes before returning a line. Increasing that

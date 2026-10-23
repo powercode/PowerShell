@@ -15,6 +15,156 @@ namespace PSTests.SelectString;
 
 public sealed class SelectStringEngineTests
 {
+    [Fact]
+    public void BatchesPauseScanningAndPublishFirstResultPromptly()
+    {
+        WithFile(path =>
+        {
+            File.WriteAllLines(path, Enumerable.Repeat("hit", 10));
+            using var scan = new SelectStringEngine(new[] { "hit" }).OpenFileScan(path, Encoding.UTF8,
+                maxResults: 3, byteTarget: long.MaxValue);
+            var first = scan.ReadBatch();
+            Assert.Equal(1, first.Count);
+            Assert.Equal(1UL, scan.LinesRead);
+            var next = scan.ReadBatch();
+            Assert.Equal(3, next.Count);
+            Assert.Equal(4UL, scan.LinesRead);
+            Assert.Equal(1UL, first.Results[0].LineNumber);
+            Assert.Equal("hit", first.Results[0].Matches[0].Value);
+            scan.Dispose();
+            using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            Assert.Throws<ObjectDisposedException>(() => scan.ReadBatch());
+        });
+    }
+
+    [Fact]
+    public void ByteTargetDoesNotTruncateOversizedResults()
+    {
+        WithFile(path =>
+        {
+            string huge = "hit" + new string('x', 100000);
+            File.WriteAllLines(path, new[] { "hit", huge, "hit" });
+            using var scan = new SelectStringEngine(new[] { "hit" }).OpenFileScan(path, Encoding.UTF8,
+                maxResults: 32, byteTarget: 1024);
+            Assert.Equal(1, scan.ReadBatch().Count);
+            var batch = scan.ReadBatch();
+            Assert.Equal(1, batch.Count);
+            Assert.Equal(huge, batch.Results[0].Line);
+            Assert.True(batch.EstimatedBytes > 1024);
+            Assert.Equal(2UL, scan.LinesRead);
+            Assert.Equal(3UL, scan.ReadBatch().Results[0].LineNumber);
+            Assert.Null(scan.ReadBatch());
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BatchesPreserveContextCapturesAndBom(bool inverted)
+    {
+        foreach (Encoding encoding in new[] { Encoding.UTF8, Encoding.Unicode, Encoding.BigEndianUnicode, Encoding.UTF32 })
+        {
+            WithFile(path =>
+            {
+                File.WriteAllText(path, "hit café\r\nhit café\rmiss\nhit café\nlast", encoding);
+                var engine = new SelectStringEngine(new[] { "hit (?<word>café)" }, allMatches: true, notMatch: inverted);
+                var expected = new List<SelectStringEngine.Result>();
+                engine.ScanFile(path, Encoding.ASCII, 2, 2, false, item => { expected.Add(item); return true; });
+                using var scan = engine.OpenFileScan(path, Encoding.ASCII, 2, 2, maxResults: 2);
+                var actual = new List<SelectStringEngine.Result>();
+                SelectStringEngine.ScanBatch batch;
+                while ((batch = scan.ReadBatch()) != null)
+                {
+                    actual.AddRange(batch.Results.Take(batch.Count));
+                }
+
+                Assert.Equal(expected.Count, actual.Count);
+                for (int i = 0; i < expected.Count; i++)
+                {
+                    Assert.Equal(expected[i].LineNumber, actual[i].LineNumber);
+                    Assert.Equal(expected[i].Line, actual[i].Line);
+                    Assert.Equal(expected[i].Matches.Select(m => m.Value), actual[i].Matches.Select(m => m.Value));
+                    Assert.Equal(expected[i].Context.PreContext, actual[i].Context.PreContext);
+                    Assert.Equal(expected[i].Context.PostContext, actual[i].Context.PostContext);
+                    Assert.Equal(expected[i].Context.DisplayPreContext, actual[i].Context.DisplayPreContext);
+                    Assert.Equal(expected[i].Context.DisplayPostContext, actual[i].Context.DisplayPostContext);
+                    if (!inverted) { Assert.Equal("café", actual[i].Matches[0].Groups["word"].Value); }
+                }
+            });
+        }
+    }
+
+    [Fact]
+    public void CancellationBetweenBatchesClosesTheReader()
+    {
+        WithFile(path =>
+        {
+            File.WriteAllLines(path, new[] { "hit", "miss", "miss" });
+            using var cancellation = new CancellationTokenSource();
+            using var scan = new SelectStringEngine(new[] { "hit" }).OpenFileScan(path, Encoding.UTF8,
+                cancellationToken: cancellation.Token);
+            Assert.Equal(1, scan.ReadBatch().Count);
+            cancellation.Cancel();
+            Assert.Throws<OperationCanceledException>(() => scan.ReadBatch());
+            using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        });
+    }
+
+    [Fact]
+    public void CancellationDuringNoMatchScanDoesNotRequireOutput()
+    {
+        WithFile(path =>
+        {
+            File.WriteAllLines(path, Enumerable.Repeat("miss", 100));
+            using var cancellation = new CancellationTokenSource();
+            int checks = 0;
+            using var scan = new SelectStringEngine.ScanSession<SelectStringEngine.Result, SelectStringEngine.ResultFactory>(
+                new(new[] { "hit" }), path, Encoding.UTF8, 0, 0, false, default,
+                shouldStop: () =>
+                {
+                    if (++checks == 3) { cancellation.Cancel(); }
+                    return false;
+                }, cancellationToken: cancellation.Token);
+            Assert.Throws<OperationCanceledException>(() => scan.TryRead(out _));
+            Assert.Equal(3UL, scan.LinesRead);
+            using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        });
+    }
+
+    [Fact]
+    public void StopObservedDuringFinalizationSuppressesPendingOutput()
+    {
+        WithFile(path =>
+        {
+            File.WriteAllText(path, "hit");
+            int checks = 0;
+            bool emitted = false;
+            bool found = new SelectStringEngine(new[] { "hit" }).ScanFile(path, Encoding.UTF8, 0, 0, true,
+                _ => { emitted = true; return true; }, shouldStop: () => ++checks == 2);
+            Assert.True(found);
+            Assert.False(emitted);
+        });
+    }
+
+    [Fact]
+    public void PartialBatchPrecedesDecoderFailure()
+    {
+        WithFile(path =>
+        {
+            // Valid matches fit in the first reader block; malformed bytes are later.
+            byte[] valid = Encoding.UTF8.GetBytes("hit\nhit\n" + new string('x', 32768));
+            File.WriteAllBytes(path, valid.Concat(new byte[] { 0xff }).ToArray());
+            using var scan = new SelectStringEngine(new[] { "hit" }).OpenFileScan(path,
+                new UTF8Encoding(false, true));
+            Assert.Equal(1, scan.ReadBatch().Count);
+            var partial = scan.ReadBatch();
+            Assert.Equal(1, partial.Count);
+            Assert.Equal(2UL, partial.Results[0].LineNumber);
+            Assert.Throws<DecoderFallbackException>(() => scan.ReadBatch());
+            using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        });
+    }
+
     [Theory]
     [InlineData(1024)]
     [InlineData(16384)]
