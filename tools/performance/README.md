@@ -41,7 +41,10 @@ wpa.exe -i C:\Traces\candidate-DenseContext.etl -profile $profile
 ```
 
 Use the focused capture in `test/perf/SelectString/New-EtwCapture.ps1`. Filter to
-the benchmark worker PID and the same time interval in all tables. Compare CPU
+the benchmark worker PID (recorded in the JSON) and select the measured-iteration
+regions from `SelectString.Regions.xml`. Warmup and optional counting have separate
+regions; capture runs skip counting by default. Marker boundaries surround the
+measurement bookkeeping as well as the timed call. Compare CPU
 sample weights, GC pauses and JIT activity separately; inclusive stack categories
 are not additive exclusive costs. Tags cover shipping and extracted engine names,
 but inlining or unresolved symbols can hide frames. Verify tag matches against

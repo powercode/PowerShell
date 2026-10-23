@@ -34,6 +34,7 @@
         <EventId Value="10" />
       </EventFilters>
     </EventProvider>
+    <EventProvider Id="BenchmarkPhases" Name="cf52a2f8-c51a-4c1e-9a75-62796b581a55" Level="4" />
     <Profile Id="SelectString.Verbose.File" Name="SelectString"
              Description="CPU stacks and CLR GC, loader and JIT events without allocation ticks"
              LoggingMode="File" DetailLevel="Verbose">
@@ -44,6 +45,7 @@
         <EventCollectorId Value="SelectStringEvents">
           <EventProviders>
             <EventProviderId Value="SelectStringRuntime" />
+            <EventProviderId Value="BenchmarkPhases" />
           </EventProviders>
         </EventCollectorId>
       </Collectors>

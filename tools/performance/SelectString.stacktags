@@ -26,6 +26,10 @@
     <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.MshCommandRuntime.WriteObject*" />
     <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.Internal.Pipe.Add*" />
   </Tag>
+  <Tag Name="Parameter Binding">
+    <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.*ParameterBinder*" />
+    <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.*ParameterBinder*" />
+  </Tag>
   <Tag Name="JIT compiler">
     <Entrypoint Module="clrjit.dll" Method="*" />
   </Tag>
