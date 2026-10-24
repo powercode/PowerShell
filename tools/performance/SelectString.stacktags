@@ -16,6 +16,29 @@
        Inclusive scanning stacks also contain matching, context and output work;
        these categories are not additive measures of exclusive CPU time. -->
   <Tag Name="Scanning">
+    <Tag Name="Demand reading">
+      <Entrypoint Module="*" Method="PSTests.SelectString.DemandScan*ReadFile*" />
+      <Entrypoint Module="*" Method="PSTests.SelectString.DemandScan*ReadChunk*" />
+      <Entrypoint Module="*" Method="PSTests.SelectString.DemandScan*OpenReader*" />
+      <Entrypoint Module="*" Method="PSTests.SelectString.DemandScan*FillChunk*" />
+    </Tag>
+    <Tag Name="Demand matching">
+      <!-- Avoid *Match*: it also matches MatchInfo generic type arguments. -->
+      <Entrypoint Module="*" Method="PSTests.SelectString.DemandScan*MatchChunk*" />
+      <Entrypoint Module="*" Method="PSTests.SelectString.DemandScan*MatchPage*" />
+      <Entrypoint Module="*" Method="PSTests.SelectString.DemandScan*FillPage*" />
+    </Tag>
+    <Tag Name="Demand ordered output">
+      <Entrypoint Module="*" Method="PSTests.SelectString.DemandScan*Consume*" />
+      <Entrypoint Module="*" Method="PSTests.SelectString.DemandScan*CompletePage*" />
+      <Entrypoint Module="*" Method="PSTests.SelectString.DemandScan*Drain*" />
+      <Entrypoint Module="*" Method="PSTests.SelectString.DemandScan*ReleasePage*" />
+    </Tag>
+    <!-- Sampled stacks show CPU spent entering/leaving these waits, not blocked
+         duration. Use the separate DemandDiagnostics pass for wait durations. -->
+    <Tag Name="Demand event handoff">
+      <Entrypoint Module="*" Method="PSTests.SelectString.DemandScan*Wait*" />
+    </Tag>
     <Tag Name="Line scanning">
       <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringEngine*ScanSession*TryRead*" />
     </Tag>
@@ -72,6 +95,16 @@
   <Tag Name="Parameter Binding">
     <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.*ParameterBinder*" />
     <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.*ParameterBinder*" />
+  </Tag>
+  <!-- Include PowerShell's reporting preparation and native provider work even
+       when provider symbols are unavailable. Module-wide provider matches can
+       include other activity; inspect callers before attributing it to AMSI. -->
+  <Tag Name="AMSI">
+    <Entrypoint Module="*" Method="System.Management.Automation.AmsiUtils*" />
+    <Entrypoint Module="*" Method="System.Management.Automation.MemberInvocationLoggingOps.LogMemberInvocation*" />
+    <Entrypoint Module="amsi.dll" Method="*" />
+    <Entrypoint Module="MpOAV.dll" Method="*" />
+    <Entrypoint Module="MpClient.dll" Method="*" />
   </Tag>
   <Tag Name="JIT compiler">
     <Entrypoint Module="clrjit.dll" Method="*" />
