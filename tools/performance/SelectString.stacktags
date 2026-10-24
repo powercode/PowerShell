@@ -10,9 +10,52 @@
   <Tag Name="Context">
     <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectString*ContextTracker*" />
   </Tag>
+  <!-- Keep the scanner loop distinct from batch assembly and ordered draining.
+       Nested/generic type and generated async state-machine names vary with the
+       runtime, so use wildcards between the owning type and method names.
+       Inclusive scanning stacks also contain matching, context and output work;
+       these categories are not additive measures of exclusive CPU time. -->
+  <Tag Name="Scanning">
+    <Tag Name="Line scanning">
+      <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringEngine*ScanSession*TryRead*" />
+    </Tag>
+    <Tag Name="Batch assembly">
+      <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringEngine*FileScanSession*ReadBatch*" />
+      <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectString*Factory*EstimateBytes*" />
+      <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringEngine*FileScanSession*EstimateBytes*" />
+      <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringEngine*EstimateContext*" />
+    </Tag>
+    <Tag Name="Worker execution">
+      <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringEngine*FileScanWorker*ScanFileAsync*" />
+    </Tag>
+    <Tag Name="Ordered draining">
+      <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringEngine.ScanFiles*" />
+      <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringCommand.ProcessFilesConcurrently*" />
+    </Tag>
+  </Tag>
+  <!-- Channel methods identify handoff/capacity work across async continuations.
+       This provider-wide tag can include other channel users in the process.
+       Sampled CPU does not measure time spent suspended awaiting capacity. -->
+  <Tag Name="Channel handoff">
+    <Entrypoint Module="System.Threading.Channels.dll" Method="System.Threading.Channels.*" />
+  </Tag>
+  <!-- ThreadPool capacity waits and synchronous consumer waits can burn CPU in
+       SpinWait even with only two active scanners. These are process-wide tags;
+       inspect callers before attributing them to this engine. -->
+  <Tag Name="ThreadPool waiting">
+    <Entrypoint Module="System.Private.CoreLib.dll" Method="System.Threading.LowLevelLifoSemaphore.*" />
+  </Tag>
+  <Tag Name="Synchronous task waiting">
+    <Entrypoint Module="System.Private.CoreLib.dll" Method="System.Threading.Tasks.Task.SpinThenBlockingWait*" />
+    <Entrypoint Module="System.Private.CoreLib.dll" Method="System.Threading.Tasks.Task.InternalWaitCore*" />
+  </Tag>
+  <Tag Name="Native spinning">
+    <Entrypoint Module="coreclr.dll" Method="ThreadNative_SpinWait*" />
+  </Tag>
   <Tag Name="Result construction">
     <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectString*Factory*Create*" />
     <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringCommand.ToMatchInfo*" />
+    <Entrypoint Module="*" Method="Microsoft.PowerShell.Commands.SelectStringEngine.MaterializeMatches*" />
   </Tag>
   <Tag Name="Regex">
     <Entrypoint Module="System.Text.RegularExpressions.dll" Method="System.Text.RegularExpressions.*" />

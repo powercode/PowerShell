@@ -204,4 +204,48 @@ function Compare-BenchmarkResult
     }
 }
 
-Export-ModuleMember -Function 'Start-Benchmarking', 'Compare-BenchmarkResult'
+function Start-WindowsPerformanceAnalyzer{
+    <#
+    .SYNOPSIS
+    Start the Windows Performance Analyzer.
+    .DESCRIPTION
+    This function starts the Windows Performance Analyzer with the specified trace files and WPA profiles.
+    #>
+    [CmdletBinding(DefaultParameterSetName = 'LiteralPath')]
+    param(
+        [Alias('PSPath')]
+        [Parameter(Mandatory, ValueFromPipelineByPropertyName, ParameterSetName = 'LiteralPath')]
+        # Literal paths to etl-trace files to analyze with Windows Performance Analyzer.
+        [string[]]$LiteralPath,
+
+        [Parameter(Mandatory, ValueFromPipelineByPropertyName, ParameterSetName = 'Path')]
+        # Paths to etl-trace files to analyze with Windows Performance Analyzer.
+        [string[]] $Path
+        ,
+        [ArgumentCompleter({
+            Get-ChildItem -Path $PSScriptRoot/../../tools/performance/*.wpaprofile | foreach-object{
+                [System.Management.Automation.CompletionResult]::new($_.FullName, $_.Name, 'ParameterValue', $_.FullName)
+            }
+        })]
+        # The WPA profile(s) to use with Windows Performance Analyzer. Defaults to the PowerShell profile.
+        [string[]] $WpaProfile = "$PSScriptRoot/../../tools/performance/PowerShell.wpaProfile"
+    )
+
+    process {
+        $resolvedPaths = if ($PSCmdlet.ParameterSetName -eq 'LiteralPath') {
+            # Handle LiteralPath
+            Resolve-Path -LiteralPath:$LiteralPath
+        } elseif ($PSCmdlet.ParameterSetName -eq 'Path') {
+            # Handle Path
+            Resolve-Path -Path:$Path
+        }
+        $profiles = $WpaProfile | ForEach-Object { "-profile", $_ }
+        foreach($resolvedPath in $resolvedPaths){
+            $etlPath = $resolvedPath.ProviderPath
+            Write-Debug "wpa.exe $profiles -i $etlPath"
+            wpa.exe $profiles -i $etlPath
+        }
+    }
+}
+
+Export-ModuleMember -Function Start-Benchmarking, Compare-BenchmarkResult, Start-WindowsPerformanceAnalyzer
