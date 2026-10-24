@@ -6,6 +6,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -95,31 +96,75 @@ namespace Microsoft.PowerShell.Commands
         // Strings and regex matches own their storage. No result borrows reader buffers.
         internal sealed class Result
         {
-            internal string Line { get; set; }
+            internal string Line { get; init; }
 
-            internal ulong LineNumber { get; set; }
+            internal ulong LineNumber { get; init; }
 
-            internal string Path { get; set; }
+            internal string Path { get; init; }
 
-            internal int PatternIndex { get; set; }
+            internal int PatternIndex { get; init; }
 
-            internal int SimpleMatchIndex { get; set; } = -1;
+            internal int SimpleMatchIndex { get; init; } = -1;
 
-            internal Match[] Matches { get; set; } = [];
+            private object _matches = Array.Empty<Match>();
 
-            internal ResultContext Context { get; set; }
+            internal Match SingleMatch
+            {
+                get => _matches as Match;
+                init { if (value is not null) { _matches = value; } }
+            }
+
+            internal Match[] MatchArray => _matches as Match[];
+
+            internal int MatchCount => _matches switch { Match[] array => array.Length, Match => 1, _ => 0 };
+
+            internal Match[] Matches
+            {
+                get => MaterializeMatches(ref _matches);
+                init => _matches = value ?? [];
+            }
+
+            internal ResultContext Context { get; init; }
         }
 
         /// <summary>
         /// Matching metadata only. Text ownership and output representation belong to the caller.
         /// </summary>
-        internal readonly struct MatchData(int patternIndex, int simpleMatchIndex, Match[] matches)
+        internal readonly struct MatchData(int patternIndex, int simpleMatchIndex, Match[] matches, Match singleMatch = null)
         {
             internal int PatternIndex { get; } = patternIndex;
 
             internal int SimpleMatchIndex { get; } = simpleMatchIndex;
 
-            internal Match[] Matches { get; } = matches;
+            private readonly object _matches = (object)matches ?? singleMatch;
+
+            internal Match[] MatchArray => _matches as Match[];
+
+            internal Match SingleMatch => _matches as Match;
+
+            // Metadata stays allocation-free; factories transfer these fields to
+            // the owning result, which caches the public array on first access.
+            internal Match[] Matches => MatchArray ?? (SingleMatch is null ? [] : [SingleMatch]);
+        }
+
+        // One field holds either a single Match or the public array. Readers share
+        // the published array; a concurrent replacement must not be overwritten.
+        internal static Match[] MaterializeMatches(ref object storage)
+        {
+            while (true)
+            {
+                object current = Volatile.Read(ref storage);
+                if (current is not Match single)
+                {
+                    return (Match[])current;
+                }
+
+                Match[] array = [single];
+                if (ReferenceEquals(Interlocked.CompareExchange(ref storage, array, current), current))
+                {
+                    return array;
+                }
+            }
         }
 
         /// <summary>
@@ -154,7 +199,8 @@ namespace Microsoft.PowerShell.Commands
                 LineNumber = lineNumber,
                 PatternIndex = match.PatternIndex,
                 SimpleMatchIndex = match.SimpleMatchIndex,
-                Matches = match.Matches,
+                Matches = match.MatchArray,
+                SingleMatch = match.SingleMatch,
                 Context = context ? new ResultContext() : null,
             };
 
@@ -182,6 +228,7 @@ namespace Microsoft.PowerShell.Commands
             int patternIndex = 0;
             int simpleIndex = -1;
             Match[] matches = null;
+            Match singleMatch = null;
             for (; patternIndex < _patterns.Length; patternIndex++)
             {
                 if (_regexes == null)
@@ -189,24 +236,15 @@ namespace Microsoft.PowerShell.Commands
                     simpleIndex = _compareInfo.IndexOf(line, _patterns[patternIndex], 0, line.Length, _compareOptions);
                     matched = simpleIndex >= 0;
                 }
-                else if (_allMatches && !_notMatch)
+                else if (_notMatch)
                 {
-                    MatchCollection collection = _regexes[patternIndex].Matches(line);
-                    matched = collection.Count > 0;
-                    if (matched)
-                    {
-                        matches = new Match[collection.Count];
-                        ((ICollection)collection).CopyTo(matches, 0);
-                    }
+                    // Matching lines are discarded by inversion below. Only test
+                    // existence: neither captures nor their output array can escape.
+                    matched = _regexes[patternIndex].IsMatch(line);
                 }
                 else
                 {
-                    Match match = _regexes[patternIndex].Match(line);
-                    matched = match.Success;
-                    if (matched)
-                    {
-                        matches = [match];
-                    }
+                    matched = TryMatchRegex(_regexes[patternIndex], line, out singleMatch, out matches);
                 }
 
                 if (matched)
@@ -226,8 +264,32 @@ namespace Microsoft.PowerShell.Commands
                 return false;
             }
 
-            result = new MatchData(patternIndex, simpleIndex, matches ?? []);
+            result = new MatchData(patternIndex, simpleIndex, matches, singleMatch);
             return true;
+        }
+
+        // Keep regex result construction separate from first-pattern selection and
+        // NotMatch inversion. A single match needs no array until a consumer asks.
+        // Request inlining because this helper is reached for every attempted pattern
+        // on every line; the extraction should not add a call to that hot path.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool TryMatchRegex(Regex regex, string line, out Match singleMatch, out Match[] matches)
+        {
+            singleMatch = null;
+            matches = null;
+            if (_allMatches)
+            {
+                MatchCollection collection = regex.Matches(line);
+                int count = collection.Count;
+                if (count == 0) { return false; }
+                matches = new Match[count];
+                ((ICollection)collection).CopyTo(matches, 0);
+                return true;
+            }
+
+            Match match = regex.Match(line);
+            singleMatch = match.Success ? match : null;
+            return match.Success;
         }
 
         internal static IContextTracker<T> CreateContextTracker<T, TFactory>(int preContext, int postContext, TFactory factory)
@@ -504,7 +566,7 @@ namespace Microsoft.PowerShell.Commands
             {
                 // Avoid accessing Match.Groups/Captures here: doing so can allocate.
                 // Count referenced text conservatively, even if context strings overlap.
-                long bytes = 128L + result.Line.Length * 2L + result.Matches.Length * 128L;
+                long bytes = 128L + result.Line.Length * 2L + result.MatchCount * 128L;
                 if (result.Context is { } context)
                 {
                     bytes += EstimateContext(context.PreContext) + EstimateContext(context.PostContext)

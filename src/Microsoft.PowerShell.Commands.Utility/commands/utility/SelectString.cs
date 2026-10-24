@@ -97,15 +97,24 @@ namespace Microsoft.PowerShell.Commands
         /// <value>Whether the matched portion of the string is highlighted with the negative VT sequence.</value>
         private readonly bool _emphasize;
 
-        /// <summary>
-        /// Stores the starting index of each match within the line.
-        /// </summary>
-        private readonly IReadOnlyList<int> _matchIndexes;
+        // A regex Match needs no new storage. Literal hits use a boxed range;
+        // multiple hits/public callers retain their supplied index/length lists.
+        // Keep this independent of Matches so replacing its array cannot change
+        // the emphasis snapshot, while public constructor lists remain live.
+        private readonly object _emphasis;
 
-        /// <summary>
-        /// Stores the length of each match within the line.
-        /// </summary>
-        private readonly IReadOnlyList<int> _matchLengths;
+        // Capture emphasis independently of the mutable public Matches array.
+        internal MatchInfo(int index, int length)
+        {
+            _emphasize = true;
+            _emphasis = (index, length);
+        }
+
+        internal MatchInfo(Match match)
+        {
+            _emphasize = true;
+            _emphasis = match;
+        }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="MatchInfo"/> class with emphasis disabled.
@@ -124,8 +133,7 @@ namespace Microsoft.PowerShell.Commands
         public MatchInfo(IReadOnlyList<int> matchIndexes, IReadOnlyList<int> matchLengths)
         {
             this._emphasize = true;
-            this._matchIndexes = matchIndexes;
-            this._matchLengths = matchLengths;
+            this._emphasis = (matchIndexes, matchLengths);
         }
 
         /// <summary>
@@ -321,24 +329,45 @@ namespace Microsoft.PowerShell.Commands
             string invertColorsVT100 = PSStyle.Instance.Reverse;
             string resetVT100 = PSStyle.Instance.Reset;
 
-            char[] chars = new char[(_matchIndexes.Count * (invertColorsVT100.Length + resetVT100.Length)) + Line.Length];
+            IReadOnlyList<int> indexes = null;
+            IReadOnlyList<int> lengths = null;
+            int singleIndex = 0;
+            int singleLength = 0;
+            int count = 1;
+            switch (_emphasis)
+            {
+                case Match match:
+                    singleIndex = match.Index;
+                    singleLength = match.Length;
+                    break;
+                case ValueTuple<int, int> range:
+                    (singleIndex, singleLength) = range;
+                    break;
+                case ValueTuple<IReadOnlyList<int>, IReadOnlyList<int>> lists:
+                    (indexes, lengths) = lists;
+                    count = indexes.Count;
+                    break;
+            }
+            char[] chars = new char[(count * (invertColorsVT100.Length + resetVT100.Length)) + Line.Length];
             int lineIndex = 0;
             int charsIndex = 0;
-            for (int i = 0; i < _matchIndexes.Count; i++)
+            for (int i = 0; i < count; i++)
             {
+                int index = indexes is null ? singleIndex : indexes[i];
+                int length = lengths is null ? singleLength : lengths[i];
                 // Adds characters before match
-                Line.CopyTo(lineIndex, chars, charsIndex, _matchIndexes[i] - lineIndex);
-                charsIndex += _matchIndexes[i] - lineIndex;
-                lineIndex = _matchIndexes[i];
+                Line.CopyTo(lineIndex, chars, charsIndex, index - lineIndex);
+                charsIndex += index - lineIndex;
+                lineIndex = index;
 
                 // Adds opening vt sequence
                 invertColorsVT100.CopyTo(0, chars, charsIndex, invertColorsVT100.Length);
                 charsIndex += invertColorsVT100.Length;
 
                 // Adds characters being emphasized
-                Line.CopyTo(lineIndex, chars, charsIndex, _matchLengths[i]);
-                lineIndex += _matchLengths[i];
-                charsIndex += _matchLengths[i];
+                Line.CopyTo(lineIndex, chars, charsIndex, length);
+                lineIndex += length;
+                charsIndex += length;
 
                 // Adds closing vt sequence
                 resetVT100.CopyTo(0, chars, charsIndex, resetVT100.Length);
@@ -369,7 +398,18 @@ namespace Microsoft.PowerShell.Commands
         /// <summary>
         /// Gets or sets a list of all Regex matches on the matching line.
         /// </summary>
-        public Match[] Matches { get; set; } = Array.Empty<Match>();
+        public Match[] Matches
+        {
+            get => SelectStringEngine.MaterializeMatches(ref _matches);
+            set => Volatile.Write(ref _matches, value);
+        }
+
+        private object _matches = Array.Empty<Match>();
+
+        internal void SetMatches(Match singleMatch, Match[] matches)
+        {
+            _matches = (object)matches ?? (object)singleMatch ?? Array.Empty<Match>();
+        }
 
         /// <summary>
         /// Create a deep copy of this MatchInfo instance.
@@ -388,7 +428,11 @@ namespace Microsoft.PowerShell.Commands
 
             // Regex match objects are immutable, so we can get away
             // with just copying the array.
-            clone.Matches = (Match[])clone.Matches.Clone();
+            // An unmaterialized single match can remain lazy in both copies.
+            if (clone._matches is Match[] matches)
+            {
+                clone._matches = matches.Clone();
+            }
 
             return clone;
         }
@@ -1030,7 +1074,7 @@ namespace Microsoft.PowerShell.Commands
                 _engine.ScanFiles(included, Encoding, result =>
                 {
                     if (Stopping) { return false; }
-                    var data = new SelectStringEngine.MatchData(result.PatternIndex, result.SimpleMatchIndex, result.Matches);
+                    var data = new SelectStringEngine.MatchData(result.PatternIndex, result.SimpleMatchIndex, result.MatchArray, result.SingleMatch);
                     MatchInfo output = factory.Create(result.Line, result.Path, result.LineNumber, in data, result.Context != null);
                     if (result.Context is { } context)
                     {
@@ -1149,22 +1193,22 @@ namespace Microsoft.PowerShell.Commands
             public MatchInfo Create(string line, string path, ulong lineNumber, in SelectStringEngine.MatchData data, bool context)
             {
                 MatchInfo result;
-                if (_emphasize)
+                if (_emphasize && data.SimpleMatchIndex >= 0)
+                {
+                    result = new MatchInfo(data.SimpleMatchIndex, command.Pattern[data.PatternIndex].Length);
+                }
+                else if (_emphasize && data.SingleMatch is Match single)
+                {
+                    result = new MatchInfo(single);
+                }
+                else if (_emphasize)
                 {
                     List<int> indexes = new();
                     List<int> lengths = new();
-                    if (data.SimpleMatchIndex >= 0)
+                    foreach (Match match in data.MatchArray ?? Array.Empty<Match>())
                     {
-                        indexes.Add(data.SimpleMatchIndex);
-                        lengths.Add(command.Pattern[data.PatternIndex].Length);
-                    }
-                    else
-                    {
-                        foreach (Match match in data.Matches)
-                        {
-                            indexes.Add(match.Index);
-                            lengths.Add(match.Length);
-                        }
+                        indexes.Add(match.Index);
+                        lengths.Add(match.Length);
                     }
 
                     result = new MatchInfo(indexes, lengths);
@@ -1178,7 +1222,7 @@ namespace Microsoft.PowerShell.Commands
                 result.Line = line;
                 result.LineNumber = lineNumber;
                 result.Pattern = command.Pattern[data.PatternIndex];
-                result.Matches = data.Matches;
+                result.SetMatches(data.SingleMatch, data.MatchArray);
                 if (path != null)
                 {
                     result.Path = path;

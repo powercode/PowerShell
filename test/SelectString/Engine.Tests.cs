@@ -16,6 +16,35 @@ namespace PSTests.SelectString;
 
 public sealed class SelectStringEngineTests
 {
+    [Fact]
+    public void SingleMatchArrayIsDeferredThroughBatchAccounting()
+    {
+        WithFile(path =>
+        {
+            File.WriteAllText(path, "hit café\nhit fin");
+            var engine = new SelectStringEngine([@"hit (?<word>\w+)"]);
+            var results = new List<SelectStringEngine.Result>();
+            engine.ScanFiles([path, path], Encoding.UTF8, result =>
+            {
+                results.Add(result);
+                return true;
+            }, (_, error) => throw error);
+            foreach (var result in results)
+            {
+                Assert.Null(result.MatchArray);
+                Assert.Equal(1, result.MatchCount);
+                Assert.Null(result.MatchArray);
+                var single = result.SingleMatch;
+                Assert.NotNull(single);
+                var matches = result.Matches;
+                Assert.Same(matches, result.Matches);
+                Assert.Same(single, Assert.Single(matches));
+            }
+
+            Assert.Equal("café", results[0].Matches[0].Groups["word"].Value);
+        });
+    }
+
     [Theory]
     [InlineData(false, 1)]
     [InlineData(true, 1)]
@@ -471,11 +500,19 @@ public sealed class SelectStringEngineTests
         }
     }
 
-    [Fact]
-    public void NotMatchRequiresAllPatternsToFail()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void NotMatchRequiresAllPatternsToFail(bool allMatches, bool compiled)
     {
-        var engine = new SelectStringEngine(["a", "b"], allMatches: true, notMatch: true);
-        Assert.False(engine.TryMatch("b", out _));
+        var engine = new SelectStringEngine(["a", @"(?<letter>b)\k<letter>"],
+            allMatches: allMatches, notMatch: true, compiledRegex: compiled);
+        Assert.False(engine.TryMatch("a", out _));
+        Assert.False(engine.TryMatch("bb bb", out _));
+        Assert.True(engine.TryMatch("b", out var single));
+        Assert.Empty(single.Matches);
         Assert.True(engine.TryMatch("c", out var result));
         Assert.Equal(0, result.PatternIndex);
         Assert.Empty(result.Matches);

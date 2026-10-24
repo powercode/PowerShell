@@ -14,6 +14,82 @@ Describe "Select-String" -Tags "CI" {
         Push-Location $currentDirectory
     }
 
+    Context "Match ownership" {
+        It "Defers the matches array through formatting" {
+            $result = 'before hit after' | Select-String 'hit'
+            $field = $result.GetType().GetField('_matches', [Reflection.BindingFlags] 'Instance,NonPublic')
+            $field.GetValue($result) | Should -BeOfType System.Text.RegularExpressions.Match
+            $null = $result.ToEmphasizedString('')
+            $field.GetValue($result) | Should -BeOfType System.Text.RegularExpressions.Match
+            $null = $result.Matches
+            ,$field.GetValue($result) | Should -BeOfType System.Array
+        }
+
+        It "Caches the matches array and honors replacement and null assignments" {
+            $result = 'hit café' | Select-String 'hit (?<word>\w+)'
+            $matches = $result.Matches
+            [object]::ReferenceEquals($matches, $result.Matches) | Should -BeTrue
+            $matches[0].Groups['word'].Value | Should -BeExactly 'café'
+            $replacement = [regex]::Matches('other', 'other') | ForEach-Object { $_ }
+            $replacement = [System.Text.RegularExpressions.Match[]] @($replacement)
+            $result.Matches = $replacement
+            [object]::ReferenceEquals($replacement, $result.Matches) | Should -BeTrue
+            $result.Matches = $null
+            ($null -eq $result.Matches) | Should -BeTrue
+        }
+
+        It "Clones context results without sharing mutable matches arrays" {
+            $original = 'hit café' | Select-String 'hit (?<word>\w+)' -Context 1
+            $copy = $original | Select-String 'hit'
+            [object]::ReferenceEquals($original, $copy) | Should -BeFalse
+            [object]::ReferenceEquals($original.Matches, $copy.Matches) | Should -BeFalse
+            $copy.Matches[0] = [regex]::Match('other', 'other')
+            $original.Matches[0].Groups['word'].Value | Should -BeExactly 'café'
+        }
+
+        It "Preserves emphasis after replacing the public matches array" {
+            $result = 'before hit after' | Select-String 'hit'
+            $before = $result.ToEmphasizedString('')
+            $result.Matches = @()
+            $result.ToEmphasizedString('') | Should -BeExactly $before
+        }
+
+        It "Preserves the public emphasis constructor's live lists" {
+            $indexes = [System.Collections.Generic.List[int]]::new()
+            $lengths = [System.Collections.Generic.List[int]]::new()
+            $indexes.Add(0)
+            $lengths.Add(1)
+            $result = [Microsoft.PowerShell.Commands.MatchInfo]::new($indexes, $lengths)
+            $result.Line = 'ab'
+            $result.ToEmphasizedString('') | Should -BeExactly "$($PSStyle.Reverse)a$($PSStyle.Reset)b"
+            $indexes[0] = 1
+            $result.ToEmphasizedString('') | Should -BeExactly "a$($PSStyle.Reverse)b$($PSStyle.Reset)"
+        }
+
+        It "Formats compact <kind> emphasis without accessing Matches" -TestCases @(
+            @{ kind = 'regex' }
+            @{ kind = 'literal' }
+        ) {
+            param($kind)
+            $types = $kind -eq 'regex' ? [type[]] @([System.Text.RegularExpressions.Match]) : [type[]] @([int], [int])
+            $arguments = $kind -eq 'regex' ? [object[]] @([regex]::Match('before hit after', 'hit')) : [object[]] @(7, 3)
+            $constructor = [Microsoft.PowerShell.Commands.MatchInfo].GetConstructor(
+                [Reflection.BindingFlags] 'Instance,NonPublic', $null, $types, $null)
+            $result = $constructor.Invoke($arguments)
+            $result.Line = 'before hit after'
+            $result.Matches = $null
+            $result.ToEmphasizedString('') | Should -BeExactly "before $($PSStyle.Reverse)hit$($PSStyle.Reset) after"
+        }
+
+        It "Serializes single-match captures on demand" {
+            $result = 'hit café' | Select-String 'hit (?<word>\w+)'
+            $xml = [System.Management.Automation.PSSerializer]::Serialize($result, 5)
+            $copy = [System.Management.Automation.PSSerializer]::Deserialize($xml)
+            $copy.Matches.Count | Should -Be 1
+            $copy.Matches[0].Value | Should -BeExactly 'hit café'
+        }
+    }
+
     Context "String actions" {
         BeforeAll {
             $testinputone = "hello","Hello","goodbye"
