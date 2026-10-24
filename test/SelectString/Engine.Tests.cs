@@ -17,15 +17,20 @@ namespace PSTests.SelectString;
 public sealed class SelectStringEngineTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void SlowFirstFileAndConsumerBoundReadAheadAndAdmission(bool stopEarly)
+    [InlineData(false, 1)]
+    [InlineData(true, 1)]
+    [InlineData(false, 128)]
+    [InlineData(true, 128)]
+    [InlineData(false, 512)]
+    [InlineData(true, 512)]
+    public void SlowFirstFileAndConsumerBoundReadAheadAndAdmission(bool stopEarly, int batchSize)
     {
         WithFile(first => WithFile(second => WithFile(third =>
         {
+            int lineCount = batchSize * 5 + 20;
             foreach (string path in new[] { first, second, third })
             {
-                File.WriteAllLines(path, Enumerable.Repeat("hit", 20));
+                File.WriteAllLines(path, Enumerable.Repeat("hit", lineCount));
             }
 
             using var laterFull = new ManualResetEventSlim();
@@ -42,7 +47,7 @@ public sealed class SelectStringEngineTests
             {
                 waits[path] = lines;
                 if (path == second) { laterFull.Set(); }
-                if (path == first && lines == 3) { firstFull.Set(); }
+                if (path == first && lines == 1UL + 2UL * (ulong)batchSize) { firstFull.Set(); }
             });
             var output = new List<string>();
             new SelectStringEngine(new[] { "hit" }).ScanFiles(new[] { first, second, third }, Encoding.UTF8,
@@ -52,23 +57,24 @@ public sealed class SelectStringEngineTests
                     if (output.Count == 1)
                     {
                         // With one result held by this consumer, the first worker may
-                        // scan two more. The later worker has no consumer yet: only two.
+                        // scan two batches more. The later worker has no consumer yet:
+                        // its first one-result batch and one full batch fill its queue.
                         Assert.True(firstFull.Wait(TimeSpan.FromSeconds(10)));
-                        Assert.Equal(3UL, waits[first]);
-                        Assert.Equal(2UL, waits[second]);
+                        Assert.Equal(1UL + 2UL * (ulong)batchSize, waits[first]);
+                        Assert.Equal(1UL + (ulong)batchSize, waits[second]);
                         Assert.False(started.ContainsKey(third));
                         Assert.Equal(first, result.Path);
                     }
 
                     return !stopEarly;
                 }, (_, error) => throw error, concurrency: 2, queuedBatches: 2,
-                maxResults: 1, observer: observer);
+                maxResults: batchSize, byteTarget: batchSize * 1024L, observer: observer);
 
             if (stopEarly) { Assert.Single(output); }
             else
             {
-                Assert.Equal(Enumerable.Repeat(first, 20).Concat(Enumerable.Repeat(second, 20))
-                    .Concat(Enumerable.Repeat(third, 20)), output);
+                Assert.Equal(Enumerable.Repeat(first, lineCount).Concat(Enumerable.Repeat(second, lineCount))
+                    .Concat(Enumerable.Repeat(third, lineCount)), output);
             }
 
             foreach (string path in new[] { first, second, third })

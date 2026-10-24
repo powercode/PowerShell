@@ -617,6 +617,9 @@ use the ordinary undelayed consumer, so first-result latency does not describe
 the delayed sink. Leave affinity unrestricted when testing multi-core scaling.
 The first ordered-parallel comparison is recorded in
 [RESULTS-parallel-files.md](RESULTS-parallel-files.md).
+The bounded batch-size follow-up is in
+[RESULTS-parallel-batches.md](RESULTS-parallel-batches.md); it retains the smaller
+default because larger batches did not establish a repeatable wall-time win.
 
 ```powershell
 ./test/perf/SelectString/Measure-SelectString.ps1 `
