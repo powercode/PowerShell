@@ -225,7 +225,7 @@ namespace System.Management.Automation
         ///     place and that any validation metadata has been satisfied.
         /// </param>
         /// <param name="parameterMetadata"></param>
-        internal abstract void BindParameter(string name, object value, CompiledCommandParameter parameterMetadata);
+        internal abstract void StoreParameterValue(string name, object value, CompiledCommandParameter parameterMetadata);
 
         private void ValidatePSTypeName(
             CommandParameterInternal parameter,
@@ -260,8 +260,8 @@ namespace System.Management.Automation
 
         /// <summary>
         /// Does all the type coercion, data generation, and validation necessary to bind the
-        /// parameter, then calls the protected BindParameter method to have
-        /// the derived class do the actual binding.
+        /// parameter, then calls the protected <see cref="StoreParameterValue(string, object, CompiledCommandParameter)"/>
+        /// method to have the derived class do the actual binding.
         /// </summary>
         /// <param name="parameter">
         /// The parameter to be bound.
@@ -278,11 +278,12 @@ namespace System.Management.Automation
         /// </returns>
         /// <remarks>
         /// The binding algorithm goes as follows:
-        /// 1. The data generation attributes are run
-        /// 2. The data is coerced into the correct type
-        /// 3. The data if validated using the validation attributes
-        /// 4. The data is encoded into the bindable object using the
-        ///    protected BindParameter method.
+        /// <list type="number">
+        /// <item><description>The data generation attributes are run.</description></item>
+        /// <item><description>The data is coerced into the correct type.</description></item>
+        /// <item><description>The data is validated using the validation attributes.</description></item>
+        /// <item><description>The data is encoded into the bindable object using the protected <see cref="StoreParameterValue(string, object, CompiledCommandParameter)"/> method.</description></item>
+        /// </list>
         /// </remarks>
         /// <exception cref="ArgumentNullException">
         /// If <paramref name="parameter"/> or <paramref name="parameterMetadata"/> is null.
@@ -296,7 +297,7 @@ namespace System.Management.Automation
         /// or
         /// If the binding to the parameter fails.
         /// </exception>
-        internal virtual bool BindParameter(
+        internal virtual bool CoerceValidateAndBind(
             CommandParameterInternal parameter,
             CompiledCommandParameter parameterMetadata,
             ParameterBindingFlags flags)
@@ -365,9 +366,7 @@ namespace System.Management.Automation
                 {
                     try
                     {
-                        ArgumentTypeConverterAttribute argumentTypeConverter = dma as ArgumentTypeConverterAttribute;
-
-                        if (argumentTypeConverter != null)
+                        if (dma is ArgumentTypeConverterAttribute argumentTypeConverter)
                         {
                             if (coerceTypeIfNeeded)
                             {
@@ -546,7 +545,7 @@ namespace System.Management.Automation
 
             try
             {
-                BindParameter(parameter.ParameterName, parameterValue, parameterMetadata);
+                StoreParameterValue(parameter.ParameterName, parameterValue, parameterMetadata);
             }
             catch (SetValueException setValueException)
             {
@@ -682,10 +681,13 @@ namespace System.Management.Automation
             {
                 // Since the parameter is of type string, verify that either the argument
                 // is not null and not empty or that the parameter can accept null or empty.
-                string stringParamValue = parameterValue as string;
-                Diagnostics.Assert(
-                    stringParamValue != null,
-                    "Type coercion should have already converted the argument value to a string");
+                if (parameterValue is not string stringParamValue)
+                {
+                    Diagnostics.Assert(
+                        false,
+                        "Type coercion should have already converted the argument value to a string");
+                    return;
+                }
 
                 if (stringParamValue.Length == 0 && !parameterMetadata.AllowsEmptyStringArgument)
                 {
@@ -808,8 +810,7 @@ namespace System.Management.Automation
                 return true;
             }
 
-            var psobj = parameterValue as PSObject;
-            if (psobj != null && !psobj.ImmediateBaseObjectIsEmpty)
+            if (parameterValue is PSObject psobj && !psobj.ImmediateBaseObjectIsEmpty)
             {
                 // See if the base object is of the same type or
                 // as subclass of the parameter
@@ -1021,7 +1022,6 @@ namespace System.Management.Automation
                         return FinalizeResult(result);
                     }
 
-                    // NTRAID#Windows OS Bugs-1064175-2004/02/28-JeffJon
                     // If we have an PSObject with null base and we are trying to
                     // convert to a string, then we need to use null instead of
                     // calling LanguagePrimitives.ConvertTo as that will return
@@ -1041,7 +1041,6 @@ namespace System.Management.Automation
                         }
                     }
 
-                    // NTRAID#Windows OS Bugs -<bug id here> - Nana
                     // If we have a boolean, we have to ensure that it can
                     // only take parameters of type boolean or numbers with
                     // 0 indicating false and everything else indicating true
@@ -1053,7 +1052,6 @@ namespace System.Management.Automation
                         return FinalizeResult(result);
                     }
 
-                    // NTRAID#Windows OS Bugs-1009284-2004/05/05-JeffJon
                     // Need to handle other collection types here as well
 
                     // Before attempting to encode a collection, we check if we can convert the argument directly via
@@ -1159,16 +1157,9 @@ namespace System.Management.Automation
 
         private static bool IsNullParameterValue(object currentValue)
         {
-            bool result = false;
-
-            if (currentValue == null ||
-                currentValue == AutomationNull.Value ||
-                currentValue == UnboundParameter.Value)
-            {
-                result = true;
-            }
-
-            return result;
+            return currentValue == null ||
+                   currentValue == AutomationNull.Value ||
+                   currentValue == UnboundParameter.Value;
         }
 
         private object HandleNullParameterForSpecialTypes(
@@ -1471,13 +1462,10 @@ namespace System.Management.Automation
                 return result;
             }
 
-            if (!coercionRequired)
-            {
-                result = createdCollection.collection;
+            result = createdCollection.collection;
 
-                // Set the converted result object untrusted if necessary
-                ExecutionContext.PropagateInputSource(originalValue, result, Context.LanguageMode);
-            }
+            // Set the converted result object untrusted if necessary
+            ExecutionContext.PropagateInputSource(originalValue, result, Context.LanguageMode);
 
             return result;
         }
@@ -1535,7 +1523,6 @@ namespace System.Management.Automation
 
                 // Create an instance of the parameter type
 
-                // NTRAID#Windows Out Of Band Releases-906820-2005/09/01
                 // This code previously used the ctor(int) ctor form.
                 // System.Collections.ObjectModel.Collection<T> does not
                 // support this ctor form.  More generally, there is no
@@ -1599,45 +1586,18 @@ namespace System.Management.Automation
                         }
                     }
                 }
-                catch (ArgumentException argException)
+                catch (Exception e) when (
+                    e is ArgumentException
+                    or NotSupportedException
+                    or TargetInvocationException
+                    or MethodAccessException
+                    or MemberAccessException
+                    or System.Runtime.InteropServices.InvalidComObjectException
+                    or System.Runtime.InteropServices.COMException
+                    or TypeLoadException)
                 {
                     errorOccurred = true;
-                    error = argException;
-                }
-                catch (NotSupportedException notSupported)
-                {
-                    errorOccurred = true;
-                    error = notSupported;
-                }
-                catch (TargetInvocationException targetInvocationException)
-                {
-                    errorOccurred = true;
-                    error = targetInvocationException;
-                }
-                catch (MethodAccessException methodAccessException)
-                {
-                    errorOccurred = true;
-                    error = methodAccessException;
-                }
-                catch (MemberAccessException memberAccessException)
-                {
-                    errorOccurred = true;
-                    error = memberAccessException;
-                }
-                catch (System.Runtime.InteropServices.InvalidComObjectException invalidComObject)
-                {
-                    errorOccurred = true;
-                    error = invalidComObject;
-                }
-                catch (System.Runtime.InteropServices.COMException comException)
-                {
-                    errorOccurred = true;
-                    error = comException;
-                }
-                catch (TypeLoadException typeLoadException)
-                {
-                    errorOccurred = true;
-                    error = typeLoadException;
+                    error = e;
                 }
 
                 if (errorOccurred)
@@ -1683,7 +1643,6 @@ namespace System.Management.Automation
             bool isSystemDotArray,
             ref bool coercionRequired)
         {
-            // NTRAID#Windows OS Bugs-966440-2004/05/05-JeffJon
             // This coercion can only go to a collection type.  It cannot take a
             // collection type and coerce it into a scalar type.
 
@@ -1878,16 +1837,17 @@ namespace System.Management.Automation
         internal static IList GetIList(object value)
         {
             var baseObj = PSObject.Base(value);
-            var result = baseObj as IList;
-            if (result != null)
+            if (baseObj is IList result)
             {
                 // Reference comparison to determine if 'value' is a PSObject
                 s_tracer.WriteLine(baseObj == value
                                      ? "argument is IList"
                                      : "argument is PSObject with BaseObject as IList");
+
+                return result;
             }
 
-            return result;
+            return null;
         }
 
         /// <summary>

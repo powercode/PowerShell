@@ -413,7 +413,7 @@ namespace System.Management.Automation
         /// or
         /// The parameter has already been bound.
         /// </exception>
-        internal virtual bool BindParameter(
+        internal virtual bool ResolveAndBindNamedParameter(
             CommandParameterInternal argument,
             ParameterBindingFlags flags)
         {
@@ -440,7 +440,7 @@ namespace System.Management.Automation
                 }
 
                 flags &= ~ParameterBindingFlags.DelayBindScriptBlock;
-                result = BindParameter(_currentParameterSetFlag, argument, matchingParameter, flags);
+                result = DispatchBindToSubBinder(_currentParameterSetFlag, argument, matchingParameter, flags);
             }
 
             return result;
@@ -491,7 +491,7 @@ namespace System.Management.Automation
         /// or
         /// If the binding to the parameter fails.
         /// </exception>
-        internal virtual bool BindParameter(
+        internal virtual bool DispatchBindToSubBinder(
             uint parameterSets,
             CommandParameterInternal argument,
             MergedCompiledCommandParameter parameter,
@@ -503,7 +503,7 @@ namespace System.Management.Automation
             {
                 case ParameterBinderAssociation.DeclaredFormalParameters:
                     result =
-                        this.DefaultParameterBinder.BindParameter(
+                        this.DefaultParameterBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -533,7 +533,7 @@ namespace System.Management.Automation
             CommandParameterInternal argument,
             MergedCompiledCommandParameter parameter)
         {
-            BindParameter(parameterSets, argument, parameter, ParameterBindingFlags.ShouldCoerceType);
+            DispatchBindToSubBinder(parameterSets, argument, parameter, ParameterBindingFlags.ShouldCoerceType);
         }
 
         /// <summary>
@@ -923,7 +923,7 @@ namespace System.Management.Automation
                                 false);
 
                         bindResult =
-                            BindParameter(
+                            DispatchBindToSubBinder(
                                 validParameterSets,
                                 bindableArgument,
                                 parameter.Parameter,
@@ -1261,7 +1261,7 @@ namespace System.Management.Automation
                         flags |= ParameterBindingFlags.ShouldCoerceType;
                     }
 
-                    BindParameter(uint.MaxValue, argument, parameter, flags);
+                    DispatchBindToSubBinder(uint.MaxValue, argument, parameter, flags);
                 }
                 finally
                 {

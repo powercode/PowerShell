@@ -73,7 +73,7 @@ namespace System.Management.Automation
         /// <returns>
         /// True if the parameter was successfully bound. Any error condition produces an exception.
         /// </returns>
-        internal override bool BindParameter(
+        internal override bool ResolveAndBindNamedParameter(
             CommandParameterInternal argument,
             ParameterBindingFlags flags)
         {

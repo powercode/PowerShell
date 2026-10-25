@@ -117,7 +117,7 @@ namespace System.Management.Automation
         /// <exception cref="SetValueException">
         /// If the setter raises an exception.
         /// </exception>
-        internal override void BindParameter(string name, object value, CompiledCommandParameter parameterMetadata)
+        internal override void StoreParameterValue(string name, object value, CompiledCommandParameter parameterMetadata)
         {
             Diagnostics.Assert(!string.IsNullOrEmpty(name), "caller to verify name parameter");
 

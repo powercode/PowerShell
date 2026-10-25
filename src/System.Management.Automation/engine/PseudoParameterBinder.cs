@@ -31,7 +31,6 @@ namespace System.Management.Automation
             CommandLineParameters commandLineParameters)
             : base(target, command.MyInvocation, command.Context, command)
         {
-            // NTRAID#Windows Out Of Band Releases-927103-2006/01/25-JonN
             foreach (var pair in target)
             {
                 string key = pair.Key;
@@ -111,7 +110,7 @@ namespace System.Management.Automation
         /// <exception cref="ArgumentException">
         /// If <paramref name="name"/> is null or empty.
         /// </exception>
-        internal override void BindParameter(string name, object value, CompiledCommandParameter parameterMetadata)
+        internal override void StoreParameterValue(string name, object value, CompiledCommandParameter parameterMetadata)
         {
             if (string.IsNullOrEmpty(name))
             {

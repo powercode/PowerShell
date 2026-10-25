@@ -12,6 +12,7 @@ using System.Management.Automation.Internal;
 using System.Management.Automation.Language;
 using System.Management.Automation.Runspaces;
 using System.Numerics;
+using System.Runtime.ExceptionServices;
 using System.Text;
 
 namespace System.Management.Automation
@@ -138,8 +139,6 @@ namespace System.Management.Automation
             {
                 // Use ValidateParameterSets to get the number of valid parameter
                 // sets.
-
-                // NTRAID#Windows Out Of Band Releases-2005/11/07-923917-JonN
                 validParameterSetCount = ValidateParameterSets(true, false);
             }
 
@@ -186,12 +185,7 @@ namespace System.Management.Automation
                 }
                 catch (ParameterBindingException pbex)
                 {
-                    if (!DefaultParameterBindingInUse)
-                    {
-                        throw;
-                    }
-
-                    ThrowElaboratedBindingException(pbex);
+                    ThrowOrElaborateBindingException(pbex);
                 }
             }
 
@@ -283,10 +277,6 @@ namespace System.Management.Automation
 
             // We need to make sure there is at least one valid parameter set. Its
             // OK to allow more than one as long as one of them takes pipeline input.
-
-            // NTRAID#Windows Out Of Band Releases-2006/02/14-928660-JonN
-            // Pipeline input fails to bind to pipeline enabled parameter
-            // second parameter changed from true to false
             ValidateParameterSets(true, false);
 
             // Always get the dynamic parameters as there may be mandatory parameters there
@@ -407,8 +397,6 @@ namespace System.Management.Automation
 
                 s_tracer.WriteLine("BIND DEFAULT after [{0}] result [{1}]", bindingStage, isSuccess);
             }
-
-            return;
         }
 
         /// <summary>
@@ -431,8 +419,7 @@ namespace System.Management.Automation
 
                 try
                 {
-                    ScriptBlock scriptBlockArg = argumentValue as ScriptBlock;
-                    if (scriptBlockArg != null)
+                    if (argumentValue is ScriptBlock scriptBlockArg)
                     {
                         // Get the current binding state, and pass it to the ScriptBlock as the argument
                         // The 'arg' includes HashSet properties 'BoundParameters', 'BoundPositionalParameters',
@@ -459,8 +446,8 @@ namespace System.Management.Automation
                            /*parameterAst*/null, parameterName, "-" + parameterName + ":",
                            /*argumentAst*/null, argumentValue, false);
 
-                    bool bindResult =
-                            BindParameter(
+                        bool bindResult =
+                            DispatchBindToSubBinder(
                                 validParameterSetFlag,
                                 bindableArgument,
                                 parameter,
@@ -940,14 +927,7 @@ namespace System.Management.Automation
                                         parameter.ArgumentValue.GetType(),
                                         e.Message);
 
-                                if (!DefaultParameterBindingInUse)
-                                {
-                                    throw bindingException;
-                                }
-                                else
-                                {
-                                    ThrowElaboratedBindingException(bindingException);
-                                }
+                                ThrowOrElaborateBindingException(bindingException);
                             }
                         }
 
@@ -959,14 +939,7 @@ namespace System.Management.Automation
                     }
                 }
 
-                if (!DefaultParameterBindingInUse)
-                {
-                    throw bindingException;
-                }
-                else
-                {
-                    ThrowElaboratedBindingException(bindingException);
-                }
+                ThrowOrElaborateBindingException(bindingException);
             }
         }
 
@@ -1022,7 +995,7 @@ namespace System.Management.Automation
         /// </returns>
         private bool RestoreParameter(CommandParameterInternal argumentToBind, MergedCompiledCommandParameter parameter)
         {
-            GetBinderForParameter(parameter)?.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
+            GetBinderForParameter(parameter)?.StoreParameterValue(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
 
             return true;
         }
@@ -1048,29 +1021,17 @@ namespace System.Management.Automation
                         parameterSetName);
 
                 // Might be caused by default parameter binding
-                if (!DefaultParameterBindingInUse)
-                {
-                    throw bindingException;
-                }
-                else
-                {
-                    ThrowElaboratedBindingException(bindingException);
-                }
+                ThrowOrElaborateBindingException(bindingException);
             }
 
             try
             {
-                BindParameter(parameterSets, argument, parameter,
+                DispatchBindToSubBinder(parameterSets, argument, parameter,
                     ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock);
             }
             catch (ParameterBindingException pbex)
             {
-                if (!DefaultParameterBindingInUse)
-                {
-                    throw;
-                }
-
-                ThrowElaboratedBindingException(pbex);
+                ThrowOrElaborateBindingException(pbex);
             }
         }
 
@@ -1088,55 +1049,22 @@ namespace System.Management.Automation
         /// </returns>
         private static bool IsParameterScriptBlockBindable(MergedCompiledCommandParameter parameter)
         {
-            bool result = false;
+            bool result = IsScriptBlockCompatible(parameter.Parameter.Type);
 
-            Type parameterType = parameter.Parameter.Type;
-
-            do // false loop
+            if (!result)
             {
-                if (parameterType == typeof(object))
+                ParameterCollectionTypeInformation collectionTypeInfo = parameter.Parameter.CollectionTypeInformation;
+                if (collectionTypeInfo.ParameterCollectionType != ParameterCollectionType.NotCollection)
                 {
-                    result = true;
-                    break;
+                    result = IsScriptBlockCompatible(collectionTypeInfo.ElementType);
                 }
-
-                if (parameterType == typeof(ScriptBlock))
-                {
-                    result = true;
-                    break;
-                }
-
-                if (parameterType.IsSubclassOf(typeof(ScriptBlock)))
-                {
-                    result = true;
-                    break;
-                }
-
-                ParameterCollectionTypeInformation parameterCollectionTypeInfo = parameter.Parameter.CollectionTypeInformation;
-                if (parameterCollectionTypeInfo.ParameterCollectionType != ParameterCollectionType.NotCollection)
-                {
-                    if (parameterCollectionTypeInfo.ElementType == typeof(object))
-                    {
-                        result = true;
-                        break;
-                    }
-
-                    if (parameterCollectionTypeInfo.ElementType == typeof(ScriptBlock))
-                    {
-                        result = true;
-                        break;
-                    }
-
-                    if (parameterCollectionTypeInfo.ElementType.IsSubclassOf(typeof(ScriptBlock)))
-                    {
-                        result = true;
-                        break;
-                    }
-                }
-            } while (false);
+            }
 
             s_tracer.WriteLine("IsParameterScriptBlockBindable: result = {0}", result);
             return result;
+
+            static bool IsScriptBlockCompatible(Type type) =>
+                type == typeof(object) || typeof(ScriptBlock).IsAssignableFrom(type);
         }
 
         /// <summary>
@@ -1167,7 +1095,7 @@ namespace System.Management.Automation
         /// True if the parameter was successfully bound. False if <paramref name="flags"/>
         /// has the flag <see cref="ParameterBindingFlags.ShouldCoerceType"/> set and the type does not match the parameter type.
         /// </returns>
-        internal override bool BindParameter(
+        internal override bool DispatchBindToSubBinder(
             uint parameterSets,
             CommandParameterInternal argument,
             MergedCompiledCommandParameter parameter,
@@ -1249,7 +1177,7 @@ namespace System.Management.Automation
             {
                 try
                 {
-                    result = BindParameter(argument, parameter, flags);
+                    result = BindToAssociatedBinder(argument, parameter, flags);
                 }
                 catch (Exception e)
                 {
@@ -1298,7 +1226,7 @@ namespace System.Management.Automation
         /// True if the parameter was successfully bound. False if <paramref name="flags"/>
         /// has the flag <see cref="ParameterBindingFlags.ShouldCoerceType"/> set and the type does not match the parameter type.
         /// </returns>
-        private bool BindParameter(
+        private bool BindToAssociatedBinder(
             CommandParameterInternal argument,
             MergedCompiledCommandParameter parameter,
             ParameterBindingFlags flags)
@@ -1309,7 +1237,7 @@ namespace System.Management.Automation
             {
                 case ParameterBinderAssociation.DeclaredFormalParameters:
                     result =
-                        DefaultParameterBinder.BindParameter(
+                        DefaultParameterBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -1317,7 +1245,7 @@ namespace System.Management.Automation
 
                 case ParameterBinderAssociation.CommonParameters:
                     result =
-                        CommonParametersBinder.BindParameter(
+                        CommonParametersBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -1329,7 +1257,7 @@ namespace System.Management.Automation
                         "The metadata for the ShouldProcessParameters should only be available if the command supports ShouldProcess");
 
                     result =
-                        ShouldProcessParametersBinder.BindParameter(
+                        ShouldProcessParametersBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -1341,7 +1269,7 @@ namespace System.Management.Automation
                         "The metadata for the PagingParameters should only be available if the command supports paging");
 
                     result =
-                        PagingParametersBinder.BindParameter(
+                        PagingParametersBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -1353,7 +1281,7 @@ namespace System.Management.Automation
                         "The metadata for the TransactionsParameters should only be available if the command supports transactions");
 
                     result =
-                        TransactionParametersBinder.BindParameter(
+                        TransactionParametersBinder.CoerceValidateAndBind(
                             argument,
                             parameter.Parameter,
                             flags);
@@ -1367,7 +1295,7 @@ namespace System.Management.Automation
                     if (_dynamicParameterBinder != null)
                     {
                         result =
-                            _dynamicParameterBinder.BindParameter(
+                            _dynamicParameterBinder.CoerceValidateAndBind(
                                 argument,
                                 parameter.Parameter,
                                 flags);
@@ -1453,14 +1381,7 @@ namespace System.Management.Automation
                                 ParameterBindingException.NewAmbiguousParameterSet(this.Command.MyInvocation);
 
                             // Might be caused by the default parameter binding
-                            if (!DefaultParameterBindingInUse)
-                            {
-                                throw bindingException;
-                            }
-                            else
-                            {
-                                ThrowElaboratedBindingException(bindingException);
-                            }
+                            ThrowOrElaborateBindingException(bindingException);
                         }
 
                         varargsParameter = parameter;
@@ -1515,18 +1436,11 @@ namespace System.Management.Automation
 
                         try
                         {
-                            BindParameter(cpi, varargsParameter, ParameterBindingFlags.ShouldCoerceType);
+                            BindToAssociatedBinder(cpi, varargsParameter, ParameterBindingFlags.ShouldCoerceType);
                         }
                         catch (ParameterBindingException pbex)
                         {
-                            if (!DefaultParameterBindingInUse)
-                            {
-                                throw;
-                            }
-                            else
-                            {
-                                ThrowElaboratedBindingException(pbex);
-                            }
+                            ThrowOrElaborateBindingException(pbex);
                         }
 
                         UnboundArguments.Clear();
@@ -1560,9 +1474,7 @@ namespace System.Management.Automation
                 {
                     s_tracer.WriteLine("The Cmdlet supports the dynamic parameter interface");
 
-                    IDynamicParameters dynamicParameterCmdlet = this.Command as IDynamicParameters;
-
-                    if (dynamicParameterCmdlet != null)
+                    if (this.Command is IDynamicParameters dynamicParameterCmdlet)
                     {
                         if (_dynamicParameterBinder == null)
                         {
@@ -1603,8 +1515,7 @@ namespace System.Management.Automation
 
                                 InternalParameterMetadata dynamicParameterMetadata;
 
-                                RuntimeDefinedParameterDictionary runtimeParamDictionary = dynamicParamBindableObject as RuntimeDefinedParameterDictionary;
-                                if (runtimeParamDictionary != null)
+                                if (dynamicParamBindableObject is RuntimeDefinedParameterDictionary runtimeParamDictionary)
                                 {
                                     // Generate the type metadata for the runtime-defined parameters
                                     dynamicParameterMetadata =
@@ -2499,8 +2410,6 @@ namespace System.Management.Automation
                     validSetIsDefault ||
                     (hasDefaultSetDefined && (_currentParameterSetFlag & defaultParameterSetFlag) != 0))
                 {
-                    // NTRAID#Windows Out Of Band Releases-2006/02/14-928660-JonN
-                    // Set currentParameterSetName regardless of setDefault
                     string currentParameterSetName = BindableParameters.GetParameterSetName(defaultParameterSetFlag);
                     Command.SetParameterSetName(currentParameterSetName);
                     if (setDefault)
@@ -2558,7 +2467,6 @@ namespace System.Management.Automation
                             validParameterSetCount = 1;
                         }
                     }
-                    // NTRAID#Windows Out Of Band Releases-2005/11/07-923917-JonN
                     else if (validParameterSetCount > 1)
                     {
                         int resolvedParameterSetCount = ResolveParameterSetAmbiguityBasedOnMandatoryParameters();
@@ -2657,14 +2565,7 @@ namespace System.Management.Automation
                 currentParameterSet <<= 1;
             }
 
-            if (!DefaultParameterBindingInUse)
-            {
-                throw bindingException;
-            }
-            else
-            {
-                ThrowElaboratedBindingException(bindingException);
-            }
+            ThrowOrElaborateBindingException(bindingException);
         }
 
         /// <summary>
@@ -2681,8 +2582,6 @@ namespace System.Management.Automation
         /// </returns>
         private bool AtLeastOneUnboundValidParameterSetTakesPipelineInput(uint validParameterSetFlags)
         {
-            bool result = false;
-
             // Loop through all the unbound parameters to see if there are any
             // that take pipeline input for the specified parameter sets.
 
@@ -2690,12 +2589,11 @@ namespace System.Management.Automation
             {
                 if (parameter.Parameter.DoesParameterSetTakePipelineInput(validParameterSetFlags))
                 {
-                    result = true;
-                    break;
+                    return true;
                 }
             }
 
-            return result;
+            return false;
         }
 
         /// <summary>
@@ -2803,7 +2701,7 @@ namespace System.Management.Automation
 
                             // Ignore the result since any failure should cause an exception
                             result =
-                                BindParameter(argument, ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.ThrowOnParameterNotFound);
+                                ResolveAndBindNamedParameter(argument, ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.ThrowOnParameterNotFound);
 
                             Diagnostics.Assert(
                                 result,
@@ -2968,57 +2866,32 @@ namespace System.Management.Automation
         {
             Diagnostics.Assert(!string.IsNullOrEmpty(parameterName), "parameterName is not set");
             const char hotKeyPrefix = '&';
-            bool built = false;
             StringBuilder label = new StringBuilder(parameterName);
             string usedHotKeysStr = usedHotKeys.ToString();
 
-            for (int i = 0; i < parameterName.Length; i++)
+            // Priority order: uppercase letters, lowercase letters, then non-letters.
+            Func<char, bool>[] predicates = new Func<char, bool>[]
             {
-                // try Upper case
-                if (char.IsUpper(parameterName[i]) && usedHotKeysStr.Contains(parameterName[i]))
-                {
-                    label.Insert(i, hotKeyPrefix);
-                    usedHotKeys.Append(parameterName[i]);
-                    built = true;
-                    break;
-                }
-            }
+                char.IsUpper,
+                char.IsLower,
+                static c => !char.IsLetter(c)
+            };
 
-            if (!built)
+            foreach (Func<char, bool> predicate in predicates)
             {
-                // try Lower case
                 for (int i = 0; i < parameterName.Length; i++)
                 {
-                    if (char.IsLower(parameterName[i]) && usedHotKeysStr.Contains(parameterName[i]))
+                    if (predicate(parameterName[i]) && !usedHotKeysStr.Contains(parameterName[i]))
                     {
                         label.Insert(i, hotKeyPrefix);
                         usedHotKeys.Append(parameterName[i]);
-                        built = true;
-                        break;
+                        return label.ToString();
                     }
                 }
             }
 
-            if (!built)
-            {
-                // try non-letters
-                for (int i = 0; i < parameterName.Length; i++)
-                {
-                    if (!char.IsLetter(parameterName[i]) && usedHotKeysStr.Contains(parameterName[i]))
-                    {
-                        label.Insert(i, hotKeyPrefix);
-                        usedHotKeys.Append(parameterName[i]);
-                        built = true;
-                        break;
-                    }
-                }
-            }
-
-            if (!built)
-            {
-                // use first char
-                label.Insert(0, hotKeyPrefix);
-            }
+            // Fallback when all candidates are already used.
+            label.Insert(0, hotKeyPrefix);
 
             return label.ToString();
         }
@@ -3388,8 +3261,6 @@ namespace System.Management.Automation
             MergedCompiledCommandParameter parameter,
             ParameterBindingFlags flags)
         {
-            bool bindResult = false;
-
             // Attempt binding the value from the pipeline
             // without type coercion
 
@@ -3399,57 +3270,7 @@ namespace System.Management.Automation
                     "Parameter [{0}] PIPELINE INPUT ValueFromPipeline NO COERCION",
                 parameter.Parameter.Name);
 
-            ParameterBindingException parameterBindingException = null;
-            try
-            {
-                bindResult = BindPipelineParameter(inputToOperateOn, parameter, flags);
-            }
-            catch (ParameterBindingArgumentTransformationException e)
-            {
-                PSInvalidCastException invalidCast;
-                if (e.InnerException is ArgumentTransformationMetadataException)
-                {
-                    invalidCast = e.InnerException.InnerException as PSInvalidCastException;
-                }
-                else
-                {
-                    invalidCast = e.InnerException as PSInvalidCastException;
-                }
-
-                if (invalidCast == null)
-                {
-                    parameterBindingException = e;
-                }
-                // Just ignore and continue;
-                bindResult = false;
-            }
-            catch (ParameterBindingValidationException e)
-            {
-                parameterBindingException = e;
-            }
-            catch (ParameterBindingParameterDefaultValueException e)
-            {
-                parameterBindingException = e;
-            }
-            catch (ParameterBindingException)
-            {
-                // Just ignore and continue;
-                bindResult = false;
-            }
-
-            if (parameterBindingException != null)
-            {
-                if (!DefaultParameterBindingInUse)
-                {
-                    throw parameterBindingException;
-                }
-                else
-                {
-                    ThrowElaboratedBindingException(parameterBindingException);
-                }
-            }
-
-            return bindResult;
+            return BindPipelineParameterWithErrorHandling(inputToOperateOn, parameter, flags, ignoreInvalidCastTransformationError: true);
         }
 
         private bool BindValueFromPipelineByPropertyName(
@@ -3485,47 +3306,77 @@ namespace System.Management.Automation
 
             if (member != null)
             {
-                ParameterBindingException parameterBindingException = null;
-                try
-                {
-                    bindResult =
-                        BindPipelineParameter(
-                            member.Value,
-                            parameter,
-                            flags);
-                }
-                catch (ParameterBindingArgumentTransformationException e)
-                {
-                    parameterBindingException = e;
-                }
-                catch (ParameterBindingValidationException e)
-                {
-                    parameterBindingException = e;
-                }
-                catch (ParameterBindingParameterDefaultValueException e)
-                {
-                    parameterBindingException = e;
-                }
-                catch (ParameterBindingException)
-                {
-                    // Just ignore and continue;
-                    bindResult = false;
-                }
-
-                if (parameterBindingException != null)
-                {
-                    if (!DefaultParameterBindingInUse)
-                    {
-                        throw parameterBindingException;
-                    }
-                    else
-                    {
-                        ThrowElaboratedBindingException(parameterBindingException);
-                    }
-                }
+                bindResult = BindPipelineParameterWithErrorHandling(member.Value, parameter, flags, ignoreInvalidCastTransformationError: false);
             }
 
             return bindResult;
+        }
+
+        private bool BindPipelineParameterWithErrorHandling(
+            object inputValue,
+            MergedCompiledCommandParameter parameter,
+            ParameterBindingFlags flags,
+            bool ignoreInvalidCastTransformationError)
+        {
+            bool bindResult = false;
+            ParameterBindingException parameterBindingException = null;
+
+            try
+            {
+                bindResult = BindPipelineParameter(inputValue, parameter, flags);
+            }
+            catch (ParameterBindingArgumentTransformationException e)
+            {
+                if (ignoreInvalidCastTransformationError)
+                {
+                    PSInvalidCastException invalidCast = e.InnerException is ArgumentTransformationMetadataException
+                        ? e.InnerException.InnerException as PSInvalidCastException
+                        : e.InnerException as PSInvalidCastException;
+
+                    if (invalidCast == null)
+                    {
+                        parameterBindingException = e;
+                    }
+                }
+                else
+                {
+                    parameterBindingException = e;
+                }
+
+                // Just ignore and continue.
+                bindResult = false;
+            }
+            catch (ParameterBindingValidationException e)
+            {
+                parameterBindingException = e;
+            }
+            catch (ParameterBindingParameterDefaultValueException e)
+            {
+                parameterBindingException = e;
+            }
+            catch (ParameterBindingException)
+            {
+                // Just ignore and continue.
+                bindResult = false;
+            }
+
+            if (parameterBindingException != null)
+            {
+                ThrowOrElaborateBindingException(parameterBindingException);
+            }
+
+            return bindResult;
+        }
+
+        [DoesNotReturn]
+        private void ThrowOrElaborateBindingException(ParameterBindingException ex)
+        {
+            if (!DefaultParameterBindingInUse)
+            {
+                ExceptionDispatchInfo.Capture(ex).Throw();
+            }
+
+            ThrowElaboratedBindingException(ex);
         }
 
         /// <summary>
@@ -3648,7 +3499,7 @@ namespace System.Management.Automation
                     argument.ArgumentAst, newValue,
                     false);
 
-                if (!BindParameter(newArgument, parameter, ParameterBindingFlags.ShouldCoerceType))
+                if (!BindToAssociatedBinder(newArgument, parameter, ParameterBindingFlags.ShouldCoerceType))
                 {
                     result = false;
                 }
@@ -3995,7 +3846,7 @@ namespace System.Management.Automation
                     false);
 
                 flags &= ~ParameterBindingFlags.DelayBindScriptBlock;
-                result = BindParameter(_currentParameterSetFlag, param, parameter, flags);
+                result = DispatchBindToSubBinder(_currentParameterSetFlag, param, parameter, flags);
 
                 if (result)
                 {
@@ -4192,8 +4043,7 @@ namespace System.Management.Automation
 
             foreach (DictionaryEntry entry in dictionary)
             {
-                var entryKey = entry.Key as string;
-                if (entryKey != null)
+                if (entry.Key is string entryKey)
                 {
                     string key = entryKey.Trim();
                     string cmdletName = null;
