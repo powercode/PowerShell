@@ -605,7 +605,8 @@ namespace System.Management.Automation
         {
             Type inputObjectType = inputObject?.GetType();
 
-            ParameterBindingException bindingException = new ParameterBindingException(
+            ParameterBindingException bindingException = ParameterBindingException.NewParameterBindingException(
+                innerException: null,
                 ErrorCategory.InvalidArgument,
                 this.Command.MyInvocation,
                 null,

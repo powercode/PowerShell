@@ -246,49 +246,15 @@ namespace System.Management.Automation
 
             if (!psTypeNamesOfArgumentValue.Contains(psTypeNameRequestedByParameter, StringComparer.OrdinalIgnoreCase))
             {
-                // win8: 228176..The callers know when to ignore and when not to ignore invalid cast exceptions.
-                PSInvalidCastException e = new PSInvalidCastException(nameof(ErrorCategory.InvalidArgument),
-                        null,
-                        ParameterBinderStrings.MismatchedPSTypeName,
-                        (_invocationInfo != null) && (_invocationInfo.MyCommand != null) ? _invocationInfo.MyCommand.Name : string.Empty,
-                        parameterMetadata.Name,
-                        parameterMetadata.Type,
-                        parameterValue.GetType(),
-                        0,
-                        0,
-                        psTypeNameRequestedByParameter);
-
-                ParameterBindingException parameterBindingException;
-                if (!retryOtherBindingAfterFailure)
-                {
-                    parameterBindingException = new ParameterBindingArgumentTransformationException(
-                        e,
-                        ErrorCategory.InvalidArgument,
-                        this.InvocationInfo,
-                        GetErrorExtent(parameter),
-                        parameterMetadata.Name,
-                        parameterMetadata.Type,
-                        parameterValue.GetType(),
-                        ParameterBinderStrings.MismatchedPSTypeName,
-                        "MismatchedPSTypeName",
-                        psTypeNameRequestedByParameter);
-                }
-                else
-                {
-                    parameterBindingException = new ParameterBindingException(
-                        e,
-                        ErrorCategory.InvalidArgument,
-                        this.InvocationInfo,
-                        GetErrorExtent(parameter),
-                        parameterMetadata.Name,
-                        parameterMetadata.Type,
-                        parameterValue.GetType(),
-                        ParameterBinderStrings.MismatchedPSTypeName,
-                        "MismatchedPSTypeName",
-                        psTypeNameRequestedByParameter);
-                }
-
-                throw parameterBindingException;
+                ParameterBindingException.ThrowMismatchedPSTypeName(
+                    this.InvocationInfo,
+                    GetErrorExtent(parameter),
+                    (_invocationInfo != null) && (_invocationInfo.MyCommand != null) ? _invocationInfo.MyCommand.Name : string.Empty,
+                    parameterMetadata.Name,
+                    parameterMetadata.Type,
+                    parameterValue.GetType(),
+                    psTypeNameRequestedByParameter,
+                    retryOtherBindingAfterFailure);
             }
         }
 
@@ -426,19 +392,14 @@ namespace System.Management.Automation
                             "ERROR: DATA GENERATION: {0}",
                             e.Message);
 
-                        ParameterBindingException bindingException =
-                            new ParameterBindingArgumentTransformationException(
-                                e,
-                                ErrorCategory.InvalidData,
-                                this.InvocationInfo,
-                                GetErrorExtent(parameter),
-                                parameterMetadata.Name,
-                                parameterMetadata.Type,
-                                parameterValue?.GetType(),
-                                ParameterBinderStrings.ParameterArgumentTransformationError,
-                                "ParameterArgumentTransformationError",
-                                e.Message);
-                        throw bindingException;
+                        ParameterBindingArgumentTransformationException.ThrowParameterArgumentTransformationError(
+                            e,
+                            this.InvocationInfo,
+                            GetErrorExtent(parameter),
+                            parameterMetadata.Name,
+                            parameterMetadata.Type,
+                            parameterValue?.GetType(),
+                            e.Message);
                     }
                 }
             }
@@ -524,19 +485,14 @@ namespace System.Management.Automation
                             "ERROR: VALIDATION FAILED: {0}",
                             e.Message);
 
-                        ParameterBindingValidationException bindingException =
-                            new ParameterBindingValidationException(
-                                e,
-                                ErrorCategory.InvalidData,
-                                this.InvocationInfo,
-                                GetErrorExtent(parameter),
-                                parameterMetadata.Name,
-                                parameterMetadata.Type,
-                                parameterValue?.GetType(),
-                                ParameterBinderStrings.ParameterArgumentValidationError,
-                                "ParameterArgumentValidationError",
-                                e.Message);
-                        throw bindingException;
+                        ParameterBindingValidationException.ThrowParameterArgumentValidationError(
+                            e,
+                            this.InvocationInfo,
+                            GetErrorExtent(parameter),
+                            parameterMetadata.Name,
+                            parameterMetadata.Type,
+                            parameterValue?.GetType(),
+                            e.Message);
                     }
 
                     s_tracer.WriteLine("Validation attribute on {0} returned {1}.", parameterMetadata.Name, false);
@@ -600,20 +556,14 @@ namespace System.Management.Automation
             if (bindError != null)
             {
                 Type specifiedType = parameterValue?.GetType();
-                ParameterBindingException bindingException =
-                    new ParameterBindingException(
-                        bindError,
-                        ErrorCategory.WriteError,
-                        this.InvocationInfo,
-                        GetErrorExtent(parameter),
-                        parameterMetadata.Name,
-                        parameterMetadata.Type,
-                        specifiedType,
-                        ParameterBinderStrings.ParameterBindingFailed,
-                        "ParameterBindingFailed",
-                        bindError.Message);
-
-                throw bindingException;
+                ParameterBindingException.ThrowParameterBindingFailed(
+                    bindError,
+                    this.InvocationInfo,
+                    GetErrorExtent(parameter),
+                    parameterMetadata.Name,
+                    parameterMetadata.Type,
+                    specifiedType,
+                    bindError.Message);
             }
 
             return true;
@@ -717,17 +667,12 @@ namespace System.Management.Automation
                 {
                     bindingTracer.WriteLine("ERROR: Argument cannot be null");
 
-                    ParameterBindingValidationException bindingException =
-                        new ParameterBindingValidationException(
-                            ErrorCategory.InvalidData,
-                            this.InvocationInfo,
-                            GetErrorExtent(parameter),
-                            parameterMetadata.Name,
-                            argumentType,
-                            null,
-                            ParameterBinderStrings.ParameterArgumentValidationErrorNullNotAllowed,
-                            "ParameterArgumentValidationErrorNullNotAllowed");
-                    throw bindingException;
+                    ParameterBindingValidationException.ThrowParameterArgumentValidationErrorNullNotAllowed(
+                        this.InvocationInfo,
+                        GetErrorExtent(parameter),
+                        parameterMetadata.Name,
+                        argumentType,
+                        null);
                 }
 
                 return;
@@ -746,17 +691,12 @@ namespace System.Management.Automation
                 {
                     bindingTracer.WriteLine("ERROR: Argument cannot be an empty string");
 
-                    ParameterBindingValidationException bindingException =
-                        new ParameterBindingValidationException(
-                            ErrorCategory.InvalidData,
-                            this.InvocationInfo,
-                            GetErrorExtent(parameter),
-                            parameterMetadata.Name,
-                            parameterMetadata.Type,
-                            parameterValue?.GetType(),
-                            ParameterBinderStrings.ParameterArgumentValidationErrorEmptyStringNotAllowed,
-                            "ParameterArgumentValidationErrorEmptyStringNotAllowed");
-                    throw bindingException;
+                    ParameterBindingValidationException.ThrowParameterArgumentValidationErrorEmptyStringNotAllowed(
+                        this.InvocationInfo,
+                        GetErrorExtent(parameter),
+                        parameterMetadata.Name,
+                        parameterMetadata.Type,
+                        parameterValue?.GetType());
                 }
 
                 return;
@@ -826,17 +766,14 @@ namespace System.Management.Automation
                     resourceString = ParameterBinderStrings.ParameterArgumentValidationErrorEmptyCollectionNotAllowed;
                 }
 
-                ParameterBindingValidationException bindingException =
-                    new ParameterBindingValidationException(
-                        ErrorCategory.InvalidData,
-                        this.InvocationInfo,
-                        GetErrorExtent(parameter),
-                        parameterMetadata.Name,
-                        parameterMetadata.Type,
-                        parameterValue?.GetType(),
-                        resourceString,
-                        errorId);
-                throw bindingException;
+                ParameterBindingValidationException.ThrowValidateNullOrEmpty(
+                    this.InvocationInfo,
+                    GetErrorExtent(parameter),
+                    parameterMetadata.Name,
+                    parameterMetadata.Type,
+                    parameterValue?.GetType(),
+                    resourceString,
+                    errorId);
             }
         }
 
@@ -1186,21 +1123,17 @@ namespace System.Management.Automation
                         result ?? "null",
                         toType);
 
-                    ParameterBindingException pbe =
-                        new ParameterBindingException(
-                            notSupported,
-                            ErrorCategory.InvalidArgument,
-                            this.InvocationInfo,
-                            GetErrorExtent(argument),
-                            parameterName,
-                            toType,
-                            argumentType,
-                            ParameterBinderStrings.CannotConvertArgument,
-                            "CannotConvertArgument",
-                            result ?? "null",
-                            notSupported.Message);
+                    ParameterBindingException.ThrowCannotConvertArgument(
+                        notSupported,
+                        this.InvocationInfo,
+                        GetErrorExtent(argument),
+                        parameterName,
+                        toType,
+                        argumentType,
+                        result ?? "null",
+                        notSupported.Message);
 
-                    throw pbe;
+                    throw new InvalidOperationException();
                 }
                 catch (PSInvalidCastException invalidCast)
                 {
@@ -1209,20 +1142,16 @@ namespace System.Management.Automation
                       result ?? "null",
                       toType);
 
-                    ParameterBindingException pbe =
-                        new ParameterBindingException(
-                            invalidCast,
-                            ErrorCategory.InvalidArgument,
-                            this.InvocationInfo,
-                            GetErrorExtent(argument),
-                            parameterName,
-                            toType,
-                            argumentType,
-                            ParameterBinderStrings.CannotConvertArgumentNoMessage,
-                            "CannotConvertArgumentNoMessage",
-                            invalidCast.Message);
+                    ParameterBindingException.ThrowCannotConvertArgumentNoMessage(
+                        invalidCast,
+                        this.InvocationInfo,
+                        GetErrorExtent(argument),
+                        parameterName,
+                        toType,
+                        argumentType,
+                        invalidCast.Message);
 
-                    throw pbe;
+                    throw new InvalidOperationException();
                 }
             }
 
@@ -1258,19 +1187,12 @@ namespace System.Management.Automation
                 bindingTracer.WriteLine(
                         "ERROR: No argument is specified for parameter and parameter type is BOOL");
 
-                ParameterBindingException exception =
-                    new ParameterBindingException(
-                        ErrorCategory.InvalidArgument,
-                        this.InvocationInfo,
-                        GetErrorExtent(argument),
-                        parameterName,
-                        toType,
-                        null,
-                        ParameterBinderStrings.ParameterArgumentValidationErrorNullNotAllowed,
-                        "ParameterArgumentValidationErrorNullNotAllowed",
-                        string.Empty);
-
-                throw exception;
+                ParameterBindingValidationException.ThrowParameterArgumentValidationErrorNullNotAllowed(
+                    this.InvocationInfo,
+                    GetErrorExtent(argument),
+                    parameterName,
+                    toType,
+                    null);
             }
             else
                 if (toType == typeof(SwitchParameter))
@@ -1284,18 +1206,11 @@ namespace System.Management.Automation
                 bindingTracer.TraceError(
                     "ERROR: No argument was specified for the parameter and the parameter is not of type bool");
 
-                ParameterBindingException exception =
-                    new ParameterBindingException(
-                        ErrorCategory.InvalidArgument,
-                        this.InvocationInfo,
-                        GetParameterErrorExtent(argument),
-                        parameterName,
-                        toType,
-                        null,
-                        ParameterBinderStrings.MissingArgument,
-                        "MissingArgument");
-
-                throw exception;
+                ParameterBindingException.ThrowMissingArgument(
+                    this.InvocationInfo,
+                    GetParameterErrorExtent(argument),
+                    parameterName,
+                    toType);
             }
             else
             {
@@ -1362,20 +1277,17 @@ namespace System.Management.Automation
             }
 
             // Invalid types which cannot be associated with a bool.
-            ParameterBindingException pbe =
-                new ParameterBindingException(
-                    ErrorCategory.InvalidArgument,
-                    this.InvocationInfo,
-                    GetErrorExtent(argument),
-                    parameterName,
-                    toType,
-                    argumentType,
-                    ParameterBinderStrings.CannotConvertArgument,
-                    "CannotConvertArgument",
-                    boType,
-                    string.Empty);
+            ParameterBindingException.ThrowCannotConvertArgument(
+                null,
+                this.InvocationInfo,
+                GetErrorExtent(argument),
+                parameterName,
+                toType,
+                argumentType,
+                boType,
+                string.Empty);
 
-            throw pbe;
+            throw new InvalidOperationException();
         }
 
         /// <summary>
@@ -1676,19 +1588,14 @@ namespace System.Management.Automation
 
                         if (addMethod == null)
                         {
-                            ParameterBindingException bindingException =
-                                new ParameterBindingException(
-                                    getMethodError,
-                                    ErrorCategory.InvalidArgument,
-                                    this.InvocationInfo,
-                                    GetErrorExtent(argument),
-                                    parameterName,
-                                    toType,
-                                    currentValue.GetType(),
-                                    ParameterBinderStrings.CannotExtractAddMethod,
-                                    "CannotExtractAddMethod",
-                                    (getMethodError == null) ? string.Empty : getMethodError.Message);
-                            throw bindingException;
+                            ParameterBindingException.ThrowCannotExtractAddMethod(
+                                getMethodError,
+                                this.InvocationInfo,
+                                GetErrorExtent(argument),
+                                parameterName,
+                                toType,
+                                currentValue.GetType(),
+                                (getMethodError == null) ? string.Empty : getMethodError.Message);
                         }
                     }
                 }
@@ -1737,20 +1644,15 @@ namespace System.Management.Automation
                 {
                     // Throw a ParameterBindingException
 
-                    ParameterBindingException bindingException =
-                        new ParameterBindingException(
-                            error,
-                            ErrorCategory.InvalidArgument,
-                            this.InvocationInfo,
-                            GetErrorExtent(argument),
-                            parameterName,
-                            toType,
-                            currentValue.GetType(),
-                            ParameterBinderStrings.CannotConvertArgument,
-                            "CannotConvertArgument",
-                            "null",
-                            error.Message);
-                    throw bindingException;
+                    ParameterBindingException.ThrowCannotConvertArgument(
+                        error,
+                        this.InvocationInfo,
+                        GetErrorExtent(argument),
+                        parameterName,
+                        toType,
+                        currentValue.GetType(),
+                        "null",
+                        error.Message);
                 }
             }
             else
@@ -1961,20 +1863,15 @@ namespace System.Management.Automation
                     error = error.InnerException;
                 }
 
-                ParameterBindingException bindingException =
-                    new ParameterBindingException(
-                        error,
-                        ErrorCategory.InvalidArgument,
-                        this.InvocationInfo,
-                        GetErrorExtent(argument),
-                        parameterName,
-                        toType,
-                        value?.GetType(),
-                        ParameterBinderStrings.CannotConvertArgument,
-                        "CannotConvertArgument",
-                        value ?? "null",
-                        error.Message);
-                throw bindingException;
+                ParameterBindingException.ThrowCannotConvertArgument(
+                    error,
+                    this.InvocationInfo,
+                    GetErrorExtent(argument),
+                    parameterName,
+                    toType,
+                    value?.GetType(),
+                    value ?? "null",
+                    error.Message);
             }
         }
 

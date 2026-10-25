@@ -563,18 +563,11 @@ namespace System.Management.Automation
             {
                 if (throwOnParameterNotFound)
                 {
-                    ParameterBindingException exception =
-                        new ParameterBindingException(
-                            ErrorCategory.InvalidArgument,
-                            invocationInfoFactory(),
-                            null,
-                            name,
-                            null,
-                            null,
-                            ParameterBinderStrings.NamedParameterNotFound,
-                            "NamedParameterNotFound");
-
-                    throw exception;
+                    throw ParameterBindingException.NewNamedParameterNotFound(
+                        invocationInfoFactory(),
+                        null,
+                        name,
+                        null);
                 }
             }
 
@@ -622,19 +615,12 @@ namespace System.Management.Automation
                 possibleMatches.Append(matchingParameter.Parameter.Name);
             }
 
-            ParameterBindingException exception =
-                new ParameterBindingException(
-                    ErrorCategory.InvalidArgument,
-                    invocationInfoFactory(),
-                    null,
-                    name,
-                    null,
-                    null,
-                    ParameterBinderStrings.AmbiguousParameter,
-                    "AmbiguousParameter",
-                    possibleMatches);
+            ParameterBindingException.ThrowAmbiguousParameter(
+                invocationInfoFactory(),
+                name,
+                possibleMatches.ToString());
 
-            throw exception;
+            throw new InvalidOperationException();
         }
 
         /// <summary>

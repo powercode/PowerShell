@@ -39,19 +39,10 @@ namespace System.Management.Automation
                 string ppName = pp?.Name;
                 if (pp == null || key != ppName)
                 {
-                    ParameterBindingException bindingException =
-                        new ParameterBindingException(
-                            ErrorCategory.InvalidArgument,
-                            command.MyInvocation,
-                            null,
-                            ppName,
-                            null,
-                            null,
-                            ParameterBinderStrings.RuntimeDefinedParameterNameMismatch,
-                            "RuntimeDefinedParameterNameMismatch",
-                            key);
-
-                    throw bindingException;
+                    ParameterBindingException.ThrowRuntimeDefinedParameterNameMismatch(
+                        command.MyInvocation,
+                        ppName,
+                        key);
                 }
             }
 

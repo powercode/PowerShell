@@ -904,16 +904,11 @@ namespace System.Management.Automation
 
                 if (parameter.ParameterNameSpecified)
                 {
-                    bindingException =
-                        new ParameterBindingException(
-                            ErrorCategory.InvalidArgument,
-                            this.Command.MyInvocation,
-                            GetParameterErrorExtent(parameter),
-                            parameter.ParameterName,
-                            null,
-                            specifiedType,
-                            ParameterBinderStrings.NamedParameterNotFound,
-                            "NamedParameterNotFound");
+                    bindingException = ParameterBindingException.NewNamedParameterNotFound(
+                        this.Command.MyInvocation,
+                        GetParameterErrorExtent(parameter),
+                        parameter.ParameterName,
+                        specifiedType);
                 }
                 else
                 {
@@ -936,16 +931,13 @@ namespace System.Management.Automation
                             catch (Exception e)
                             {
                                 bindingException =
-                                    new ParameterBindingArgumentTransformationException(
+                                    ParameterBindingArgumentTransformationException.NewParameterArgumentTransformationErrorMessageOnly(
                                         e,
-                                        ErrorCategory.InvalidData,
                                         this.InvocationInfo,
                                         null,
                                         null,
                                         null,
                                         parameter.ArgumentValue.GetType(),
-                                        ParameterBinderStrings.ParameterArgumentTransformationErrorMessageOnly,
-                                        "ParameterArgumentTransformationErrorMessageOnly",
                                         e.Message);
 
                                 if (!DefaultParameterBindingInUse)
@@ -959,16 +951,11 @@ namespace System.Management.Automation
                             }
                         }
 
-                        bindingException =
-                            new ParameterBindingException(
-                                ErrorCategory.InvalidArgument,
-                                this.Command.MyInvocation,
-                                null,
-                                argument,
-                                null,
-                                specifiedType,
-                                ParameterBinderStrings.PositionalParameterNotFound,
-                                "PositionalParameterNotFound");
+                        bindingException = ParameterBindingException.NewPositionalParameterNotFound(
+                            this.Command.MyInvocation,
+                            null,
+                            argument,
+                            specifiedType);
                     }
                 }
 
@@ -1055,15 +1042,9 @@ namespace System.Management.Automation
                 string parameterSetName = BindableParameters.GetParameterSetName(parameterSets);
 
                 ParameterBindingException bindingException =
-                    new ParameterBindingException(
-                        ErrorCategory.InvalidArgument,
+                    ParameterBindingException.NewParameterNotInParameterSet(
                         this.Command.MyInvocation,
-                        errorPosition: null,
                         argument.ParameterName,
-                        parameterType: null,
-                        typeSpecified: null,
-                        ParameterBinderStrings.ParameterNotInParameterSet,
-                        "ParameterNotInParameterSet",
                         parameterSetName);
 
                 // Might be caused by default parameter binding
@@ -1219,18 +1200,11 @@ namespace System.Management.Automation
 
                     if (_commandRuntime.IsClosed && _commandRuntime.InputPipe.Empty)
                     {
-                        ParameterBindingException bindingException =
-                            new ParameterBindingException(
-                                    ErrorCategory.MetadataError,
-                                    this.Command.MyInvocation,
-                                    GetErrorExtent(argument),
-                                    parameter.Parameter.Name,
-                                    parameter.Parameter.Type,
-                                    null,
-                                    ParameterBinderStrings.ScriptBlockArgumentNoInput,
-                                    "ScriptBlockArgumentNoInput");
-
-                        throw bindingException;
+                        ParameterBindingException.ThrowScriptBlockArgumentNoInput(
+                            this.Command.MyInvocation,
+                            GetErrorExtent(argument),
+                            parameter.Parameter.Name,
+                            parameter.Parameter.Type);
                     }
 
                     ParameterBinderBase.bindingTracer.WriteLine(
@@ -1476,15 +1450,7 @@ namespace System.Management.Automation
                         if (varargsParameter != null)
                         {
                             ParameterBindingException bindingException =
-                                new ParameterBindingException(
-                                        ErrorCategory.MetadataError,
-                                        this.Command.MyInvocation,
-                                        null,
-                                        parameter.Parameter.Name,
-                                        parameter.Parameter.Type,
-                                        null,
-                                        ParameterBinderStrings.AmbiguousParameterSet,
-                                        "AmbiguousParameterSet");
+                                ParameterBindingException.NewAmbiguousParameterSet(this.Command.MyInvocation);
 
                             // Might be caused by the default parameter binding
                             if (!DefaultParameterBindingInUse)
@@ -1617,16 +1583,9 @@ namespace System.Management.Automation
                                 }
 
                                 ParameterBindingException bindingException =
-                                    new ParameterBindingException(
+                                    ParameterBindingException.NewGetDynamicParametersException(
                                         e,
-                                        ErrorCategory.InvalidArgument,
                                         this.Command.MyInvocation,
-                                        null,
-                                        null,
-                                        null,
-                                        null,
-                                        ParameterBinderStrings.GetDynamicParametersException,
-                                        "GetDynamicParametersException",
                                         e.Message);
 
                                 // This exception is caused because failure happens when retrieving the dynamic parameters,
@@ -2676,15 +2635,7 @@ namespace System.Management.Automation
         private void ThrowAmbiguousParameterSetException(uint parameterSetFlags, MergedCommandParameterMetadata bindableParameters)
         {
             ParameterBindingException bindingException =
-                new ParameterBindingException(
-                    ErrorCategory.InvalidArgument,
-                    this.Command.MyInvocation,
-                    null,
-                    null,
-                    null,
-                    null,
-                    ParameterBinderStrings.AmbiguousParameterSet,
-                    "AmbiguousParameterSet");
+                ParameterBindingException.NewAmbiguousParameterSet(this.Command.MyInvocation);
 
             // Trace the parameter sets still active
             uint currentParameterSet = 1;
@@ -2823,18 +2774,9 @@ namespace System.Management.Automation
 
                         string missingParameters = BuildMissingParamsString(missingMandatoryParameters);
 
-                        ParameterBindingException bindingException =
-                            new ParameterBindingException(
-                                ErrorCategory.InvalidArgument,
-                                this.Command.MyInvocation,
-                                null,
-                                missingParameters,
-                                null,
-                                null,
-                                ParameterBinderStrings.MissingMandatoryParameter,
-                                "MissingMandatoryParameter");
-
-                        throw bindingException;
+                        ParameterBindingException.ThrowMissingMandatoryParameter(
+                            this.Command.MyInvocation,
+                            missingParameters);
                     }
 
                     // Create a collection to store the prompt descriptions of unbound mandatory parameters
@@ -2921,18 +2863,9 @@ namespace System.Management.Automation
 
                 string missingParameters = BuildMissingParamsString(missingMandatoryParameters);
 
-                ParameterBindingException bindingException =
-                    new ParameterBindingException(
-                        ErrorCategory.InvalidArgument,
-                        this.Command.MyInvocation,
-                        null,
-                        missingParameters,
-                        null,
-                        null,
-                        ParameterBinderStrings.MissingMandatoryParameter,
-                        "MissingMandatoryParameter");
-
-                throw bindingException;
+                ParameterBindingException.ThrowMissingMandatoryParameter(
+                    this.Command.MyInvocation,
+                    missingParameters);
             }
 
             if ((parameters == null) || (parameters.Count == 0))
@@ -2942,18 +2875,9 @@ namespace System.Management.Automation
 
                 string missingParameters = BuildMissingParamsString(missingMandatoryParameters);
 
-                ParameterBindingException bindingException =
-                    new ParameterBindingException(
-                        ErrorCategory.InvalidArgument,
-                        this.Command.MyInvocation,
-                        null,
-                        missingParameters,
-                        null,
-                        null,
-                        ParameterBinderStrings.MissingMandatoryParameter,
-                        "MissingMandatoryParameter");
-
-                throw bindingException;
+                ParameterBindingException.ThrowMissingMandatoryParameter(
+                    this.Command.MyInvocation,
+                    missingParameters);
             }
 
             return parameters;
@@ -3690,37 +3614,23 @@ namespace System.Management.Automation
 
                 if (error != null)
                 {
-                    ParameterBindingException bindingException =
-                        new ParameterBindingException(
-                            error,
-                            ErrorCategory.InvalidArgument,
-                            this.Command.MyInvocation,
-                            GetErrorExtent(argument),
-                            parameter.Parameter.Name,
-                            null,
-                            null,
-                            ParameterBinderStrings.ScriptBlockArgumentInvocationFailed,
-                            "ScriptBlockArgumentInvocationFailed",
-                            error.Message);
-
-                    throw bindingException;
+                    ParameterBindingException.ThrowScriptBlockArgumentInvocationFailed(
+                        error,
+                        this.Command.MyInvocation,
+                        GetErrorExtent(argument),
+                        parameter.Parameter.Name,
+                        null,
+                        null,
+                        error.Message);
                 }
 
                 if (output == null || output.Count == 0)
                 {
-                    ParameterBindingException bindingException =
-                        new ParameterBindingException(
-                            null,
-                            ErrorCategory.InvalidArgument,
-                            this.Command.MyInvocation,
-                            GetErrorExtent(argument),
-                            parameter.Parameter.Name,
-                            null,
-                            null,
-                            ParameterBinderStrings.ScriptBlockArgumentNoOutput,
-                            "ScriptBlockArgumentNoOutput");
-
-                    throw bindingException;
+                    ParameterBindingException.ThrowScriptBlockArgumentNoOutput(
+                        this.Command.MyInvocation,
+                        GetErrorExtent(argument),
+                        parameter.Parameter.Name,
+                        null);
                 }
 
                 // Check the output.  If it is only a single value, just pass the single value,
@@ -3826,20 +3736,11 @@ namespace System.Management.Automation
             }
             catch (GetValueException getValueException)
             {
-                ParameterBindingParameterDefaultValueException bindingError =
-                    new ParameterBindingParameterDefaultValueException(
-                        getValueException,
-                        ErrorCategory.ReadError,
-                        this.Command.MyInvocation,
-                        null,
-                        name,
-                        null,
-                        null,
-                        "ParameterBinderStrings",
-                        "GetDefaultValueFailed",
-                        getValueException.Message);
-
-                throw bindingError;
+                ParameterBindingParameterDefaultValueException.ThrowGetDefaultValueFailed(
+                    getValueException,
+                    this.Command.MyInvocation,
+                    name,
+                    getValueException.Message);
             }
 
             return result;
@@ -4199,19 +4100,14 @@ namespace System.Management.Automation
                     if (error != null)
                     {
                         Type specifiedType = argumentToBind.ArgumentValue?.GetType();
-                        ParameterBindingException bindingException =
-                            new ParameterBindingException(
-                                error,
-                                ErrorCategory.WriteError,
-                                this.InvocationInfo,
-                                GetErrorExtent(argumentToBind),
-                                parameter.Parameter.Name,
-                                parameter.Parameter.Type,
-                                specifiedType,
-                                ParameterBinderStrings.ParameterBindingFailed,
-                                "ParameterBindingFailed",
-                                error.Message);
-                        throw bindingException;
+                        ParameterBindingException.ThrowParameterBindingFailed(
+                            error,
+                            this.InvocationInfo,
+                            GetErrorExtent(argumentToBind),
+                            parameter.Parameter.Name,
+                            parameter.Parameter.Type,
+                            specifiedType,
+                            error.Message);
                     }
 
                     // Since the parameter was returned to its original value,
