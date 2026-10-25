@@ -16,6 +16,58 @@
       <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.CommandDiscovery.*"/>
       <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.CommandDiscovery.*"/>
     </Tag>
+    <Tag Name="ParameterBinding">
+      <Tag Name="PipelineBinding">
+        <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.PipelineParameterBinder.*"/>
+        <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.PipelineParameterBinder.*"/>
+      </Tag>
+      <Tag Name="TypeCoercion">
+        <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.ParameterTypeCoercer.*"/>
+        <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.ParameterTypeCoercer.*"/>
+      </Tag>
+      <Tag Name="ParameterSetResolution">
+        <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.ParameterSetResolver.*"/>
+        <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.ParameterSetResolver.*"/>
+      </Tag>
+      <Tag Name="DefaultValues">
+        <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.DefaultParameterValueBinder.*"/>
+        <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.DefaultValueManager.*"/>
+        <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.DefaultParameterValueBinder.*"/>
+        <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.DefaultValueManager.*"/>
+      </Tag>
+      <Tag Name="DynamicParameters">
+        <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.DynamicParameterHandler.*"/>
+        <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.DynamicParameterHandler.*"/>
+      </Tag>
+      <Tag Name="DelayBindScriptBlocks">
+        <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.DelayBindScriptBlockHandler.*"/>
+        <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.DelayBindScriptBlockHandler.*"/>
+      </Tag>
+      <Tag Name="MandatoryParameterPrompting">
+        <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.MandatoryParameterPrompter.*"/>
+        <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.MandatoryParameterPrompter.*"/>
+      </Tag>
+      <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.ParameterBinderController.*"/>
+      <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.CmdletParameterBinderController.*"/>
+      <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.ScriptParameterBinderController.*"/>
+      <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.NativeCommandParameterBinderController.*"/>
+      <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.MinishellParameterBinderController.*"/>
+      <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.ParameterBinderBase.*"/>
+      <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.ReflectionParameterBinder.*"/>
+      <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.ScriptParameterBinder.*"/>
+      <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.RuntimeDefinedParameterBinder.*"/>
+      <Entrypoint Module="System.Management.Automation.dll" Method="System.Management.Automation.NativeCommandParameterBinder.*"/>
+      <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.ParameterBinderController.*"/>
+      <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.CmdletParameterBinderController.*"/>
+      <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.ScriptParameterBinderController.*"/>
+      <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.NativeCommandParameterBinderController.*"/>
+      <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.MinishellParameterBinderController.*"/>
+      <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.ParameterBinderBase.*"/>
+      <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.ReflectionParameterBinder.*"/>
+      <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.ScriptParameterBinder.*"/>
+      <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.RuntimeDefinedParameterBinder.*"/>
+      <Entrypoint Module="System.Management.Automation.ni.dll" Method="System.Management.Automation.NativeCommandParameterBinder.*"/>
+    </Tag>
     <Tag Name="Formatting">
       <Entrypoint Module="System.Management.Automation.dll" Method="Microsoft.PowerShell.Commands.Internal.Format.*"/>
       <Entrypoint Module="System.Management.Automation.ni.dll" Method="Microsoft.PowerShell.Commands.Internal.Format.*"/>
