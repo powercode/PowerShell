@@ -25,6 +25,9 @@ internal interface IDelayBindScriptBlockContext
         CommandParameterInternal argument,
         MergedCompiledCommandParameter parameter,
         ParameterBindingFlags flags);
+
+    /// <summary>Pending delay-bind ScriptBlock entries keyed by parameter.</summary>
+    Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument> DelayBindScriptBlocks { get; }
 }
 
 /// <summary>
@@ -53,19 +56,16 @@ internal sealed class DelayBindScriptBlockHandler
 
     private readonly IDelayBindScriptBlockContext _context;
 
-    private readonly Dictionary<MergedCompiledCommandParameter, DelayedScriptBlockArgument> _delayBindScriptBlocks =
-        new Dictionary<MergedCompiledCommandParameter, DelayedScriptBlockArgument>();
-
     internal DelayBindScriptBlockHandler(IDelayBindScriptBlockContext context)
     {
         _context = context;
     }
 
     private string DebuggerDisplayValue
-        => $"DelayBindHandler: PendingCount={_delayBindScriptBlocks.Count}";
+        => $"DelayBindHandler: PendingCount={_context.DelayBindScriptBlocks.Count}";
 
     /// <summary>Exposes the parameter keys that have pending delay-bind entries.</summary>
-    internal ICollection<MergedCompiledCommandParameter> Keys => _delayBindScriptBlocks.Keys;
+    internal ICollection<MergedCompiledCommandParameter> Keys => _context.DelayBindScriptBlocks.Keys;
 
     /// <summary>
     /// Creates a new <see cref="DelayedScriptBlockArgument"/> owned by this handler.
@@ -78,9 +78,9 @@ internal sealed class DelayBindScriptBlockHandler
     /// </summary>
     internal void TryAdd(MergedCompiledCommandParameter parameter, DelayedScriptBlockArgument delayedArg)
     {
-        if (!_delayBindScriptBlocks.ContainsKey(parameter))
+        if (!_context.DelayBindScriptBlocks.ContainsKey(parameter))
         {
-            _delayBindScriptBlocks.Add(parameter, delayedArg);
+            _context.DelayBindScriptBlocks.Add(parameter, delayedArg);
         }
     }
 
@@ -108,7 +108,7 @@ internal sealed class DelayBindScriptBlockHandler
         // Loop through each of the delay bind script blocks and invoke them.
         // Bind the result to the associated parameter
 
-        foreach (KeyValuePair<MergedCompiledCommandParameter, DelayedScriptBlockArgument> delayedScriptBlock in _delayBindScriptBlocks)
+        foreach (KeyValuePair<MergedCompiledCommandParameter, DelayedScriptBlockArgument> delayedScriptBlock in _context.DelayBindScriptBlocks)
         {
             thereWasSomethingToBind = true;
 

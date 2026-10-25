@@ -14,6 +14,7 @@ using System.Management.Automation.Runspaces;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security;
+using System.Threading;
 
 using Microsoft.PowerShell;
 using Microsoft.PowerShell.Commands.Internal.Format;
@@ -654,6 +655,39 @@ namespace System.Management.Automation
         /// </summary>
         /// <value>Reference to command discovery</value>
         internal CommandProcessorBase CurrentCommandProcessor { get; set; }
+
+        #region BindingState pool
+
+        // Single-entry per-runspace cache for BindingState reuse.
+        // Runspaces execute a single pipeline at a time, so one cached instance is sufficient.
+        // Interlocked.Exchange provides a thread-safety margin for RunspacePool scenarios.
+        private BindingState _cachedBindingState;
+
+        /// <summary>
+        /// Rents a <see cref="BindingState"/> from the per-runspace pool, or allocates a new one.
+        /// The returned instance is fully reset and ready for a new command invocation.
+        /// </summary>
+        internal BindingState RentBindingState(
+            IReadOnlyList<MergedCompiledCommandParameter> allParameters,
+            string commandName)
+        {
+            BindingState state = Interlocked.Exchange(ref _cachedBindingState, null) ?? new BindingState();
+            state.Reset(allParameters, commandName);
+            return state;
+        }
+
+        /// <summary>
+        /// Returns a <see cref="BindingState"/> to the per-runspace pool for reuse.
+        /// Clears all references so cached objects are not kept alive between invocations.
+        /// </summary>
+        internal void ReturnBindingState(BindingState state)
+        {
+            // Reset with empty parameters to release all command-specific object references.
+            state.Reset(System.Array.Empty<MergedCompiledCommandParameter>(), null);
+            Interlocked.Exchange(ref _cachedBindingState, state);
+        }
+
+        #endregion BindingState pool
 
         /// <summary>
         /// Redirect to the CommandDiscovery in the engine.

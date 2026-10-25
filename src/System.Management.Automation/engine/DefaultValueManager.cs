@@ -34,6 +34,9 @@ internal interface IDefaultValueManagerContext
 
     /// <summary>Arguments already matched to a parameter, keyed by parameter name.</summary>
     Dictionary<string, CommandParameterInternal> BoundArguments { get; }
+
+    /// <summary>Saved default values for restoration after each pipeline object is processed.</summary>
+    Dictionary<string, CommandParameterInternal> DefaultParameterValues { get; }
 }
 
 /// <summary>
@@ -44,13 +47,6 @@ internal interface IDefaultValueManagerContext
 internal sealed class DefaultValueManager
 {
     private readonly IDefaultValueManagerContext _context;
-
-    /// <summary>
-    /// Stores saved default values (either from <see cref="SaveScriptParameterValue"/> or
-    /// <see cref="Backup"/>) keyed by parameter name, for restoration after each pipeline object.
-    /// </summary>
-    private readonly Dictionary<string, CommandParameterInternal> _defaultParameterValues =
-        new Dictionary<string, CommandParameterInternal>(StringComparer.OrdinalIgnoreCase);
 
     internal DefaultValueManager(IDefaultValueManagerContext context)
     {
@@ -63,7 +59,7 @@ internal sealed class DefaultValueManager
     /// </summary>
     internal void SaveScriptParameterValue(string name, object value)
     {
-        _defaultParameterValues.Add(name,
+        _context.DefaultParameterValues.Add(name,
             CommandParameterInternal.CreateParameterWithArgument(
                 /*parameterAst*/null, name, "-" + name + ":",
                 /*argumentAst*/null, value,
@@ -75,10 +71,10 @@ internal sealed class DefaultValueManager
     /// </summary>
     internal void Backup(MergedCompiledCommandParameter parameter)
     {
-        if (!_defaultParameterValues.ContainsKey(parameter.Parameter.Name))
+        if (!_context.DefaultParameterValues.ContainsKey(parameter.Parameter.Name))
         {
             object? defaultParameterValue = _context.GetDefaultParameterValue(parameter.Parameter.Name);
-            _defaultParameterValues.Add(
+            _context.DefaultParameterValues.Add(
                 parameter.Parameter.Name,
                 CommandParameterInternal.CreateParameterWithArgument(
                     /*parameterAst*/null, parameter.Parameter.Name, "-" + parameter.Parameter.Name + ":",
@@ -114,7 +110,7 @@ internal sealed class DefaultValueManager
             // If the argument was found then bind it to the parameter
             // and manage the bound and unbound parameter list
 
-            if (_defaultParameterValues.TryGetValue(parameter.Parameter.Name, out CommandParameterInternal? argumentToBind))
+            if (_context.DefaultParameterValues.TryGetValue(parameter.Parameter.Name, out CommandParameterInternal? argumentToBind))
             {
                 // Don't go through the normal binding routine to run data generation,
                 // type coercion, validation, or prerequisites since we know the

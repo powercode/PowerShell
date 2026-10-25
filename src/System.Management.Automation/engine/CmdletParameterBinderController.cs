@@ -91,21 +91,31 @@ namespace System.Management.Automation
                 this.Command,
                 this.CommandLineParameters);
 
-            // Add the static parameter metadata to the bindable parameters
-            // And add them to the unbound parameters list
+            // Record the command name in the binding state for debugger display.
+            State.CommandName = commandMetadata.Name;
 
+            // Resolve the initial unbound parameter list before renting BindingState,
+            // because RentBindingState.Reset() will populate UnboundParameters from it.
+            List<MergedCompiledCommandParameter> initialParameters;
             if (commandMetadata.ImplementsDynamicParameters)
             {
                 // ReplaceMetadata makes a copy for us, so we can use that collection as is.
-                this.UnboundParameters = this.BindableParameters.ReplaceMetadata(commandMetadata.StaticCommandParameterMetadata);
+                initialParameters = this.BindableParameters.ReplaceMetadata(commandMetadata.StaticCommandParameterMetadata);
             }
             else
             {
                 _bindableParameters = commandMetadata.StaticCommandParameterMetadata;
 
                 // Must make a copy of the list because we'll modify it.
-                this.UnboundParameters = new List<MergedCompiledCommandParameter>(_bindableParameters.BindableParameters.Values);
+                initialParameters = new List<MergedCompiledCommandParameter>(_bindableParameters.BindableParameters.Values);
             }
+
+            // Rent a BindingState from the per-runspace pool (or allocate a new one if the pool
+            // is empty). This overwrites the default State allocated by ParameterBinderController.
+            State = cmdlet.Context.RentBindingState(initialParameters, commandMetadata.Name);
+
+            // In DEBUG builds, assert that the rented state is fully clean.
+            State.AssertClean(initialParameters.Count);
 
             ParameterSetResolver = new System.Management.Automation.ParameterSetResolver(
                 commandMetadata: _commandMetadata,
@@ -132,6 +142,16 @@ namespace System.Management.Automation
         }
 
         #endregion ctor
+
+        /// <summary>
+        /// Returns the rented <see cref="BindingState"/> to the per-runspace pool on
+        /// <see cref="ExecutionContext"/> so it can be reused by the next command invocation.
+        /// Called from <see cref="CommandProcessor"/> during disposal.
+        /// </summary>
+        internal void ReturnState()
+        {
+            Context.ReturnBindingState(State);
+        }
 
         private string DebuggerDisplayValue
         {
@@ -179,6 +199,27 @@ namespace System.Management.Automation
         HashSet<string> IDefaultParameterBindingContext.CopyBoundPositionalParameters()
             => DefaultParameterBinder.CommandLineParameters.CopyBoundPositionalParameters();
 
+        List<string>? IDefaultParameterBindingContext.DefaultParameterAliasList
+        {
+            get => State.DefaultParameterAliasList;
+            set => State.DefaultParameterAliasList = value;
+        }
+
+        HashSet<string> IDefaultParameterBindingContext.DefaultParameterWarningSet
+            => State.DefaultParameterWarningSet;
+
+        Dictionary<MergedCompiledCommandParameter, object>? IDefaultParameterBindingContext.AllDefaultParameterValuePairs
+        {
+            get => State.AllDefaultParameterValuePairs;
+            set => State.AllDefaultParameterValuePairs = value;
+        }
+
+        bool IDefaultParameterBindingContext.UseDefaultParameterBinding
+        {
+            get => State.UseDefaultParameterBinding;
+            set => State.UseDefaultParameterBinding = value;
+        }
+
         IList<MergedCompiledCommandParameter> IPipelineParameterBindingContext.UnboundParameters => UnboundParameters;
 
         Collection<MergedCompiledCommandParameter> IPipelineParameterBindingContext.ParametersBoundThroughPipelineInput
@@ -209,6 +250,9 @@ namespace System.Management.Automation
             MergedCompiledCommandParameter parameter,
             ParameterBindingFlags flags)
             => BindToAssociatedBinder(argument, parameter, flags);
+
+        Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument> IDelayBindScriptBlockContext.DelayBindScriptBlocks
+            => State.DelayBindScriptBlocks;
 
         void IPipelineParameterBindingContext.BackupDefaultParameter(MergedCompiledCommandParameter parameter)
             => _defaultValueManager.Backup(parameter);
@@ -290,6 +334,9 @@ namespace System.Management.Automation
         IList<MergedCompiledCommandParameter> IDefaultValueManagerContext.UnboundParameters => UnboundParameters;
 
         Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.BoundArguments => BoundArguments;
+
+        Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.DefaultParameterValues
+            => State.DefaultParameterValues;
 
         #region helper_methods
 
@@ -959,9 +1006,9 @@ namespace System.Management.Automation
 
                     BoundObsoleteParameterNames.Add(parameter.Parameter.Name);
 
-                    ObsoleteParameterWarningList ??= new List<WarningRecord>();
+                    State.ObsoleteParameterWarningList ??= new List<WarningRecord>();
 
-                    ObsoleteParameterWarningList.Add(warningRecord);
+                    State.ObsoleteParameterWarningList.Add(warningRecord);
                 }
             }
 
@@ -1189,8 +1236,9 @@ namespace System.Management.Automation
 
         /// <summary>
         /// Keep the obsolete parameter warnings generated from parameter binding.
+        /// Routes through <see cref="BindingState"/> for pooled allocation.
         /// </summary>
-        internal List<WarningRecord>? ObsoleteParameterWarningList { get; private set; }
+        internal List<WarningRecord>? ObsoleteParameterWarningList => State.ObsoleteParameterWarningList;
 
         /// <summary>
         /// Keep names of the parameters for which we have generated obsolete warning messages.
@@ -1199,11 +1247,9 @@ namespace System.Management.Automation
         {
             get
             {
-                return _boundObsoleteParameterNames ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                return State.BoundObsoleteParameterNames ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             }
         }
-
-        private HashSet<string>? _boundObsoleteParameterNames;
 
         private readonly ReflectionParameterBinder _commonParametersBinder;
         private readonly ReflectionParameterBinder _shouldProcessParameterBinder;
