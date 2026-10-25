@@ -52,6 +52,64 @@ Start-Benchmarking -Runtime <string[]> [-Filter <string[]>] [-Artifacts <string>
 ```
 Run `Get-Help Start-Benchmarking -Full` to see the description of each parameter.
 
+### Parameter Binder Benchmarks
+
+The source-build-only `ParameterBindingIsolation` benchmarks call
+`CmdletParameterBinderController` directly for named, positional, and pipeline binding.
+They are compiled when `PERF_TARGET_VERSION` is unset. Although runspace and controller
+construction happen in `GlobalSetup` and are not timed, the controller still relies on
+PowerShell engine types and services. The named and positional cases reset the controller's
+mutable binding state inside each measured operation. `Start-Benchmarking` tab completion
+enumerates available benchmark names with `-List flat` and caches them for the module session.
+
+See the `Start-Benchmarking` help examples for commands to run the full isolation group or an
+individual case:
+
+```powershell
+Import-Module ./test/perf/perf.psm1
+Get-Help Start-Benchmarking -Examples
+```
+
+The module defaults to `-TargetFramework net11.0`, which benchmarks the current source tree
+when `PERF_TARGET_VERSION` is unset. By default, results are written to
+`test/perf/BenchmarkDotNet.Artifacts`; specify `-Artifacts <path>` to choose another output
+directory. Keep source-build and NuGet-package benchmark runs separate: the direct controller
+cases are available only in source-build mode. Direct-binding timings and end-to-end
+`ScriptBlock` timings measure different scopes and should not be compared as if they were
+equivalent operations.
+
+The source-only `MandatoryParameterChecks` group compares the legacy post-binding mandatory
+check with the allocation-free presence check and its diagnostic fallback. Its scenarios cover
+an empty unbound list, optional parameters, the inactive mandatory parameters of the
+`Where-Object` script-block set, and a genuinely missing mandatory parameter. Setup verifies
+the expected result and is excluded from measurement:
+
+```powershell
+Start-Benchmarking -TargetFramework net11.0 -Filter '*MandatoryParameterChecks*'
+```
+
+`PipelineBindingWithMandatoryCheck_1Param_100kObjects` includes both pipeline binding and the
+mandatory-check gate used for record admission. It normalizes its 100,000-object batch to
+per-record results using `OperationsPerInvoke`; the existing `PurePipelineBinding` benchmarks
+measure binding alone and report the whole batch. Neither benchmark includes `ProcessRecord`
+or input production. Zero allocation in the isolated mandatory presence check does not imply
+zero allocation for the complete pipeline.
+
+Use separate, dedicated `-Artifacts` directories for before/after measurements.
+`Start-Benchmarking` removes an existing artifact directory before running.
+
+For consumer comparisons, enumerate a fixed set of paths once before measurement and feed
+that same array to `Where-Object`, `ForEach-Object`, `Group-Object`, `Select-Object`, and
+`Sort-Object`. Also measure the live `Get-ChildItem` producer pipelines and a producer-only
+case. This distinguishes enumeration from consumer work. These
+consumers have different output sizes and algorithms, so report bytes and time per input
+record, along with result/group counts; do not interpret total pipeline timings as binder
+cost. A tiny binder-share difference in a command dominated by sorting, grouping, or I/O is
+not evidence of a useful binding optimization.
+
+Treat `Select-String` as an I/O-heavy command comparison, not a parameter-binding benchmark.
+For binding attribution, use prebuilt input, no-op consumers, and record-admission benchmarks.
+
 ### Regression Detection
 
 We use the tool [`ResultsComparer`](../dotnet-tools/ResultsComparer) to compare the provided benchmark results.

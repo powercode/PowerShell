@@ -4,6 +4,38 @@
 $repoRoot = git rev-parse --show-toplevel
 Import-Module "$repoRoot/build.psm1"
 
+$script:BenchmarkFilterCompletionCache = $null
+
+function Get-BenchmarkFilterCompletion
+{
+    param(
+        [string] $WordToComplete
+    )
+
+    if ($null -eq $script:BenchmarkFilterCompletionCache) {
+        $artifactsPath = Join-Path ([System.IO.Path]::GetTempPath()) "powershell-benchmark-completion-$([guid]::NewGuid().ToString('N'))"
+        try {
+            $script:BenchmarkFilterCompletionCache = @(Start-Benchmarking -List flat -Quiet -Artifacts $artifactsPath)
+        }
+        finally {
+            if (Test-Path -LiteralPath $artifactsPath) {
+                Remove-Item -LiteralPath $artifactsPath -Recurse -Force -ErrorAction Stop
+            }
+        }
+    }
+
+    $searchTerm = $WordToComplete.Trim([char[]]@("'", '"')) -replace '[*?]', ''
+    foreach ($benchmarkName in $script:BenchmarkFilterCompletionCache) {
+        if ([string]::IsNullOrEmpty($searchTerm) -or $benchmarkName.IndexOf($searchTerm, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            [System.Management.Automation.CompletionResult]::new(
+                $benchmarkName,
+                $benchmarkName,
+                [System.Management.Automation.CompletionResultType]::ParameterValue,
+                $benchmarkName)
+        }
+    }
+}
+
 function Start-Benchmarking
 {
     <#
@@ -25,36 +57,63 @@ function Start-Benchmarking
 
     .PARAMETER Filter
     One or more wildcard patterns to filter the benchmarks to be executed or to be listed.
+    Tab completion lists available benchmarks from the current source build using
+    'Start-Benchmarking -List flat'. The list is cached for the current module session.
 
     .PARAMETER Artifacts
     Path to the folder where you want to store the artifacts produced from running benchmarks.
 
     .PARAMETER KeepFiles
     Indicates to keep all temporary files produced for running benchmarks.
+
+    .PARAMETER Quiet
+        Suppress log output messages when listing benchmarks.
+    .EXAMPLE
+    Import-Module ./test/perf/perf.psm1
+    Start-Benchmarking -TargetFramework net11.0 -Filter '*ParameterBindingIsolation*'
+
+    Runs the source-build parameter-binding isolation benchmarks against the current code.
+    BenchmarkDotNet writes artifacts to test/perf/BenchmarkDotNet.Artifacts by default.
+
+    .EXAMPLE
+    Import-Module ./test/perf/perf.psm1
+    Start-Benchmarking -TargetFramework net11.0 -Filter '*PureNamedBinding_3Params*' -Artifacts ./artifacts/ParameterBinding
+
+    Runs one direct parameter-binding benchmark and writes artifacts to the specified directory.
     #>
     [CmdletBinding(DefaultParameterSetName = 'TargetFramework')]
     param(
         [Parameter(ParameterSetName = 'TargetPSVersion')]
         [ValidatePattern(
-            '^7\.(0|1|2)\.\d+(-preview\.\d{1,2})?$',
+            '^7\.\d+\.\d+(-preview\.\d{1,2})?$',
             ErrorMessage = 'The package version is invalid or not supported')]
         [string] $TargetPSVersion,
 
         [Parameter(ParameterSetName = 'TargetFramework')]
-        [ValidateSet('netcoreapp3.1', 'net5.0', 'net6.0')]
-        [string] $TargetFramework = 'net6.0',
+        [ValidateSet('netcoreapp3.1', 'net5.0', 'net6.0', 'net8.0', 'net9.0', 'net10.0', 'net11.0')]
+        [string] $TargetFramework = 'net11.0',
 
         [Parameter(ParameterSetName = 'TargetFramework')]
         [ValidateSet('flat', 'tree')]
         [string] $List,
 
         [Parameter(Mandatory, ParameterSetName = 'Runtimes')]
-        [ValidateSet('netcoreapp3.1', 'net5.0', 'net6.0')]
+        [ValidateSet('netcoreapp3.1', 'net5.0', 'net6.0', 'net8.0', 'net9.0', 'net10.0', 'net11.0')]
         [string[]] $Runtime,
 
+        [System.Management.Automation.ArgumentCompleter({
+            param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+            $module = (Get-Command -Name $commandName -CommandType Function).Module
+            & $module {
+                param($WordToComplete)
+                Get-BenchmarkFilterCompletion -WordToComplete $WordToComplete
+            } $wordToComplete
+        })]
         [string[]] $Filter = '*',
         [string] $Artifacts,
-        [switch] $KeepFiles
+        [switch] $KeepFiles,
+        [Parameter(ParameterSetName = 'TargetFramework')]
+        [switch] $Quiet
     )
 
     Begin {
@@ -88,13 +147,14 @@ function Start-Benchmarking
             $savedOFS = $OFS; $OFS = $null
 
             ## Aggregate BDN arguments.
-            $runArgs = @('--filter')
-            foreach ($entry in $Filter) { $runArgs += $entry }
-            $runArgs += '--artifacts', $Artifacts
-            $runArgs += '--envVars', 'POWERSHELL_TELEMETRY_OPTOUT:1'
-
-            if ($List) { $runArgs += '--list', $List }
-            if ($KeepFiles) { $runArgs += "--keepFiles" }
+            $runArgs = @(
+                '--filter'
+                foreach($entry in $Filter) { $entry }
+                '--artifacts', $Artifacts
+                '--envVars', 'POWERSHELL_TELEMETRY_OPTOUT:1'
+                if ($List) { '--list', $List }
+                if ($KeepFiles) { '--keepFiles' }
+            )
 
             switch ($PSCmdlet.ParameterSetName) {
                 'TargetPSVersion' {
@@ -108,8 +168,10 @@ function Start-Benchmarking
                 }
 
                 'TargetFramework' {
-                    $message = if ($TargetFramework -eq 'net6.0') { 'the current PowerShell code base ...' } else { "the corresponding latest version of 'Microsoft.PowerShell.SDK' ..." }
-                    Write-Log -message "Run benchmarks targeting '$TargetFramework' and $message"
+                    if (-not $Quiet) {
+                        $message = if ($TargetFramework -eq 'net11.0') { 'the current PowerShell code base ...' } else { "the corresponding latest version of 'Microsoft.PowerShell.SDK' ..." }
+                        Write-Log -message "Run benchmarks targeting '$TargetFramework' and $message"
+                    }
 
                     ## Use 'Release' instead of 'release' (note the capital case) because BDN uses 'Release' when building the auto-generated
                     ## project, and MSBuild somehow recognizes 'release' and 'Release' as two different configurations and thus will rebuild
@@ -123,7 +185,7 @@ function Start-Benchmarking
                     ## Use 'Release' instead of 'release' (note the capital case) because BDN uses 'Release' when building the auto-generated
                     ## project, and MSBuild somehow recognizes 'release' and 'Release' as two different configurations and thus will rebuild
                     ## all dependencies unnecessarily.
-                    dotnet run -c Release -f net6.0 --runtimes $Runtime $runArgs
+                    dotnet run -c Release -f net11.0 --runtimes $Runtime $runArgs
                 }
             }
 
@@ -167,6 +229,18 @@ function Compare-BenchmarkResult
 
     .PARAMETER Top
     Filter the diff to top `N` results
+
+    .EXAMPLE
+    Import-Module ./test/perf/perf.psm1
+    Compare-BenchmarkResult -BaseResultPath ./artifacts/ParameterBinding/baseline -DiffResultPath ./artifacts/ParameterBinding/current -Threshold 5%
+
+    Compares the baseline and current parameter-binding benchmark results and reports statistically significant differences above the threshold.
+
+    .EXAMPLE
+    Import-Module ./test/perf/perf.psm1
+    Compare-BenchmarkResult -BaseResultPath ./artifacts/ParameterBinding/baseline -DiffResultPath ./artifacts/ParameterBinding/current -Threshold 5% -Noise 0.5ns -Top 10
+
+    Uses a 0.5 ns noise filter and shows at most the top 10 results.
     #>
     param(
         [Parameter(Mandatory)]
