@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Collections;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Management.Automation.Internal;
 using System.Management.Automation.Security;
@@ -400,7 +401,7 @@ namespace System.Management.Automation
         /// host interfaces. These will be sent to the parameter binder controller
         /// for processing.
         /// </summary>
-        internal Collection<CommandParameterInternal> arguments = new Collection<CommandParameterInternal>();
+        internal List<CommandParameterInternal> arguments = new();
 
         /// <summary>
         /// Adds an unbound parameter.

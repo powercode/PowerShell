@@ -325,8 +325,7 @@ namespace System.Management.Automation
                 new Collection<CommandParameterInfo>();
 
             // Get the parameters in the parameter set
-            Collection<MergedCompiledCommandParameter> compiledParameters =
-                parameterMetadata.GetParametersInParameterSet(parameterSetFlag);
+            var compiledParameters = parameterMetadata.GetParametersInParameterSet(parameterSetFlag);
 
             foreach (MergedCompiledCommandParameter parameter in compiledParameters)
             {

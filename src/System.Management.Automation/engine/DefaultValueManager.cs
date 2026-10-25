@@ -179,7 +179,7 @@ internal sealed class DefaultValueManager
 
                 // Ensure the parameter is not in the unboundParameters list
 
-                BindingState.SwapRemove(_context.UnboundParameters, parameter);
+                ParameterBindingState.SwapRemove(_context.UnboundParameters, parameter);
             }
         }
     }

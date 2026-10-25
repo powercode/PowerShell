@@ -32,7 +32,7 @@ internal interface IDelayBindScriptBlockContext
 
 /// <summary>
 /// Encapsulates the delay-bind ScriptBlock deferral, invocation, and per-pipeline-object
-/// result binding. Extracted from <see cref="CmdletParameterBinderController"/> to satisfy SRP.
+/// result binding.
 /// </summary>
 [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
 internal sealed class DelayBindScriptBlockHandler

@@ -457,7 +457,7 @@ namespace PSTests.Parallel
                 [parameter.Parameter.ParameterSetFlags] = promptingSet,
             };
 
-            var result = new Collection<MergedCompiledCommandParameter>();
+            var result = new List<MergedCompiledCommandParameter>();
             ParameterSetResolver.CollectNonpipelineableMandatoryParameters(promptingData, parameter.Parameter.ParameterSetFlags, result);
 
             Assert.Single(result);
@@ -475,7 +475,7 @@ namespace PSTests.Parallel
             context.UnboundParameters = new List<MergedCompiledCommandParameter> { name };
             resolver.CurrentParameterSetFlag = name.Parameter.ParameterSetFlags;
 
-            Collection<MergedCompiledCommandParameter> missing = resolver.GetMissingMandatoryParameters(validParameterSetCount: 1, isPipelineInputExpected: false);
+            List<MergedCompiledCommandParameter> missing = resolver.GetMissingMandatoryParameters(validParameterSetCount: 1, isPipelineInputExpected: false);
 
             Assert.Single(missing);
             Assert.Same(name, missing[0]);
@@ -492,7 +492,7 @@ namespace PSTests.Parallel
             context.UnboundParameters = new List<MergedCompiledCommandParameter> { name };
             resolver.CurrentParameterSetFlag = name.Parameter.ParameterSetFlags;
 
-            Collection<MergedCompiledCommandParameter> missing = resolver.GetMissingMandatoryParameters(validParameterSetCount: 1, isPipelineInputExpected: true);
+            List<MergedCompiledCommandParameter> missing = resolver.GetMissingMandatoryParameters(validParameterSetCount: 1, isPipelineInputExpected: true);
 
             Assert.Single(missing);
             Assert.Same(name, missing[0]);
@@ -509,7 +509,7 @@ namespace PSTests.Parallel
             context.UnboundParameters = new List<MergedCompiledCommandParameter> { name };
             resolver.CurrentParameterSetFlag = name.Parameter.ParameterSetFlags;
 
-            Collection<MergedCompiledCommandParameter> missing = resolver.GetMissingMandatoryParameters(validParameterSetCount: 1, isPipelineInputExpected: false);
+            List<MergedCompiledCommandParameter> missing = resolver.GetMissingMandatoryParameters(validParameterSetCount: 1, isPipelineInputExpected: false);
 
             Assert.Empty(missing);
         }

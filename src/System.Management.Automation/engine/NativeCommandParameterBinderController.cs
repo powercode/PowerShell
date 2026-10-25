@@ -3,6 +3,7 @@
 
 #nullable enable
 
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 
@@ -105,7 +106,7 @@ namespace System.Management.Automation
         /// For any parameters that do not have a name, they are added to the command
         /// line arguments for the command
         /// </remarks>
-        internal override Collection<CommandParameterInternal> BindParameters(Collection<CommandParameterInternal> parameters)
+        internal override List<CommandParameterInternal> BindParameters(List<CommandParameterInternal> parameters)
         {
             ((NativeCommandParameterBinder)DefaultParameterBinder).BindParameters(parameters);
 
@@ -114,6 +115,6 @@ namespace System.Management.Automation
             return s_emptyReturnCollection;
         }
 
-        private static readonly Collection<CommandParameterInternal> s_emptyReturnCollection = new Collection<CommandParameterInternal>();
+        private static readonly List<CommandParameterInternal> s_emptyReturnCollection = [];
     }
 }

@@ -82,7 +82,7 @@ namespace System.Management.Automation
             return null;
         }
 
-        internal void BindParameters(Collection<CommandParameterInternal> parameters)
+        internal void BindParameters(List<CommandParameterInternal> parameters)
         {
             bool sawVerbatimArgumentMarker = false;
             bool first = true;
@@ -199,7 +199,7 @@ namespace System.Management.Automation
             }
         }
 
-        private readonly List<string> _argumentList = new List<string>();
+        private readonly List<string> _argumentList = new();
 
         /// <summary>
         /// Gets a value indicating whether to use an ArgumentList or string for arguments when invoking a native executable.

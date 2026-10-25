@@ -35,7 +35,6 @@ internal interface IParameterBindingContext
 
 /// <summary>
 /// Encapsulates parameter-set state management, validation, and resolution.
-/// Extracted from CmdletParameterBinderController to satisfy SRP.
 /// </summary>
 [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
 internal sealed class ParameterSetResolver
@@ -373,11 +372,9 @@ internal sealed class ParameterSetResolver
         return false;
     }
 
-    internal Collection<MergedCompiledCommandParameter> GetMissingMandatoryParameters(
-        int validParameterSetCount,
-        bool isPipelineInputExpected)
+    internal List<MergedCompiledCommandParameter> GetMissingMandatoryParameters(int validParameterSetCount, bool isPipelineInputExpected)
     {
-        Collection<MergedCompiledCommandParameter> result = new Collection<MergedCompiledCommandParameter>();
+        List<MergedCompiledCommandParameter> result = new();
 
         uint defaultParameterSet = _commandMetadata.DefaultParameterSetFlag;
         uint commandMandatorySets = 0;
@@ -405,7 +402,7 @@ internal sealed class ParameterSetResolver
                     availableParameterSetFlags = uint.MaxValue;
                 }
 
-                commandMandatorySets = (CurrentParameterSetFlag & availableParameterSetFlags);
+                commandMandatorySets = CurrentParameterSetFlag & availableParameterSetFlags;
             }
 
             if (validParameterSetCount > 1 &&
@@ -468,7 +465,7 @@ internal sealed class ParameterSetResolver
     private Dictionary<uint, ParameterSetPromptingData> CollectMandatoryPromptingData(
         uint defaultParameterSet,
         bool isPipelineInputExpected,
-        Collection<MergedCompiledCommandParameter> result,
+        List<MergedCompiledCommandParameter> result,
         ref uint commandMandatorySets,
         out bool missingAMandatoryParameter,
         out bool missingAMandatoryParameterInAllSet)
@@ -525,7 +522,7 @@ internal sealed class ParameterSetResolver
     internal static void CollectNonpipelineableMandatoryParameters(
         Dictionary<uint, ParameterSetPromptingData> promptingData,
         uint mandatorySets,
-        Collection<MergedCompiledCommandParameter> result)
+        List<MergedCompiledCommandParameter> result)
     {
         foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
         {
@@ -545,7 +542,7 @@ internal sealed class ParameterSetResolver
         Dictionary<uint, ParameterSetPromptingData> promptingData,
         uint commandMandatorySets,
         uint defaultParameterSet,
-        Collection<MergedCompiledCommandParameter> result)
+        List<MergedCompiledCommandParameter> result)
     {
         if (defaultParameterSet == 0 || (commandMandatorySets & defaultParameterSet) == 0)
         {
@@ -617,7 +614,7 @@ internal sealed class ParameterSetResolver
     private bool TryLatchToUniquePipelineSet(
         Dictionary<uint, ParameterSetPromptingData> promptingData,
         uint commandMandatorySets,
-        Collection<MergedCompiledCommandParameter> result)
+        List<MergedCompiledCommandParameter> result)
     {
         uint setThatTakesPipelineInputByValue = 0;
         uint setThatTakesPipelineInputByPropertyName = 0;

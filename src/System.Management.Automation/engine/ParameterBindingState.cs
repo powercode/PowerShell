@@ -4,19 +4,17 @@
 #nullable enable
 
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
 namespace System.Management.Automation
 {
     /// <summary>
-    /// Consolidates the per-invocation mutable binding state that was previously scattered
-    /// across <see cref="ParameterBinderController"/> and its SRP components.
-    /// A single <see cref="BindingState"/> instance travels with each command invocation.
+    /// Consolidates the per-invocation mutable binding state for the parameter binding subsystem.
+    /// A single <see cref="ParameterBindingState"/> instance travels with each command invocation.
     /// </summary>
     [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
-    internal sealed class BindingState
+    internal sealed class ParameterBindingState
     {
         /// <summary>
         /// The name of the command being bound. Set by the controller at initialization.
@@ -38,7 +36,7 @@ namespace System.Management.Automation
         /// <summary>
         /// Command-line arguments that have not yet been matched to a parameter.
         /// </summary>
-        internal Collection<CommandParameterInternal> UnboundArguments { get; set; } = [];
+        internal List<CommandParameterInternal> UnboundArguments { get; set; } = [];
 
         /// <summary>
         /// Arguments that have been bound, keyed by parameter name (OrdinalIgnoreCase).
@@ -49,7 +47,7 @@ namespace System.Management.Automation
         /// <summary>
         /// Names of parameters that were bound via <c>$PSDefaultParameterValues</c>.
         /// </summary>
-        internal Collection<string> BoundDefaultParameters { get; } = [];
+        internal List<string> BoundDefaultParameters { get; } = [];
 
         /// <summary>
         /// Whether default parameter binding from <c>$PSDefaultParameterValues</c> is active.
@@ -59,72 +57,102 @@ namespace System.Management.Automation
         /// <summary>
         /// Parameters that received their value from the pipeline input.
         /// </summary>
-        internal Collection<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput { get; }
-            = new Collection<MergedCompiledCommandParameter>();
+        internal List<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput { get; } = [];
 
-        // ── Task 3.1: DefaultValueManager state ──────────────────────────────────────
+        // ── Default-value tracking ──────────────────────────────────────────────────
 
         /// <summary>
         /// Saved default values for restoration after each pipeline-object is processed,
         /// keyed by parameter name (OrdinalIgnoreCase).
-        /// Previously stored as a field on <see cref="DefaultValueManager"/>.
         /// </summary>
         internal Dictionary<string, CommandParameterInternal> DefaultParameterValues { get; }
             = new Dictionary<string, CommandParameterInternal>(StringComparer.OrdinalIgnoreCase);
 
-        // ── Task 3.2: DelayBindScriptBlockHandler state ───────────────────────────────
+        // ── Delay-bind ScriptBlock state ──────────────────────────────────────────────
 
         /// <summary>
         /// ScriptBlock arguments deferred for per-pipeline-object evaluation, keyed by parameter.
-        /// Previously stored as a field on <see cref="DelayBindScriptBlockHandler"/>.
         /// </summary>
         internal Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument> DelayBindScriptBlocks { get; }
             = new Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument>();
 
-        // ── Task 3.3: DefaultParameterValueBinder state ───────────────────────────────
+        // ── $PSDefaultParameterValues state ──────────────────────────────────────────
 
         /// <summary>
         /// Aliases of the current cmdlet, cached per invocation for <c>$PSDefaultParameterValues</c> matching.
-        /// Previously stored as <c>_aliasList</c> on <see cref="DefaultParameterValueBinder"/>.
         /// </summary>
         internal List<string>? DefaultParameterAliasList { get; set; }
 
         /// <summary>
         /// Keys for which a <c>$PSDefaultParameterValues</c> warning has already been emitted.
         /// Prevents duplicate warnings within a single invocation.
-        /// Previously stored as <c>_warningSet</c> on <see cref="DefaultParameterValueBinder"/>.
         /// </summary>
         internal HashSet<string> DefaultParameterWarningSet { get; }
             = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// The last computed set of qualified default parameter value pairs.
-        /// Previously stored as <c>_allDefaultParameterValuePairs</c> on <see cref="DefaultParameterValueBinder"/>.
         /// </summary>
         internal Dictionary<MergedCompiledCommandParameter, object>? AllDefaultParameterValuePairs { get; set; }
 
         /// <summary>
         /// Whether <c>$PSDefaultParameterValues</c> binding should be attempted for this invocation.
         /// Set to <see langword="false"/> when the dictionary has <c>Disabled=true</c>.
-        /// Previously stored as <c>_useDefaultParameterBinding</c> on <see cref="DefaultParameterValueBinder"/>.
         /// </summary>
         internal bool UseDefaultParameterBinding { get; set; } = true;
 
-        // ── Task 3.4: CmdletParameterBinderController obsolete-tracking state ─────────
+        // ── Obsolete-parameter tracking ────────────────────────────────────────────
 
         /// <summary>
         /// Names of parameters for which an obsolete warning has already been generated.
         /// Lazy-allocated; <see langword="null"/> when no obsolete parameters have been bound.
-        /// Previously stored as <c>_boundObsoleteParameterNames</c> on <see cref="CmdletParameterBinderController"/>.
         /// </summary>
         internal HashSet<string>? BoundObsoleteParameterNames { get; set; }
 
         /// <summary>
         /// Accumulated obsolete-parameter warning records, flushed in <c>DoBegin</c>.
         /// Lazy-allocated; <see langword="null"/> when no obsolete parameters have been bound.
-        /// Previously stored as <c>ObsoleteParameterWarningList</c> on <see cref="CmdletParameterBinderController"/>.
         /// </summary>
         internal List<WarningRecord>? ObsoleteParameterWarningList { get; set; }
+
+        // ── Positional parameter dictionary cache ─────────────────────────────────────
+
+        /// <summary>
+        /// Cached result of <c>EvaluateUnboundPositionalParameters</c>.
+        /// Valid when <see cref="_cachedPositionalUnboundCount"/> and
+        /// <see cref="_cachedPositionalSetFlag"/> match the current binding state.
+        /// </summary>
+        private SortedDictionary<int, Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter>>? _cachedPositionalDict;
+        private int _cachedPositionalUnboundCount;
+        private uint _cachedPositionalSetFlag;
+
+        /// <summary>
+        /// Returns the cached positional dictionary if the (unboundCount, setFlag) key matches;
+        /// otherwise returns <see langword="null"/>.
+        /// </summary>
+        internal SortedDictionary<int, Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter>>?
+            GetCachedPositionalDictionary(int unboundCount, uint validParameterSetFlag)
+        {
+            if (_cachedPositionalDict != null
+                && _cachedPositionalUnboundCount == unboundCount
+                && _cachedPositionalSetFlag == validParameterSetFlag)
+            {
+                return _cachedPositionalDict;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Stores the computed positional dictionary together with the key used to validate it.
+        /// </summary>
+        internal void SetCachedPositionalDictionary(
+            SortedDictionary<int, Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter>> dict,
+            int unboundCount, uint validParameterSetFlag)
+        {
+            _cachedPositionalDict = dict;
+            _cachedPositionalUnboundCount = unboundCount;
+            _cachedPositionalSetFlag = validParameterSetFlag;
+        }
 
         // ── Pipeline CPI pool ─────────────────────────────────────────────────────────
 
@@ -211,21 +239,26 @@ namespace System.Management.Automation
             BoundDefaultParameters.Clear();
             DefaultParameterBindingInUse = false;
 
-            // DefaultValueManager state (Task 3.1)
+            // Default-value tracking
             DefaultParameterValues.Clear();
 
-            // DelayBindScriptBlockHandler state (Task 3.2)
+            // Delay-bind ScriptBlock state
             DelayBindScriptBlocks.Clear();
 
-            // DefaultParameterValueBinder state (Task 3.3)
+            // $PSDefaultParameterValues state
             DefaultParameterAliasList = null;
             DefaultParameterWarningSet.Clear();
             AllDefaultParameterValuePairs = null;
             UseDefaultParameterBinding = true;
 
-            // Obsolete-tracking state (Task 3.4)
+            // Obsolete-parameter tracking
             BoundObsoleteParameterNames = null;
             ObsoleteParameterWarningList = null;
+
+            // Positional parameter dictionary cache
+            _cachedPositionalDict = null;
+            _cachedPositionalUnboundCount = 0;
+            _cachedPositionalSetFlag = 0;
 
             // Pipeline CPI pool — drop all refs so pooled CPIs don't outlive this invocation
             _cpiPoolCount = 0;
@@ -254,6 +287,7 @@ namespace System.Management.Automation
             Debug.Assert(UseDefaultParameterBinding, $"[{caller}] UseDefaultParameterBinding not reset to true after Reset");
             Debug.Assert(BoundObsoleteParameterNames == null, $"[{caller}] BoundObsoleteParameterNames not clean after Reset");
             Debug.Assert(ObsoleteParameterWarningList == null, $"[{caller}] ObsoleteParameterWarningList not clean after Reset");
+            Debug.Assert(_cachedPositionalDict == null, $"[{caller}] _cachedPositionalDict not clean after Reset");
         }
 
         // ── O(1) list-removal helpers ─────────────────────────────────────────────────

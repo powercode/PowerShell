@@ -26,7 +26,6 @@ internal interface IMandatoryParameterPrompterContext
 
 /// <summary>
 /// Encapsulates mandatory-parameter detection, user prompting, and prompt data structure building.
-/// Extracted from <see cref="CmdletParameterBinderController"/> to satisfy SRP.
 /// </summary>
 [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
 internal sealed class MandatoryParameterPrompter
@@ -79,7 +78,7 @@ internal sealed class MandatoryParameterPrompter
     /// <returns>
     /// True if there are no unbound mandatory parameters. False if there are unbound mandatory parameters.
     /// </returns>
-    internal bool HandleUnboundMandatoryParameters(out Collection<MergedCompiledCommandParameter> missingMandatoryParameters)
+    internal bool HandleUnboundMandatoryParameters(out List<MergedCompiledCommandParameter> missingMandatoryParameters)
     {
         return HandleUnboundMandatoryParameters(
             ParameterSetResolver.ValidParameterSetCount(_parameterSetResolver.CurrentParameterSetFlag),
@@ -123,7 +122,7 @@ internal sealed class MandatoryParameterPrompter
         bool processMissingMandatory,
         bool promptForMandatory,
         bool isPipelineInputExpected,
-        out Collection<MergedCompiledCommandParameter> missingMandatoryParameters)
+        out List<MergedCompiledCommandParameter> missingMandatoryParameters)
     {
         bool result = true;
 
@@ -194,7 +193,7 @@ internal sealed class MandatoryParameterPrompter
 
     private Dictionary<string, PSObject> PromptForMissingMandatoryParameters(
         Collection<FieldDescription> fieldDescriptionList,
-        Collection<MergedCompiledCommandParameter> missingMandatoryParameters)
+        List<MergedCompiledCommandParameter> missingMandatoryParameters)
     {
         Dictionary<string, PSObject>? parameters = null;
 
@@ -253,7 +252,7 @@ internal sealed class MandatoryParameterPrompter
         return parameters;
     }
 
-    internal static string BuildMissingParamsString(Collection<MergedCompiledCommandParameter> missingMandatoryParameters)
+    internal static string BuildMissingParamsString(List<MergedCompiledCommandParameter> missingMandatoryParameters)
     {
         StringBuilder missingParameters = new StringBuilder();
 
@@ -266,7 +265,7 @@ internal sealed class MandatoryParameterPrompter
     }
 
     private Collection<FieldDescription> CreatePromptDataStructures(
-        Collection<MergedCompiledCommandParameter> missingMandatoryParameters)
+        List<MergedCompiledCommandParameter> missingMandatoryParameters)
     {
         StringBuilder usedHotKeys = new StringBuilder();
         Collection<FieldDescription> fieldDescriptionList = new Collection<FieldDescription>();

@@ -77,7 +77,7 @@ namespace System.Management.Automation
         /// If a parameter name or alias described in the <paramref name="parameterMetadata"/> already
         /// exists.
         /// </exception>
-        internal Collection<MergedCompiledCommandParameter> AddMetadataForBinder(
+        internal List<MergedCompiledCommandParameter> AddMetadataForBinder(
             InternalParameterMetadata parameterMetadata,
             ParameterBinderAssociation binderAssociation)
         {
@@ -86,8 +86,7 @@ namespace System.Management.Automation
                 throw PSTraceSource.NewArgumentNullException(nameof(parameterMetadata));
             }
 
-            Collection<MergedCompiledCommandParameter> result =
-                new Collection<MergedCompiledCommandParameter>();
+            List<MergedCompiledCommandParameter> result = new();
 
             // Merge in the bindable parameters
 
@@ -532,8 +531,7 @@ namespace System.Management.Automation
             }
 
             // Collection only needed for the prefix-matching slow path.
-            Collection<MergedCompiledCommandParameter> matchingParameters =
-                new Collection<MergedCompiledCommandParameter>();
+            List<MergedCompiledCommandParameter> matchingParameters = new();
 
             // First try to match the bindable parameters
 
@@ -587,14 +585,13 @@ namespace System.Management.Automation
         /// Resolves ambiguity when multiple parameters match a prefix.
         /// </summary>
         private static MergedCompiledCommandParameter DisambiguateMultipleMatches(
-            Collection<MergedCompiledCommandParameter> matchingParameters,
+            List<MergedCompiledCommandParameter> matchingParameters,
             string name,
             bool tryExactMatching,
             Func<InvocationInfo> invocationInfoFactory)
         {
             // Prefer parameters in the cmdlet over common parameters.
-            Collection<MergedCompiledCommandParameter> filteredParameters =
-                new Collection<MergedCompiledCommandParameter>();
+            List<MergedCompiledCommandParameter> filteredParameters = new();
 
             foreach (MergedCompiledCommandParameter matchingParameter in matchingParameters)
             {
@@ -635,10 +632,9 @@ namespace System.Management.Automation
         /// <returns>
         /// A collection of all the parameters in the specified parameter set.
         /// </returns>
-        internal Collection<MergedCompiledCommandParameter> GetParametersInParameterSet(uint parameterSetFlag)
+        internal List<MergedCompiledCommandParameter> GetParametersInParameterSet(uint parameterSetFlag)
         {
-            Collection<MergedCompiledCommandParameter> result =
-                new Collection<MergedCompiledCommandParameter>();
+            List<MergedCompiledCommandParameter> result = new();
 
             foreach (MergedCompiledCommandParameter parameter in BindableParameters.Values)
             {

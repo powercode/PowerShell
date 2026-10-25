@@ -33,7 +33,7 @@ internal interface IDefaultParameterBindingContext
     Dictionary<string, MergedCompiledCommandParameter> BoundParameters { get; }
 
     /// <summary>Names of parameters bound via $PSDefaultParameterValues.</summary>
-    Collection<string> BoundDefaultParameters { get; }
+    List<string> BoundDefaultParameters { get; }
 
     /// <summary>Copy of bound positional parameter names from the default binder.</summary>
     HashSet<string> CopyBoundPositionalParameters();
@@ -53,7 +53,6 @@ internal interface IDefaultParameterBindingContext
 
 /// <summary>
 /// Encapsulates $PSDefaultParameterValues lookup, qualification, and binding.
-/// Extracted from <see cref="CmdletParameterBinderController"/> to satisfy SRP.
 /// </summary>
 [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
 internal sealed class DefaultParameterValueBinder
@@ -181,18 +180,9 @@ internal sealed class DefaultParameterValueBinder
                 }
 
                 CommandParameterInternal bindableArgument =
-                    CommandParameterInternal.CreateParameterWithArgument(
-                        parameterAst: null,
-                        parameterName,
-                        $"-{parameterName}:",
-                        argumentAst: null,
-                        argumentValue,
-                        false);
+                    CommandParameterInternal.CreateParameterWithArgument(parameterAst: null, parameterName, $"-{parameterName}:", argumentAst: null, argumentValue, false);
 
-                bool bindResult = _bindingContext.DispatchBindToSubBinder(
-                    validParameterSetFlag,
-                    bindableArgument,
-                    parameter,
+                bool bindResult = _bindingContext.DispatchBindToSubBinder(validParameterSetFlag, bindableArgument, parameter,
                     ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock);
 
                 if (bindResult && !ret)
@@ -230,9 +220,9 @@ internal sealed class DefaultParameterValueBinder
     /// </summary>
     private PSObject WrapBindingState()
     {
-        HashSet<string> boundParameterNames = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> boundParameterNames = new(_bindingContext.BoundParameters.Count, StringComparer.OrdinalIgnoreCase);
         HashSet<string> boundPositionalParameterNames = _bindingContext.CopyBoundPositionalParameters();
-        HashSet<string> boundDefaultParameterNames = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> boundDefaultParameterNames = new(_bindingContext.BoundParameters.Count, StringComparer.OrdinalIgnoreCase);
 
         foreach (string paramName in _bindingContext.BoundParameters.Keys)
         {
@@ -341,7 +331,7 @@ internal sealed class DefaultParameterValueBinder
             return null;
         }
 
-        var availablePairs = new Dictionary<MergedCompiledCommandParameter, object>();
+        Dictionary<MergedCompiledCommandParameter, object> availablePairs = new(DefaultParameterValues.Count);
 
         if (needToGetAlias && DefaultParameterValues.Count > 0)
         {

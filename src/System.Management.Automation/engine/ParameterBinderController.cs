@@ -82,7 +82,7 @@ namespace System.Management.Automation
         /// Consolidated per-invocation mutable binding state. All state fields
         /// previously declared individually are now stored here to enable pooling.
         /// </summary>
-        internal BindingState State { get; set; } = new();
+        internal ParameterBindingState State { get; set; } = new();
 
         /// <summary>
         /// A list of the unbound parameters for the command.
@@ -118,12 +118,12 @@ namespace System.Management.Automation
         /// <summary>
         /// A collection of bound default parameters.
         /// </summary>
-        protected Collection<string> BoundDefaultParameters => State.BoundDefaultParameters;
+        protected List<string> BoundDefaultParameters => State.BoundDefaultParameters;
 
         /// <summary>
         /// A collection of the unbound arguments.
         /// </summary>
-        protected Collection<CommandParameterInternal> UnboundArguments
+        protected List<CommandParameterInternal> UnboundArguments
         {
             get => State.UnboundArguments;
             set => State.UnboundArguments = value;
@@ -165,6 +165,13 @@ namespace System.Management.Automation
         {
             int writeIndex = 0;
 
+            // Clear any stale resolved-parameter cache from a previous reparse pass
+            // (e.g. when called a second time after dynamic parameters are added).
+            for (int i = 0; i < UnboundArguments.Count; i++)
+            {
+                UnboundArguments[i].ResolvedParameter = null;
+            }
+
             for (int index = 0; index < UnboundArguments.Count; ++index)
             {
                 CommandParameterInternal argument = UnboundArguments[index];
@@ -192,6 +199,9 @@ namespace System.Management.Automation
                     UnboundArguments[writeIndex++] = argument;
                     continue;
                 }
+
+                // Cache the resolved parameter so BindNamedParameters can skip a second lookup.
+                argument.ResolvedParameter = matchingParameter;
 
                 // Now that we know we have a single match for the parameter name,
                 // see if we can figure out what the argument value for the parameter is.
@@ -263,10 +273,10 @@ namespace System.Management.Automation
             }
         }
 
-        protected void InitUnboundArguments(Collection<CommandParameterInternal> arguments)
+        protected void InitUnboundArguments(List<CommandParameterInternal> arguments)
         {
             // Add the passed in arguments to the unboundArguments collection
-            Collection<CommandParameterInternal>? paramsFromSplatting = null;
+            List<CommandParameterInternal>? paramsFromSplatting = null;
             foreach (CommandParameterInternal argument in arguments)
             {
                 if (argument.FromHashtableSplatting)
@@ -470,7 +480,7 @@ namespace System.Management.Automation
         /// <returns>
         /// The arguments which are still not bound.
         /// </returns>
-        internal virtual Collection<CommandParameterInternal> BindParameters(Collection<CommandParameterInternal> parameters)
+        internal virtual List<CommandParameterInternal> BindParameters(List<CommandParameterInternal> parameters)
         {
             throw new NotImplementedException();
         }
@@ -533,7 +543,7 @@ namespace System.Management.Automation
 
             if (result && ((flags & ParameterBindingFlags.IsDefaultValue) == 0))
             {
-                BindingState.SwapRemove(UnboundParameters, parameter);
+                ParameterBindingState.SwapRemove(UnboundParameters, parameter);
                 BoundParameters.Add(parameter.Parameter.Name, parameter);
             }
 
@@ -574,7 +584,7 @@ namespace System.Management.Automation
         /// or
         /// If the binding to the parameter fails.
         /// </exception>
-        protected void BindNamedParameters(uint parameterSets, Collection<CommandParameterInternal> arguments)
+        protected void BindNamedParameters(uint parameterSets, List<CommandParameterInternal> arguments)
         {
             HashSet<string>? boundExplicitNamedParams = null;
 
@@ -589,8 +599,10 @@ namespace System.Management.Automation
 
                 // We don't want to throw an exception yet because the parameter might be a positional argument,
                 // or in case of a cmdlet or an advanced function, it might match up to a dynamic parameter.
+                // Use the resolved parameter cached by ReparseUnboundArguments when available.
                 MergedCompiledCommandParameter parameter =
-                    BindableParameters.GetMatchingParameter(
+                    argument.ResolvedParameter
+                    ?? BindableParameters.GetMatchingParameter(
                         argument.ParameterName,
                         throwOnParameterNotFound: false,
                         tryExactMatching: true,
@@ -683,7 +695,7 @@ namespace System.Management.Automation
         /// If the binding to the parameter fails.
         /// </exception>
         internal void BindPositionalParameters(
-            Collection<CommandParameterInternal> unboundArguments,
+            List<CommandParameterInternal> unboundArguments,
             uint validParameterSets,
             uint defaultParameterSet,
             out ParameterBindingException? outgoingBindingException
@@ -708,7 +720,8 @@ namespace System.Management.Automation
             try
             {
                 positionalParameterDictionary =
-                    EvaluateUnboundPositionalParameters(UnboundParameters, ParameterSetResolver.CurrentParameterSetFlag);
+                    State.GetCachedPositionalDictionary(UnboundParameters.Count, ParameterSetResolver.CurrentParameterSetFlag)
+                    ?? EvaluateAndCachePositionalParameters();
             }
             catch (InvalidOperationException)
             {
@@ -747,48 +760,39 @@ namespace System.Management.Automation
                     break;
                 }
 
-                // Bind first to defaultParameterSet without type coercion, then to
-                // other sets without type coercion, then to the defaultParameterSet with
-                // type coercion and finally to the other sets with type coercion.
+                // When only one parameter set is active and it equals the default set, passes 1 & 3
+                // (default-set, no-coerce and default-set, coerce) are identical to passes 2 & 4.
+                // Skip passes 1 and 3 to collapse the 4-pass loop to 2 passes for the common case.
+                bool skipDefaultSetPreference = defaultParameterSet == 0
+                    || (validParameterSets & defaultParameterSet) == 0
+                    || validParameterSets == defaultParameterSet;
 
                 bool aParameterWasBound = false;
-                if (defaultParameterSet != 0 && (validParameterSets & defaultParameterSet) != 0)
+                if (!skipDefaultSetPreference)
                 {
-                    // Favor the default parameter set.
-                    // First try without type coercion
-
+                    // Pass 1: default set, no coercion
                     aParameterWasBound =
                         BindPositionalParametersInSet(defaultParameterSet, nextPositionalParameters, argument, ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
                 }
 
                 if (!aParameterWasBound)
                 {
-                    // Try the non-default parameter sets
-                    // without type coercion.
-
+                    // Pass 2: all valid sets, no coercion
                     aParameterWasBound =
                         BindPositionalParametersInSet(validParameterSets, nextPositionalParameters, argument, ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
                 }
 
-                if (!aParameterWasBound)
+                if (!aParameterWasBound && !skipDefaultSetPreference)
                 {
-                    // Now try the default parameter set with type coercion
-                    if (defaultParameterSet != 0 && (validParameterSets & defaultParameterSet) != 0)
-                    {
-                        // Favor the default parameter set.
-                        // First try without type coercion
-
-                        aParameterWasBound =
-                            BindPositionalParametersInSet(defaultParameterSet, nextPositionalParameters, argument, 
-                                ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
-                    }
+                    // Pass 3: default set, with coercion
+                    aParameterWasBound =
+                        BindPositionalParametersInSet(defaultParameterSet, nextPositionalParameters, argument,
+                            ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
                 }
 
                 if (!aParameterWasBound)
                 {
-                    // Try the non-default parameter sets
-                    // with type coercion.
-
+                    // Pass 4: all valid sets, with coercion
                     aParameterWasBound =
                         BindPositionalParametersInSet(validParameterSets, nextPositionalParameters, argument,
                             ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
@@ -819,6 +823,16 @@ namespace System.Management.Automation
             }
         }
 
+        private SortedDictionary<int, Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter>>
+            EvaluateAndCachePositionalParameters()
+        {
+            var dict = EvaluateUnboundPositionalParameters(
+                UnboundParameters, ParameterSetResolver.CurrentParameterSetFlag);
+            State.SetCachedPositionalDictionary(
+                dict, UnboundParameters.Count, ParameterSetResolver.CurrentParameterSetFlag);
+            return dict;
+        }
+
         /// <summary>
         /// This method only updates the collections contained in the dictionary, not the dictionary
         /// itself to contain only the parameters that are in the specified parameter set.
@@ -835,7 +849,7 @@ namespace System.Management.Automation
         {
             foreach (Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter> parameterCollection in positionalParameterDictionary.Values)
             {
-                Collection<MergedCompiledCommandParameter> paramToRemove = new Collection<MergedCompiledCommandParameter>();
+                List<MergedCompiledCommandParameter> paramToRemove = new();
 
                 foreach (PositionalCommandParameter positionalParameter in parameterCollection.Values)
                 {
@@ -1011,7 +1025,7 @@ namespace System.Management.Automation
 
         private static CommandParameterInternal? GetNextPositionalArgument(
             List<CommandParameterInternal> unboundArgumentsCollection,
-            Collection<CommandParameterInternal> nonPositionalArguments,
+            List<CommandParameterInternal> nonPositionalArguments,
             ref int unboundArgumentsIndex)
         {
             // Find the next positional argument
@@ -1185,7 +1199,7 @@ namespace System.Management.Automation
         /// Keeps track of the parameters that get bound through pipeline input, so that their
         /// previous values can be restored before the next pipeline input comes.
         /// </summary>
-        internal Collection<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput => State.ParametersBoundThroughPipelineInput;
+        internal List<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput => State.ParametersBoundThroughPipelineInput;
 
         /// <summary>
         /// For any unbound parameters, this method checks to see if the

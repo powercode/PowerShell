@@ -4,6 +4,7 @@
 #nullable enable
 
 using System.Collections;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
@@ -79,7 +80,7 @@ namespace System.Management.Automation
         /// For any parameters that do not have a name, they are added to the command
         /// line arguments for the command
         /// </remarks>
-        internal Collection<CommandParameterInternal> BindParameters(Collection<CommandParameterInternal> parameters, bool outputRedirected, string hostName)
+        internal List<CommandParameterInternal> BindParameters(List<CommandParameterInternal> parameters, bool outputRedirected, string hostName)
         {
             MinishellParameters seen = 0;
             string? inputFormat = null;
@@ -246,7 +247,7 @@ namespace System.Management.Automation
             return s_emptyReturnCollection;
         }
 
-        private static readonly Collection<CommandParameterInternal> s_emptyReturnCollection = new Collection<CommandParameterInternal>();
+        private static readonly List<CommandParameterInternal> s_emptyReturnCollection = [];
 
         internal const string CommandParameter = "command";
         internal const string EncodedCommandParameter = "encodedCommand";

@@ -1301,7 +1301,7 @@ namespace System.Management.Automation.Language
                                 // Win8 345299: If the first try ended with ParameterBindingException, try again with no arguments
                                 alreadyRetried = true;
                                 commandProcessor.CmdletParameterBinderController.ClearUnboundArguments();
-                                commandProcessor.CmdletParameterBinderController.BindCommandLineParametersNoValidation(new Collection<CommandParameterInternal>());
+                                commandProcessor.CmdletParameterBinderController.BindCommandLineParametersNoValidation(new List<CommandParameterInternal>());
                             }
                         }
                         catch (ParameterBindingException e)

@@ -25,6 +25,13 @@ namespace System.Management.Automation
         private bool _spaceAfterParameter;
         private bool _fromHashtableSplatting;
 
+        /// <summary>
+        /// The resolved parameter metadata cached during <see cref="ParameterBinderController.ReparseUnboundArguments"/>.
+        /// Used by <see cref="ParameterBinderController.BindNamedParameters"/> to skip a second lookup.
+        /// Cleared at the start of each reparse pass to prevent stale references across dynamic-parameter re-binds.
+        /// </summary>
+        internal MergedCompiledCommandParameter ResolvedParameter;
+
         internal bool SpaceAfterParameter => _spaceAfterParameter;
 
         internal bool ParameterNameSpecified => _hasParameter;
@@ -176,6 +183,7 @@ namespace System.Management.Automation
             _hasArgument = false;
             _spaceAfterParameter = false;
             _fromHashtableSplatting = false;
+            ResolvedParameter = null;
         }
 
         /// <summary>

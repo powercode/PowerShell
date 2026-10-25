@@ -469,8 +469,7 @@ namespace System.Management.Automation
 
             syntaxItem.AppendChild(syntaxItemName).AppendChild(syntaxItemName_text);
 
-            Collection<MergedCompiledCommandParameter> compiledParameters =
-                parameterMetadata.GetParametersInParameterSet(1u << i);
+            var compiledParameters = parameterMetadata.GetParametersInParameterSet(1u << i);
 
             foreach (MergedCompiledCommandParameter mergedParameter in compiledParameters)
             {
