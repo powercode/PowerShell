@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#nullable enable
+
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -94,13 +96,7 @@ namespace System.Management.Automation
 
             UnboundArguments = BindNamedParameters(uint.MaxValue, UnboundArguments);
 
-            ParameterBindingException parameterBindingError;
-            UnboundArguments =
-                BindPositionalParameters(
-                    UnboundArguments,
-                    uint.MaxValue,
-                    uint.MaxValue,
-                    out parameterBindingError);
+            UnboundArguments = BindPositionalParameters(UnboundArguments, uint.MaxValue, uint.MaxValue, out ParameterBindingException? _);
 
             try
             {
@@ -156,8 +152,6 @@ namespace System.Management.Automation
 
             foreach (CommandParameterInternal parameter in arguments)
             {
-                object argValue = parameter.ArgumentSpecified ? parameter.ArgumentValue : null;
-
                 // Proper automatic proxy generation requires the ability to prevent unbound arguments
                 // in the proxy from binding to positional parameters in the proxied command.  We use
                 // a special key ("$args") when splatting @CommandLineArguments to package up $args.
@@ -188,15 +182,16 @@ namespace System.Management.Automation
                 if (parameter.ParameterAndArgumentSpecified &&
                     parameter.ParameterName.Equals("$args", StringComparison.OrdinalIgnoreCase))
                 {
+                    object argumentValue = parameter.ArgumentValue;
                     // $args is normally an object[], but because this feature is accessible from script, it's possible
                     // for it to contain anything.
-                    if (argValue is object[])
+                    if (argumentValue is object[] argumentValueArray)
                     {
-                        args.AddRange(argValue as object[]);
+                        args.AddRange(argumentValueArray);
                     }
                     else
                     {
-                        args.Add(argValue);
+                        args.Add(argumentValue);
                     }
 
                     continue;
@@ -223,7 +218,7 @@ namespace System.Management.Automation
 
                 if (parameter.ArgumentSpecified)
                 {
-                    args.Add(argValue);
+                    args.Add(parameter.ArgumentValue);
                 }
             }
 

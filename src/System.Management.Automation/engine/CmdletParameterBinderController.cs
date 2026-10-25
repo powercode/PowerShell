@@ -1,6 +1,8 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#nullable enable
+
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -55,12 +57,12 @@ namespace System.Management.Automation
                 cmdlet.Context,
                 parameterBinder)
         {
-            if (cmdlet == null)
+            if (cmdlet! == null)
             {
                 throw PSTraceSource.NewArgumentNullException(nameof(cmdlet));
             }
 
-            if (commandMetadata == null)
+            if (commandMetadata! == null)
             {
                 throw PSTraceSource.NewArgumentNullException(nameof(commandMetadata));
             }
@@ -221,6 +223,7 @@ namespace System.Management.Automation
             ParameterBindingFlags flags)
             => DispatchBindToSubBinder(validParameterSetFlag, argument, parameter, flags);
 
+        [System.Diagnostics.CodeAnalysis.DoesNotReturn]
         void IPipelineParameterBindingContext.ThrowOrElaborateBindingException(ParameterBindingException ex)
             => ThrowOrElaborateBindingException(ex);
 
@@ -268,7 +271,7 @@ namespace System.Management.Automation
             Collection<CommandParameterInternal> args,
             uint currentParameterSetFlag,
             uint defaultParameterSetFlag,
-            out ParameterBindingException outgoingBindingException)
+            out ParameterBindingException? outgoingBindingException)
             => BindPositionalParameters(args, currentParameterSetFlag, defaultParameterSetFlag, out outgoingBindingException);
 
         InvocationInfo IDefaultValueManagerContext.InvocationInfo => Command.MyInvocation;
@@ -276,7 +279,7 @@ namespace System.Management.Automation
         IScriptExtent IDefaultValueManagerContext.GetErrorExtent(CommandParameterInternal argument)
             => GetErrorExtent(argument);
 
-        object IDefaultValueManagerContext.GetDefaultParameterValue(string name)
+        object? IDefaultValueManagerContext.GetDefaultParameterValue(string name)
             => GetDefaultParameterValue(name);
 
         bool IDefaultValueManagerContext.RestoreParameter(CommandParameterInternal argument, MergedCompiledCommandParameter parameter)
@@ -459,8 +462,8 @@ namespace System.Management.Automation
                 UnboundArguments = BindNamedParameters(ParameterSetResolver.CurrentParameterSetFlag, this.UnboundArguments);
             }
 
-            ParameterBindingException reportedBindingException;
-            ParameterBindingException currentBindingException;
+            ParameterBindingException? reportedBindingException;
+            ParameterBindingException? currentBindingException;
 
             using (ParameterBinderBase.bindingTracer.TraceScope(
                 "BIND POSITIONAL cmd line args [{0}]",
@@ -517,7 +520,7 @@ namespace System.Management.Automation
             VerifyArgumentsProcessed(reportedBindingException);
         }
 
-        internal IDictionary DefaultParameterValues
+        internal IDictionary? DefaultParameterValues
         {
             get => _defaultParameterValueBinder.DefaultParameterValues;
             set => _defaultParameterValueBinder.DefaultParameterValues = value;
@@ -529,7 +532,7 @@ namespace System.Management.Automation
         /// <param name="originalBindingException">
         /// Previous binding exceptions that possibly causes the failure
         /// </param>
-        private void VerifyArgumentsProcessed(ParameterBindingException originalBindingException)
+        private void VerifyArgumentsProcessed(ParameterBindingException? originalBindingException)
         {
             // Now verify that all the arguments that were passed in were processed.
 
@@ -540,7 +543,7 @@ namespace System.Management.Automation
 
                 // Get the argument type that was specified
 
-                Type specifiedType = null;
+                Type? specifiedType = null;
                 object argumentValue = parameter.ArgumentValue;
                 if (argumentValue != null && argumentValue != UnboundParameter.Value)
                 {
@@ -571,7 +574,7 @@ namespace System.Management.Automation
                         {
                             try
                             {
-                                argument = parameter.ArgumentValue.ToString();
+                                argument = parameter.ArgumentValue.ToString() ?? StringLiterals.DollarNull;
                             }
                             catch (Exception e)
                             {
@@ -797,7 +800,7 @@ namespace System.Management.Automation
                 {
                     result = BindToAssociatedBinder(argument, parameter, flags);
                 }
-                catch (Exception e)
+                catch (Exception? e)
                 {
                     bool rethrow = true;
                     if ((flags & ParameterBindingFlags.ShouldCoerceType) == 0)
@@ -978,7 +981,7 @@ namespace System.Management.Automation
                 // Find the parameters that take the remaining args, if there are more
                 // than one and the parameter set has not been defined, this is an error
 
-                MergedCompiledCommandParameter varargsParameter = null;
+                MergedCompiledCommandParameter? varargsParameter = null;
 
                 foreach (MergedCompiledCommandParameter parameter in UnboundParameters)
                 {
@@ -1102,9 +1105,9 @@ namespace System.Management.Automation
         /// <returns>
         /// The binder that should bind this parameter, or null if no binder applies.
         /// </returns>
-        private ParameterBinderBase GetBinderForParameter(MergedCompiledCommandParameter parameter)
+        private ParameterBinderBase? GetBinderForParameter(MergedCompiledCommandParameter? parameter)
         {
-            return parameter.BinderAssociation switch
+            return parameter?.BinderAssociation switch
             {
                 ParameterBinderAssociation.DeclaredFormalParameters => DefaultParameterBinder,
                 ParameterBinderAssociation.CommonParameters => _commonParametersBinder,
@@ -1134,16 +1137,16 @@ namespace System.Management.Automation
         /// <exception cref="ParameterBindingParameterDefaultValueException">
         /// If the parameter binder encounters an error getting the default value.
         /// </exception>
-        internal object GetDefaultParameterValue(string name)
+        internal object? GetDefaultParameterValue(string name)
         {
-            MergedCompiledCommandParameter matchingParameter =
+            MergedCompiledCommandParameter? matchingParameter =
                 BindableParameters.GetMatchingParameter(
                     name,
                     false,
                     true,
                     null);
 
-            object result = null;
+            object? result = null;
 
             try
             {
@@ -1187,7 +1190,7 @@ namespace System.Management.Automation
         /// <summary>
         /// Keep the obsolete parameter warnings generated from parameter binding.
         /// </summary>
-        internal List<WarningRecord> ObsoleteParameterWarningList { get; private set; }
+        internal List<WarningRecord>? ObsoleteParameterWarningList { get; private set; }
 
         /// <summary>
         /// Keep names of the parameters for which we have generated obsolete warning messages.
@@ -1200,7 +1203,7 @@ namespace System.Management.Automation
             }
         }
 
-        private HashSet<string> _boundObsoleteParameterNames;
+        private HashSet<string>? _boundObsoleteParameterNames;
 
         private readonly ReflectionParameterBinder _commonParametersBinder;
         private readonly ReflectionParameterBinder _shouldProcessParameterBinder;

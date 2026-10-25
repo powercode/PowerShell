@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#nullable enable
+
 using System.Collections.Generic;
 using System.Management.Automation.Language;
 
@@ -19,7 +21,7 @@ internal interface IDefaultValueManagerContext
     IScriptExtent GetErrorExtent(CommandParameterInternal argument);
 
     /// <summary>Returns the current default value of the named parameter from its backing binder.</summary>
-    object GetDefaultParameterValue(string name);
+    object? GetDefaultParameterValue(string name);
 
     /// <summary>Stores a parameter value back to its backing binder without running validation.</summary>
     bool RestoreParameter(CommandParameterInternal argument, MergedCompiledCommandParameter parameter);
@@ -75,7 +77,7 @@ internal sealed class DefaultValueManager
     {
         if (!_defaultParameterValues.ContainsKey(parameter.Parameter.Name))
         {
-            object defaultParameterValue = _context.GetDefaultParameterValue(parameter.Parameter.Name);
+            object? defaultParameterValue = _context.GetDefaultParameterValue(parameter.Parameter.Name);
             _defaultParameterValues.Add(
                 parameter.Parameter.Name,
                 CommandParameterInternal.CreateParameterWithArgument(
@@ -112,14 +114,14 @@ internal sealed class DefaultValueManager
             // If the argument was found then bind it to the parameter
             // and manage the bound and unbound parameter list
 
-            if (_defaultParameterValues.TryGetValue(parameter.Parameter.Name, out CommandParameterInternal argumentToBind))
+            if (_defaultParameterValues.TryGetValue(parameter.Parameter.Name, out CommandParameterInternal? argumentToBind))
             {
                 // Don't go through the normal binding routine to run data generation,
                 // type coercion, validation, or prerequisites since we know the
                 // type is already correct, and we don't want data generation to
                 // run when resetting the default value.
 
-                Exception error = null;
+                Exception? error = null;
                 try
                 {
                     // We shouldn't have to coerce the type here so its
@@ -138,7 +140,7 @@ internal sealed class DefaultValueManager
 
                 if (error != null)
                 {
-                    Type specifiedType = argumentToBind.ArgumentValue?.GetType();
+                    Type? specifiedType = argumentToBind.ArgumentValue?.GetType();
                     ParameterBindingException.ThrowParameterBindingFailed(
                         error,
                         _context.InvocationInfo,

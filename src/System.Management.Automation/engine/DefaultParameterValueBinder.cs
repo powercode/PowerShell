@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#nullable enable
+
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
-using System.Management.Automation.Internal;
-using System.Management.Automation.Language;
 using System.Linq;
 using System.Text;
 
@@ -48,16 +48,11 @@ internal sealed class DefaultParameterValueBinder
 {
     [TraceSource("ParameterBinderController", "Controls the interaction between the command processor and the parameter binder(s).")]
     private static readonly PSTraceSource s_tracer =
-        PSTraceSource.GetTracer(
-            "ParameterBinderController",
-            "Controls the interaction between the command processor and the parameter binder(s).");
+        PSTraceSource.GetTracer("ParameterBinderController", "Controls the interaction between the command processor and the parameter binder(s).");
 
     [TraceSource("ParameterBinding", "Traces the process of binding the arguments to the parameters of cmdlets, scripts, and applications.")]
     internal static readonly PSTraceSource bindingTracer =
-        PSTraceSource.GetTracer(
-            "ParameterBinding",
-            "Traces the process of binding the arguments to the parameters of cmdlets, scripts, and applications.",
-            false);
+        PSTraceSource.GetTracer("ParameterBinding", "Traces the process of binding the arguments to the parameters of cmdlets, scripts, and applications.", false);
 
     private const string Separator = ":::";
 
@@ -67,9 +62,9 @@ internal sealed class DefaultParameterValueBinder
     private readonly MergedCommandParameterMetadata _bindableParameters;
     private readonly IDefaultParameterBindingContext _bindingContext;
 
-    private List<string> _aliasList;
+    private List<string>? _aliasList;
     private readonly HashSet<string> _warningSet = new HashSet<string>();
-    private Dictionary<MergedCompiledCommandParameter, object> _allDefaultParameterValuePairs;
+    private Dictionary<MergedCompiledCommandParameter, object>? _allDefaultParameterValuePairs;
     private bool _useDefaultParameterBinding = true;
 
     internal DefaultParameterValueBinder(
@@ -99,7 +94,7 @@ internal sealed class DefaultParameterValueBinder
     }
 
     /// <summary>The $PSDefaultParameterValues hashtable from the session.</summary>
-    internal IDictionary DefaultParameterValues { get; set; }
+    internal IDictionary? DefaultParameterValues { get; set; }
 
     internal void ResetForNewBinding()
     {
@@ -125,8 +120,7 @@ internal sealed class DefaultParameterValueBinder
             _allDefaultParameterValuePairs = GetDefaultParameterValuePairs(false);
         }
 
-        Dictionary<MergedCompiledCommandParameter, object> qualifiedParameterValuePairs =
-            GetQualifiedParameterValuePairs(currentParameterSetFlag, _allDefaultParameterValuePairs);
+        Dictionary<MergedCompiledCommandParameter, object>? qualifiedParameterValuePairs = GetQualifiedParameterValuePairs(currentParameterSetFlag, _allDefaultParameterValuePairs);
 
         if (qualifiedParameterValuePairs == null)
         {
@@ -134,10 +128,7 @@ internal sealed class DefaultParameterValueBinder
         }
 
         bool isSuccess;
-        using (bindingTracer.TraceScope(
-            "BIND DEFAULT <parameter, value> pairs after [{0}] for [{1}]",
-            bindingStage,
-            _commandMetadata.Name))
+        using (bindingTracer.TraceScope("BIND DEFAULT <parameter, value> pairs after [{0}] for [{1}]", bindingStage, _commandMetadata.Name))
         {
             isSuccess = BindDefaultParameters(currentParameterSetFlag, qualifiedParameterValuePairs);
             if (isSuccess && !DefaultParameterBindingInUse)
@@ -174,7 +165,7 @@ internal sealed class DefaultParameterValueBinder
                     // Pass the current binding state as the script block argument.
                     PSObject arg = WrapBindingState();
                     Collection<PSObject> results = scriptBlockArg.Invoke(arg);
-                    if (results == null || results.Count == 0)
+                    if (results is null or [])
                     {
                         continue;
                     }
@@ -184,10 +175,10 @@ internal sealed class DefaultParameterValueBinder
 
                 CommandParameterInternal bindableArgument =
                     CommandParameterInternal.CreateParameterWithArgument(
-                        /*parameterAst*/null,
+                        parameterAst: null,
                         parameterName,
-                        "-" + parameterName + ":",
-                        /*argumentAst*/null,
+                        $"-{parameterName}:",
+                        argumentAst: null,
                         argumentValue,
                         false);
 
@@ -232,9 +223,9 @@ internal sealed class DefaultParameterValueBinder
     /// </summary>
     private PSObject WrapBindingState()
     {
-        HashSet<string> boundParameterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> boundParameterNames = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> boundPositionalParameterNames = _bindingContext.CopyBoundPositionalParameters();
-        HashSet<string> boundDefaultParameterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> boundDefaultParameterNames = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (string paramName in _bindingContext.BoundParameters.Keys)
         {
@@ -246,7 +237,7 @@ internal sealed class DefaultParameterValueBinder
             boundDefaultParameterNames.Add(paramName);
         }
 
-        PSObject result = new PSObject();
+        PSObject result = new();
         result.Properties.Add(new PSNoteProperty("BoundParameters", boundParameterNames));
         result.Properties.Add(new PSNoteProperty("BoundPositionalParameters", boundPositionalParameterNames));
         result.Properties.Add(new PSNoteProperty("BoundDefaultParameters", boundDefaultParameterNames));
@@ -258,17 +249,16 @@ internal sealed class DefaultParameterValueBinder
     /// Get all qualified default parameter value pairs based on the
     /// current parameter set flag.
     /// </summary>
-    internal Dictionary<MergedCompiledCommandParameter, object> GetQualifiedParameterValuePairs(
+    internal Dictionary<MergedCompiledCommandParameter, object>? GetQualifiedParameterValuePairs(
         uint currentParameterSetFlag,
-        Dictionary<MergedCompiledCommandParameter, object> availableParameterValuePairs)
+        Dictionary<MergedCompiledCommandParameter, object>? availableParameterValuePairs)
     {
         if (availableParameterValuePairs == null)
         {
             return null;
         }
 
-        Dictionary<MergedCompiledCommandParameter, object> result =
-            new Dictionary<MergedCompiledCommandParameter, object>();
+        Dictionary<MergedCompiledCommandParameter, object> result = new();
 
         uint possibleParameterFlag = uint.MaxValue;
         foreach (var pair in availableParameterValuePairs)
@@ -303,7 +293,7 @@ internal sealed class DefaultParameterValueBinder
     /// <summary>
     /// Get aliases for the current cmdlet.
     /// </summary>
-    private List<string> GetAliasOfCurrentCmdlet()
+    private List<string>? GetAliasOfCurrentCmdlet()
     {
         var results = _context.SessionState.Internal.GetAliasesByCommandName(_commandMetadata.Name).ToList();
         return results.Count > 0 ? results : null;
@@ -335,7 +325,7 @@ internal sealed class DefaultParameterValueBinder
     /// Get all available default parameter value pairs.
     /// </summary>
     /// <returns>Qualified pairs or null if none are available.</returns>
-    internal Dictionary<MergedCompiledCommandParameter, object> GetDefaultParameterValuePairs(bool needToGetAlias)
+    internal Dictionary<MergedCompiledCommandParameter, object>? GetDefaultParameterValuePairs(bool needToGetAlias)
     {
         if (DefaultParameterValues == null)
         {
@@ -372,8 +362,8 @@ internal sealed class DefaultParameterValueBinder
             }
 
             key = key.Trim();
-            string cmdletName = null;
-            string parameterName = null;
+            string? cmdletName = null;
+            string? parameterName = null;
 
             if (!DefaultParameterDictionary.CheckKeyIsValid(key, ref cmdletName, ref parameterName))
             {
@@ -392,13 +382,11 @@ internal sealed class DefaultParameterValueBinder
                 continue;
             }
 
-            Diagnostics.Assert(
-                cmdletName != null && parameterName != null,
-                "The cmdletName and parameterName should be set in CheckKeyIsValid");
+            Diagnostics.Assert(cmdletName != null && parameterName != null, "The cmdletName and parameterName should be set in CheckKeyIsValid");
 
             if (WildcardPattern.ContainsWildcardCharacters(key))
             {
-                wildcardDefault.Add(cmdletName + Separator + parameterName, entry.Value);
+                wildcardDefault.Add(cmdletName + Separator + parameterName, entry.Value!);
                 continue;
             }
 
@@ -411,7 +399,7 @@ internal sealed class DefaultParameterValueBinder
             GetDefaultParameterValuePairsHelper(
                 cmdletName,
                 parameterName,
-                entry.Value,
+                entry.Value!,
                 bindableParameters,
                 bindableAlias,
                 availablePairs,
@@ -550,25 +538,10 @@ internal sealed class DefaultParameterValueBinder
         // No exception should be thrown if no match is found because paramName
         // may refer to a dynamic parameter not yet introduced at this stage.
         bool writeWarning = false;
-        MergedCompiledCommandParameter matchParameter;
-        object resultObject;
-        if (bindableParameters.TryGetValue(paramName, out matchParameter))
+        if (bindableParameters.TryGetValue(paramName, out MergedCompiledCommandParameter? matchParameter) 
+            || bindableAlias.TryGetValue(paramName, out matchParameter))
         {
-            if (!result.TryGetValue(matchParameter, out resultObject))
-            {
-                result.Add(matchParameter, paramValue);
-                return;
-            }
-
-            if (!paramValue.Equals(resultObject))
-            {
-                writeWarning = true;
-                parametersToRemove.Add(matchParameter);
-            }
-        }
-        else if (bindableAlias.TryGetValue(paramName, out matchParameter))
-        {
-            if (!result.TryGetValue(matchParameter, out resultObject))
+            if (!result.TryGetValue(matchParameter, out object? resultObject))
             {
                 result.Add(matchParameter, paramValue);
                 return;
@@ -583,11 +556,7 @@ internal sealed class DefaultParameterValueBinder
 
         if (writeWarning && !_warningSet.Contains(cmdletName + Separator + paramName))
         {
-            _commandRuntime.WriteWarning(
-                string.Format(
-                    CultureInfo.InvariantCulture,
-                    ParameterBinderStrings.DifferentValuesAssignedToSingleParameter,
-                    paramName));
+            _commandRuntime.WriteWarning(string.Format(CultureInfo.InvariantCulture, ParameterBinderStrings.DifferentValuesAssignedToSingleParameter, paramName));
             _warningSet.Add(cmdletName + Separator + paramName);
         }
     }
