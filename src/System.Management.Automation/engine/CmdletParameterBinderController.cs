@@ -20,7 +20,7 @@ namespace System.Management.Automation
     /// parameter binders required to bind parameters to a cmdlet.
     /// </summary>
     [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
-    internal class CmdletParameterBinderController : ParameterBinderController, IParameterBindingContext, IDefaultParameterBindingContext, IMandatoryParameterPrompterContext, IPipelineParameterBindingContext, IDelayBindScriptBlockContext, IDynamicParameterHandlerContext, IDefaultValueManagerContext
+    internal class CmdletParameterBinderController : ParameterBinderController, IBindingStateContext, IBindingOperationsContext
     {
         #region tracer
 
@@ -85,16 +85,16 @@ namespace System.Management.Automation
             // In DEBUG builds, assert that the rented state is fully clean.
             State.AssertClean(initialParameters.Count);
 
-            ParameterSetResolver = new ParameterSetResolver(_commandMetadata, BindableParameters, context: this);
+            ParameterSetResolver = new ParameterSetResolver(_commandMetadata, BindableParameters, stateContext: this, opsContext: this);
 
-            _defaultParameterValueBinder = new DefaultParameterValueBinder(_commandMetadata, _commandRuntime, cmdlet.Context, BindableParameters, bindingContext: this);
+            _defaultParameterValueBinder = new DefaultParameterValueBinder(_commandMetadata, _commandRuntime, cmdlet.Context, BindableParameters, stateContext: this, opsContext: this);
 
-            _mandatoryParameterPrompter = new MandatoryParameterPrompter(ParameterSetResolver, Context, Command, bindingContext: this);
+            _mandatoryParameterPrompter = new MandatoryParameterPrompter(ParameterSetResolver, Context, Command, opsContext: this);
 
-            _pipelineParameterBinder = new PipelineParameterBinder(this);
-            _delayBindScriptBlockHandler = new DelayBindScriptBlockHandler(this);
-            _dynamicParameterHandler = new DynamicParameterHandler(this);
-            _defaultValueManager = new DefaultValueManager(this);
+            _pipelineParameterBinder = new PipelineParameterBinder(this, this);
+            _delayBindScriptBlockHandler = new DelayBindScriptBlockHandler(this, this);
+            _dynamicParameterHandler = new DynamicParameterHandler(this, this);
+            _defaultValueManager = new DefaultValueManager(this, this);
         }
 
         #endregion ctor
@@ -1029,196 +1029,143 @@ namespace System.Management.Automation
 
         #endregion private_members
 
-        #region IParameterBindingContext
+        #region IBindingStateContext
 
-        ICollection<MergedCompiledCommandParameter> IParameterBindingContext.UnboundParameters => UnboundParameters;
+        IList<MergedCompiledCommandParameter> IBindingStateContext.UnboundParameters => UnboundParameters;
 
-        Dictionary<string, MergedCompiledCommandParameter> IParameterBindingContext.BoundParameters => BoundParameters;
+        Dictionary<string, MergedCompiledCommandParameter> IBindingStateContext.BoundParameters => BoundParameters;
 
-        InvocationInfo IParameterBindingContext.InvocationInfo => Command.MyInvocation;
+        Dictionary<string, CommandParameterInternal> IBindingStateContext.BoundArguments => BoundArguments;
 
-        void IParameterBindingContext.SetParameterSetName(string parameterSetName) => Command.SetParameterSetName(parameterSetName);
-
-        void IParameterBindingContext.ThrowBindingException(ParameterBindingException exception) => ThrowOrElaborateBindingException(exception);
-
-        #endregion IParameterBindingContext
-
-        #region IDefaultParameterBindingContext
-
-        bool IDefaultParameterBindingContext.DispatchBindToSubBinder(
-            uint validParameterSetFlag,
-            CommandParameterInternal argument,
-            MergedCompiledCommandParameter parameter,
-            ParameterBindingFlags flags)
-            => DispatchBindToSubBinder(validParameterSetFlag, argument, parameter, flags);
-
-        Dictionary<string, CommandParameterInternal> IDefaultParameterBindingContext.BoundArguments => BoundArguments;
-
-        Dictionary<string, MergedCompiledCommandParameter> IDefaultParameterBindingContext.BoundParameters => BoundParameters;
-
-        List<string> IDefaultParameterBindingContext.BoundDefaultParameters => BoundDefaultParameters;
-
-        HashSet<string> IDefaultParameterBindingContext.CopyBoundPositionalParameters()
-            => DefaultParameterBinder.CommandLineParameters.CopyBoundPositionalParameters();
-
-        List<string>? IDefaultParameterBindingContext.DefaultParameterAliasList
-        {
-            get => State.DefaultParameterAliasList;
-            set => State.DefaultParameterAliasList = value;
-        }
-
-        HashSet<string> IDefaultParameterBindingContext.DefaultParameterWarningSet => State.DefaultParameterWarningSet;
-
-        Dictionary<MergedCompiledCommandParameter, object>? IDefaultParameterBindingContext.AllDefaultParameterValuePairs
-        {
-            get => State.AllDefaultParameterValuePairs;
-            set => State.AllDefaultParameterValuePairs = value;
-        }
-
-        bool IDefaultParameterBindingContext.UseDefaultParameterBinding
-        {
-            get => State.UseDefaultParameterBinding;
-            set => State.UseDefaultParameterBinding = value;
-        }
-
-        #endregion IDefaultParameterBindingContext
-
-        #region IMandatoryParameterPrompterContext
-
-        bool IMandatoryParameterPrompterContext.ResolveAndBindNamedParameter(CommandParameterInternal argument, ParameterBindingFlags flags)
-            => ResolveAndBindNamedParameter(argument, flags);
-
-        #endregion IMandatoryParameterPrompterContext
-
-        #region IPipelineParameterBindingContext
-
-        IList<MergedCompiledCommandParameter> IPipelineParameterBindingContext.UnboundParameters => UnboundParameters;
-
-        List<MergedCompiledCommandParameter> IPipelineParameterBindingContext.ParametersBoundThroughPipelineInput
-            => ParametersBoundThroughPipelineInput;
-
-        ParameterSetResolver IPipelineParameterBindingContext.ParameterSetResolver => ParameterSetResolver;
-
-        bool IPipelineParameterBindingContext.DefaultParameterBindingInUse
-        {
-            get => DefaultParameterBindingInUse;
-            set => DefaultParameterBindingInUse = value;
-        }
-
-        uint IPipelineParameterBindingContext.DefaultParameterSetFlag => _commandMetadata.DefaultParameterSetFlag;
-
-        string IPipelineParameterBindingContext.CommandName => _commandMetadata.Name;
-
-        bool IPipelineParameterBindingContext.InvokeAndBindDelayBindScriptBlock(PSObject inputToOperateOn, out bool thereWasSomethingToBind)
-            => _delayBindScriptBlockHandler.InvokeAndBind(inputToOperateOn, out thereWasSomethingToBind);
-
-        void IPipelineParameterBindingContext.BackupDefaultParameter(MergedCompiledCommandParameter parameter)
-            => _defaultValueManager.Backup(parameter);
-
-        void IPipelineParameterBindingContext.RestoreDefaultParameterValues(IEnumerable<MergedCompiledCommandParameter> parameters)
-            => _defaultValueManager.Restore(parameters);
-
-        bool IPipelineParameterBindingContext.DispatchBindToSubBinder(
-            uint validParameterSetFlag,
-            CommandParameterInternal argument,
-            MergedCompiledCommandParameter parameter,
-            ParameterBindingFlags flags)
-            => DispatchBindToSubBinder(validParameterSetFlag, argument, parameter, flags);
-
-        [DoesNotReturn]
-        void IPipelineParameterBindingContext.ThrowOrElaborateBindingException(ParameterBindingException ex)
-            => ThrowOrElaborateBindingException(ex);
-
-        CommandParameterInternal IPipelineParameterBindingContext.RentPipelineCpi()
-            => State.RentPipelineCpi();
-
-        bool IPipelineParameterBindingContext.ApplyDefaultParameterBinding(string caller, bool isDynamic, uint currentParameterSetFlag)
-            => _defaultParameterValueBinder.ApplyDefaultParameterBinding(caller, isDynamic, currentParameterSetFlag);
-
-        #endregion IPipelineParameterBindingContext
-
-        #region IDelayBindScriptBlockContext
-
-        InvocationInfo IDelayBindScriptBlockContext.InvocationInfo => Command.MyInvocation;
-
-        IScriptExtent IDelayBindScriptBlockContext.GetErrorExtent(CommandParameterInternal argument) => GetErrorExtent(argument);
-
-        bool IDelayBindScriptBlockContext.BindToAssociatedBinder(CommandParameterInternal argument, MergedCompiledCommandParameter parameter, ParameterBindingFlags flags)
-            => BindToAssociatedBinder(argument, parameter, flags);
-
-        Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument> IDelayBindScriptBlockContext.DelayBindScriptBlocks
-            => State.DelayBindScriptBlocks;
-
-        #endregion IDelayBindScriptBlockContext
-
-        #region IDynamicParameterHandlerContext
-
-        bool IDynamicParameterHandlerContext.ImplementsDynamicParameters => _commandMetadata.ImplementsDynamicParameters;
-
-        Cmdlet IDynamicParameterHandlerContext.Command => Command;
-
-        ExecutionContext IDynamicParameterHandlerContext.Context => Context;
-
-        InvocationInfo IDynamicParameterHandlerContext.InvocationInfo => Command.MyInvocation;
-
-        MergedCommandParameterMetadata IDynamicParameterHandlerContext.BindableParameters => BindableParameters;
-
-        IList<MergedCompiledCommandParameter> IDynamicParameterHandlerContext.UnboundParameters => UnboundParameters;
-
-        List<CommandParameterInternal> IDynamicParameterHandlerContext.UnboundArguments
+        List<CommandParameterInternal> IBindingStateContext.UnboundArguments
         {
             get => UnboundArguments;
             set => UnboundArguments = value;
         }
 
-        uint IDynamicParameterHandlerContext.CurrentParameterSetFlag => ParameterSetResolver.CurrentParameterSetFlag;
+        List<MergedCompiledCommandParameter> IBindingStateContext.ParametersBoundThroughPipelineInput
+            => ParametersBoundThroughPipelineInput;
 
-        uint IDynamicParameterHandlerContext.DefaultParameterSetFlag
+        InvocationInfo IBindingStateContext.InvocationInfo => Command.MyInvocation;
+
+        ParameterSetResolver IBindingStateContext.ParameterSetResolver => ParameterSetResolver;
+
+        uint IBindingStateContext.CurrentParameterSetFlag => ParameterSetResolver.CurrentParameterSetFlag;
+
+        uint IBindingStateContext.DefaultParameterSetFlag
         {
             get => _commandMetadata.DefaultParameterSetFlag;
             set => _commandMetadata.DefaultParameterSetFlag = value;
         }
 
-        string IDynamicParameterHandlerContext.DefaultParameterSetName => _commandMetadata.DefaultParameterSetName;
+        string IBindingStateContext.DefaultParameterSetName => _commandMetadata.DefaultParameterSetName;
 
-        CommandLineParameters IDynamicParameterHandlerContext.CommandLineParameters => CommandLineParameters;
+        string IBindingStateContext.CommandName => _commandMetadata.Name;
 
-        void IDynamicParameterHandlerContext.ReparseUnboundArguments() => ReparseUnboundArguments();
+        bool IBindingStateContext.ImplementsDynamicParameters => _commandMetadata.ImplementsDynamicParameters;
 
-        void IDynamicParameterHandlerContext.BindNamedParameters(uint parameterSetFlag, List<CommandParameterInternal> args)
+        Cmdlet IBindingStateContext.Command => Command;
+
+        ExecutionContext IBindingStateContext.Context => Context;
+
+        MergedCommandParameterMetadata IBindingStateContext.BindableParameters => BindableParameters;
+
+        CommandLineParameters IBindingStateContext.CommandLineParameters => CommandLineParameters;
+
+        bool IBindingStateContext.DefaultParameterBindingInUse
+        {
+            get => DefaultParameterBindingInUse;
+            set => DefaultParameterBindingInUse = value;
+        }
+
+        List<string> IBindingStateContext.BoundDefaultParameters => BoundDefaultParameters;
+
+        List<string>? IBindingStateContext.DefaultParameterAliasList
+        {
+            get => State.DefaultParameterAliasList;
+            set => State.DefaultParameterAliasList = value;
+        }
+
+        HashSet<string> IBindingStateContext.DefaultParameterWarningSet => State.DefaultParameterWarningSet;
+
+        Dictionary<MergedCompiledCommandParameter, object>? IBindingStateContext.AllDefaultParameterValuePairs
+        {
+            get => State.AllDefaultParameterValuePairs;
+            set => State.AllDefaultParameterValuePairs = value;
+        }
+
+        bool IBindingStateContext.UseDefaultParameterBinding
+        {
+            get => State.UseDefaultParameterBinding;
+            set => State.UseDefaultParameterBinding = value;
+        }
+
+        Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument> IBindingStateContext.DelayBindScriptBlocks
+            => State.DelayBindScriptBlocks;
+
+        Dictionary<string, CommandParameterInternal> IBindingStateContext.DefaultParameterValues => State.DefaultParameterValues;
+
+        #endregion IBindingStateContext
+
+        #region IBindingOperationsContext
+
+        void IBindingOperationsContext.SetParameterSetName(string parameterSetName) => Command.SetParameterSetName(parameterSetName);
+
+        void IBindingOperationsContext.ThrowOrElaborateBindingException(ParameterBindingException exception) => ThrowOrElaborateBindingException(exception);
+
+        bool IBindingOperationsContext.DispatchBindToSubBinder(
+            uint validParameterSetFlag,
+            CommandParameterInternal argument,
+            MergedCompiledCommandParameter parameter,
+            ParameterBindingFlags flags)
+            => DispatchBindToSubBinder(validParameterSetFlag, argument, parameter, flags);
+
+        bool IBindingOperationsContext.BindToAssociatedBinder(CommandParameterInternal argument, MergedCompiledCommandParameter parameter, ParameterBindingFlags flags)
+            => BindToAssociatedBinder(argument, parameter, flags);
+
+        bool IBindingOperationsContext.ResolveAndBindNamedParameter(CommandParameterInternal argument, ParameterBindingFlags flags)
+            => ResolveAndBindNamedParameter(argument, flags);
+
+        void IBindingOperationsContext.ReparseUnboundArguments() => ReparseUnboundArguments();
+
+        void IBindingOperationsContext.BindNamedParameters(uint parameterSetFlag, List<CommandParameterInternal> args)
             => BindNamedParameters(parameterSetFlag, args);
 
-        void IDynamicParameterHandlerContext.BindPositionalParameters(
+        void IBindingOperationsContext.BindPositionalParameters(
             List<CommandParameterInternal> args,
             uint currentParameterSetFlag,
             uint defaultParameterSetFlag,
             out ParameterBindingException? outgoingBindingException)
             => BindPositionalParameters(args, currentParameterSetFlag, defaultParameterSetFlag, out outgoingBindingException);
 
-        #endregion IDynamicParameterHandlerContext
+        IScriptExtent IBindingOperationsContext.GetErrorExtent(CommandParameterInternal argument) => GetErrorExtent(argument);
 
-        #region IDefaultValueManagerContext
+        object? IBindingOperationsContext.GetDefaultParameterValue(string name) => GetDefaultParameterValue(name);
 
-        InvocationInfo IDefaultValueManagerContext.InvocationInfo => Command.MyInvocation;
-
-        IScriptExtent IDefaultValueManagerContext.GetErrorExtent(CommandParameterInternal argument) => GetErrorExtent(argument);
-
-        object? IDefaultValueManagerContext.GetDefaultParameterValue(string name) => GetDefaultParameterValue(name);
-
-        bool IDefaultValueManagerContext.RestoreParameter(CommandParameterInternal argument, MergedCompiledCommandParameter parameter)
+        bool IBindingOperationsContext.RestoreParameter(CommandParameterInternal argument, MergedCompiledCommandParameter parameter)
             => RestoreParameter(argument, parameter);
 
-        Dictionary<string, MergedCompiledCommandParameter> IDefaultValueManagerContext.BoundParameters => BoundParameters;
+        HashSet<string> IBindingOperationsContext.CopyBoundPositionalParameters()
+            => DefaultParameterBinder.CommandLineParameters.CopyBoundPositionalParameters();
 
-        IList<MergedCompiledCommandParameter> IDefaultValueManagerContext.UnboundParameters => UnboundParameters;
+        bool IBindingOperationsContext.InvokeAndBindDelayBindScriptBlock(PSObject inputToOperateOn, out bool thereWasSomethingToBind)
+            => _delayBindScriptBlockHandler.InvokeAndBind(inputToOperateOn, out thereWasSomethingToBind);
 
-        Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.BoundArguments => BoundArguments;
+        void IBindingOperationsContext.BackupDefaultParameter(MergedCompiledCommandParameter parameter)
+            => _defaultValueManager.Backup(parameter);
 
-        void IDefaultValueManagerContext.ReturnPipelineCpi(CommandParameterInternal cpi) => State.ReturnPipelineCpi(cpi);
+        void IBindingOperationsContext.RestoreDefaultParameterValues(IEnumerable<MergedCompiledCommandParameter> parameters)
+            => _defaultValueManager.Restore(parameters);
 
-        Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.DefaultParameterValues => State.DefaultParameterValues;
+        CommandParameterInternal IBindingOperationsContext.RentPipelineCpi()
+            => State.RentPipelineCpi();
 
-        #endregion IDefaultValueManagerContext
+        void IBindingOperationsContext.ReturnPipelineCpi(CommandParameterInternal cpi) => State.ReturnPipelineCpi(cpi);
+
+        bool IBindingOperationsContext.ApplyDefaultParameterBinding(string caller, bool isDynamic, uint currentParameterSetFlag)
+            => _defaultParameterValueBinder.ApplyDefaultParameterBinding(caller, isDynamic, currentParameterSetFlag);
+
+        #endregion IBindingOperationsContext
 
         protected override void SaveDefaultScriptParameterValue(string name, string parameterText, object value)
             => _defaultValueManager.SaveScriptParameterValue(name, parameterText, value);

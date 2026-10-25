@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Management.Automation.Language;
 using Microsoft.PowerShell.Commands;
 using System.Management.Automation;
 using Xunit;
@@ -11,30 +12,100 @@ using Xunit;
 namespace PSTests.Parallel
 {
     /// <summary>
-    /// Lightweight stub implementing IParameterBindingContext for resolver tests.
+    /// Lightweight stub implementing the binding context interfaces for resolver tests.
     /// </summary>
-    internal sealed class TestBindingContext : IParameterBindingContext
+    internal sealed class TestBindingContext : IBindingStateContext, IBindingOperationsContext
     {
-        public ICollection<MergedCompiledCommandParameter> UnboundParameters { get; set; } = new List<MergedCompiledCommandParameter>();
+        // IBindingStateContext — only the subset used by ParameterSetResolver is populated with real values
+        public IList<MergedCompiledCommandParameter> UnboundParameters { get; set; } = new List<MergedCompiledCommandParameter>();
 
         public Dictionary<string, MergedCompiledCommandParameter> BoundParameters { get; set; } = new Dictionary<string, MergedCompiledCommandParameter>(StringComparer.OrdinalIgnoreCase);
 
+        public Dictionary<string, CommandParameterInternal> BoundArguments { get; } = new Dictionary<string, CommandParameterInternal>(StringComparer.OrdinalIgnoreCase);
+
+        public List<CommandParameterInternal> UnboundArguments { get; set; } = new List<CommandParameterInternal>();
+
+        public List<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput { get; } = new List<MergedCompiledCommandParameter>();
+
         public InvocationInfo InvocationInfo { get; set; } = new InvocationInfo(new CmdletInfo("Get-Variable", typeof(GetVariableCommand)), null);
 
+        public ParameterSetResolver ParameterSetResolver { get; } = null;
+
+        public uint CurrentParameterSetFlag { get; } = 0;
+
+        public uint DefaultParameterSetFlag { get; set; } = 0;
+
+        public string DefaultParameterSetName { get; } = string.Empty;
+
+        public string CommandName { get; } = string.Empty;
+
+        public bool ImplementsDynamicParameters { get; } = false;
+
+        public Cmdlet Command { get; } = null;
+
+        public ExecutionContext Context { get; } = null;
+
+        public MergedCommandParameterMetadata BindableParameters { get; } = null;
+
+        public CommandLineParameters CommandLineParameters { get; } = null;
+
+        public bool DefaultParameterBindingInUse { get; set; } = false;
+
+        public List<string> BoundDefaultParameters { get; } = new List<string>();
+
+        public List<string> DefaultParameterAliasList { get; set; } = null;
+
+        public HashSet<string> DefaultParameterWarningSet { get; } = new HashSet<string>();
+
+        public Dictionary<MergedCompiledCommandParameter, object> AllDefaultParameterValuePairs { get; set; } = null;
+
+        public bool UseDefaultParameterBinding { get; set; } = false;
+
+        public Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument> DelayBindScriptBlocks { get; } = new Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument>();
+
+        public Dictionary<string, CommandParameterInternal> DefaultParameterValues { get; } = new Dictionary<string, CommandParameterInternal>(StringComparer.OrdinalIgnoreCase);
+
+        // Test observation properties
         public string LastSetName { get; private set; }
 
         public ParameterBindingException LastException { get; private set; }
 
-        public void SetParameterSetName(string parameterSetName)
-        {
-            LastSetName = parameterSetName;
-        }
+        // IBindingOperationsContext — only SetParameterSetName/ThrowOrElaborateBindingException used in tests
+        public void SetParameterSetName(string parameterSetName) { LastSetName = parameterSetName; }
 
-        public void ThrowBindingException(ParameterBindingException exception)
-        {
-            LastException = exception;
-            throw exception;
-        }
+        public void ThrowOrElaborateBindingException(ParameterBindingException exception) { LastException = exception; throw exception; }
+
+        public bool DispatchBindToSubBinder(uint validParameterSetFlag, CommandParameterInternal argument, MergedCompiledCommandParameter parameter, ParameterBindingFlags flags) => false;
+
+        public bool BindToAssociatedBinder(CommandParameterInternal argument, MergedCompiledCommandParameter parameter, ParameterBindingFlags flags) => false;
+
+        public bool ResolveAndBindNamedParameter(CommandParameterInternal argument, ParameterBindingFlags flags) => false;
+
+        public void ReparseUnboundArguments() { }
+
+        public void BindNamedParameters(uint parameterSetFlag, List<CommandParameterInternal> args) { }
+
+        public void BindPositionalParameters(List<CommandParameterInternal> args, uint currentParameterSetFlag, uint defaultParameterSetFlag, out ParameterBindingException outgoingBindingException) { outgoingBindingException = null; }
+
+        public IScriptExtent GetErrorExtent(CommandParameterInternal argument) => null;
+
+        public object GetDefaultParameterValue(string name) => null;
+
+        public bool RestoreParameter(CommandParameterInternal argument, MergedCompiledCommandParameter parameter) => false;
+
+        public HashSet<string> CopyBoundPositionalParameters() => new HashSet<string>();
+
+        public bool InvokeAndBindDelayBindScriptBlock(PSObject inputToOperateOn, out bool thereWasSomethingToBind) { thereWasSomethingToBind = false; return false; }
+
+        public void BackupDefaultParameter(MergedCompiledCommandParameter parameter) { }
+
+        public void RestoreDefaultParameterValues(IEnumerable<MergedCompiledCommandParameter> parameters) { }
+
+        public CommandParameterInternal RentPipelineCpi() => null;
+
+        public void ReturnPipelineCpi(CommandParameterInternal cpi) { }
+
+        public bool ApplyDefaultParameterBinding(string caller, bool isDynamic, uint currentParameterSetFlag) => false;
     }
 
     internal static class ParameterSetResolverTestFactory
@@ -98,7 +169,7 @@ namespace PSTests.Parallel
                 BoundParameters = boundParameters ?? new Dictionary<string, MergedCompiledCommandParameter>(StringComparer.OrdinalIgnoreCase),
             };
 
-            var resolver = new ParameterSetResolver(commandMetadata, metadata, context);
+            var resolver = new ParameterSetResolver(commandMetadata, metadata, stateContext: context, opsContext: context);
             return (resolver, context);
         }
     }

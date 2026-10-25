@@ -7,31 +7,10 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
+using System.Management.Automation.Language;
 using System.Numerics;
 
 namespace System.Management.Automation;
-
-/// <summary>
-/// Provides the live binding state that <see cref="ParameterSetResolver"/> needs
-/// from its owning parameter binder controller.
-/// </summary>
-internal interface IParameterBindingContext
-{
-    /// <summary>Parameters not yet bound to a value.</summary>
-    ICollection<MergedCompiledCommandParameter> UnboundParameters { get; }
-
-    /// <summary>Parameters already bound to a value, keyed by name.</summary>
-    Dictionary<string, MergedCompiledCommandParameter> BoundParameters { get; }
-
-    /// <summary>Sets the resolved parameter set name on the command.</summary>
-    void SetParameterSetName(string parameterSetName);
-
-    /// <summary>Throws or elaborates a parameter binding exception.</summary>
-    void ThrowBindingException(ParameterBindingException exception);
-
-    /// <summary>The invocation info for trace and exception context.</summary>
-    InvocationInfo InvocationInfo { get; }
-}
 
 /// <summary>
 /// Encapsulates parameter-set state management, validation, and resolution.
@@ -41,16 +20,19 @@ internal sealed class ParameterSetResolver
 {
     private readonly CommandMetadata _commandMetadata;
     private readonly MergedCommandParameterMetadata _bindableParameters;
-    private readonly IParameterBindingContext _context;
+    private readonly IBindingStateContext _stateContext;
+    private readonly IBindingOperationsContext _opsContext;
 
     internal ParameterSetResolver(
         CommandMetadata commandMetadata,
         MergedCommandParameterMetadata bindableParameters,
-        IParameterBindingContext context)
+        IBindingStateContext stateContext,
+        IBindingOperationsContext opsContext)
     {
         _commandMetadata = commandMetadata;
         _bindableParameters = bindableParameters;
-        _context = context;
+        _stateContext = stateContext;
+        _opsContext = opsContext;
     }
 
     /// <summary>Current valid parameter set flag (bit-mask). uint.MaxValue = all sets valid.</summary>
@@ -89,7 +71,8 @@ internal sealed class ParameterSetResolver
         return new ParameterSetResolver(
             commandMetadata: new CommandMetadata(typeof(PSCmdlet)),
             bindableParameters: new MergedCommandParameterMetadata(),
-            context: s_defaultContext);
+            stateContext: s_defaultContext,
+            opsContext: s_defaultContext);
     }
 
     /// <summary>
@@ -120,7 +103,7 @@ internal sealed class ParameterSetResolver
                 (hasDefaultSetDefined && (CurrentParameterSetFlag & defaultParameterSetFlag) != 0))
             {
                 string currentParameterSetName = _bindableParameters.GetParameterSetName(defaultParameterSetFlag);
-                _context.SetParameterSetName(currentParameterSetName);
+                _opsContext.SetParameterSetName(currentParameterSetName);
                 if (setDefault)
                 {
                     CurrentParameterSetFlag = _commandMetadata.DefaultParameterSetFlag;
@@ -176,7 +159,7 @@ internal sealed class ParameterSetResolver
                 }
             }
 
-            _context.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
+            _opsContext.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
         }
 
         return validParameterSetCount;
@@ -211,11 +194,11 @@ internal sealed class ParameterSetResolver
     {
         uint currentParameterSetFlag = CurrentParameterSetFlag;
         int result = ResolveParameterSetAmbiguityBasedOnMandatoryParameters(
-            _context.BoundParameters,
-            _context.UnboundParameters,
+            _stateContext.BoundParameters,
+            _stateContext.UnboundParameters,
             _bindableParameters,
             ref currentParameterSetFlag,
-            _context.SetParameterSetName);
+            _opsContext.SetParameterSetName);
 
         CurrentParameterSetFlag = currentParameterSetFlag;
 
@@ -274,7 +257,7 @@ internal sealed class ParameterSetResolver
     internal void ThrowAmbiguousParameterSetException(uint parameterSetFlags)
     {
         ParameterBindingException bindingException =
-            ParameterBindingException.NewAmbiguousParameterSet(_context.InvocationInfo);
+            ParameterBindingException.NewAmbiguousParameterSet(_stateContext.InvocationInfo);
 
         uint currentParameterSet = 1;
 
@@ -295,7 +278,7 @@ internal sealed class ParameterSetResolver
             currentParameterSet <<= 1;
         }
 
-        _context.ThrowBindingException(bindingException);
+        _opsContext.ThrowOrElaborateBindingException(bindingException);
     }
 
     internal static int ValidParameterSetCount(uint parameterSetFlags)
@@ -320,7 +303,7 @@ internal sealed class ParameterSetResolver
             parameterSetsTakingPipeInput |= parameter.Parameter.ParameterSetFlags;
         }
 
-        foreach (MergedCompiledCommandParameter parameter in _context.UnboundParameters)
+        foreach (MergedCompiledCommandParameter parameter in _stateContext.UnboundParameters)
         {
             if (!parameter.Parameter.IsPipelineParameterInSomeParameterSet)
             {
@@ -361,7 +344,7 @@ internal sealed class ParameterSetResolver
 
     internal bool AtLeastOneUnboundValidParameterSetTakesPipelineInput(uint validParameterSetFlags)
     {
-        foreach (MergedCompiledCommandParameter parameter in _context.UnboundParameters)
+        foreach (MergedCompiledCommandParameter parameter in _stateContext.UnboundParameters)
         {
             if (parameter.Parameter.DoesParameterSetTakePipelineInput(validParameterSetFlags))
             {
@@ -432,7 +415,7 @@ internal sealed class ParameterSetResolver
 
                     if (CurrentParameterSetFlag == defaultParameterSet)
                     {
-                        _context.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
+                        _opsContext.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
                     }
                     else
                     {
@@ -475,7 +458,7 @@ internal sealed class ParameterSetResolver
         missingAMandatoryParameter = false;
         missingAMandatoryParameterInAllSet = false;
 
-        foreach (MergedCompiledCommandParameter parameter in _context.UnboundParameters)
+        foreach (MergedCompiledCommandParameter parameter in _stateContext.UnboundParameters)
         {
             if (!parameter.Parameter.IsMandatoryInSomeParameterSet)
             {
@@ -605,7 +588,7 @@ internal sealed class ParameterSetResolver
         }
 
         CurrentParameterSetFlag = defaultParameterSet;
-        _context.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
+        _opsContext.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
 
         CollectNonpipelineableMandatoryParameters(promptingData, defaultParameterSet, result);
         return true;
@@ -776,7 +759,7 @@ internal sealed class ParameterSetResolver
 
             if (ValidParameterSetCount(CurrentParameterSetFlag) == 1)
             {
-                _context.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
+                _opsContext.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
             }
         }
 
@@ -788,12 +771,12 @@ internal sealed class ParameterSetResolver
         if (chosenSetContainsNonpipelineableMandatoryParameters)
         {
             CurrentParameterSetFlag = chosenMandatorySet;
-            _context.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
+            _opsContext.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
         }
         else
         {
             IgnoreOtherMandatoryParameterSets(otherMandatorySetsToBeIgnored);
-            _context.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
+            _opsContext.SetParameterSetName(_bindableParameters.GetParameterSetName(CurrentParameterSetFlag));
 
             if (CurrentParameterSetFlag != chosenMandatorySet)
             {
@@ -884,23 +867,96 @@ internal sealed class ParameterSetResolver
         return parameterMandatorySets;
     }
 
-    private static readonly IParameterBindingContext s_defaultContext = new DefaultBindingContext();
+    private static readonly DefaultBindingContext s_defaultContext = new DefaultBindingContext();
 
-    private sealed class DefaultBindingContext : IParameterBindingContext
+    private sealed class DefaultBindingContext : IBindingStateContext, IBindingOperationsContext
     {
-        public ICollection<MergedCompiledCommandParameter> UnboundParameters { get; } = new List<MergedCompiledCommandParameter>();
+        // IBindingStateContext — only UnboundParameters/BoundParameters/InvocationInfo are actually called
+
+        public IList<MergedCompiledCommandParameter> UnboundParameters { get; } = new List<MergedCompiledCommandParameter>();
 
         public Dictionary<string, MergedCompiledCommandParameter> BoundParameters { get; } = new Dictionary<string, MergedCompiledCommandParameter>(StringComparer.OrdinalIgnoreCase);
 
+        public Dictionary<string, CommandParameterInternal> BoundArguments { get; } = new Dictionary<string, CommandParameterInternal>(StringComparer.OrdinalIgnoreCase);
+
+        public List<CommandParameterInternal> UnboundArguments { get; set; } = new List<CommandParameterInternal>();
+
+        public List<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput { get; } = new List<MergedCompiledCommandParameter>();
+
         public InvocationInfo InvocationInfo { get; } = new InvocationInfo(null, null);
 
-        public void SetParameterSetName(string parameterSetName)
-        {
-        }
+        public ParameterSetResolver ParameterSetResolver { get; } = null!;
 
-        public void ThrowBindingException(ParameterBindingException exception)
-        {
-            throw exception;
-        }
+        public uint CurrentParameterSetFlag { get; } = 0;
+
+        public uint DefaultParameterSetFlag { get; set; } = 0;
+
+        public string DefaultParameterSetName { get; } = string.Empty;
+
+        public string CommandName { get; } = string.Empty;
+
+        public bool ImplementsDynamicParameters { get; } = false;
+
+        public Cmdlet Command { get; } = null!;
+
+        public ExecutionContext Context { get; } = null!;
+
+        public MergedCommandParameterMetadata BindableParameters { get; } = null!;
+
+        public CommandLineParameters CommandLineParameters { get; } = null!;
+
+        public bool DefaultParameterBindingInUse { get; set; } = false;
+
+        public List<string> BoundDefaultParameters { get; } = new List<string>();
+
+        public List<string>? DefaultParameterAliasList { get; set; } = null;
+
+        public HashSet<string> DefaultParameterWarningSet { get; } = new HashSet<string>();
+
+        public Dictionary<MergedCompiledCommandParameter, object>? AllDefaultParameterValuePairs { get; set; } = null;
+
+        public bool UseDefaultParameterBinding { get; set; } = false;
+
+        public Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument> DelayBindScriptBlocks { get; } = new Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument>();
+
+        public Dictionary<string, CommandParameterInternal> DefaultParameterValues { get; } = new Dictionary<string, CommandParameterInternal>(StringComparer.OrdinalIgnoreCase);
+
+        // IBindingOperationsContext — only SetParameterSetName/ThrowOrElaborateBindingException actually called
+
+        public void SetParameterSetName(string parameterSetName) { }
+
+        public void ThrowOrElaborateBindingException(ParameterBindingException exception) => throw exception;
+
+        public bool DispatchBindToSubBinder(uint validParameterSetFlag, CommandParameterInternal argument, MergedCompiledCommandParameter parameter, ParameterBindingFlags flags) => false;
+
+        public bool BindToAssociatedBinder(CommandParameterInternal argument, MergedCompiledCommandParameter parameter, ParameterBindingFlags flags) => false;
+
+        public bool ResolveAndBindNamedParameter(CommandParameterInternal argument, ParameterBindingFlags flags) => false;
+
+        public void ReparseUnboundArguments() { }
+
+        public void BindNamedParameters(uint parameterSetFlag, List<CommandParameterInternal> args) { }
+
+        public void BindPositionalParameters(List<CommandParameterInternal> args, uint currentParameterSetFlag, uint defaultParameterSetFlag, out ParameterBindingException? outgoingBindingException) { outgoingBindingException = null; }
+
+        public IScriptExtent GetErrorExtent(CommandParameterInternal argument) => null!;
+
+        public object? GetDefaultParameterValue(string name) => null;
+
+        public bool RestoreParameter(CommandParameterInternal argument, MergedCompiledCommandParameter parameter) => false;
+
+        public HashSet<string> CopyBoundPositionalParameters() => new HashSet<string>();
+
+        public bool InvokeAndBindDelayBindScriptBlock(PSObject inputToOperateOn, out bool thereWasSomethingToBind) { thereWasSomethingToBind = false; return false; }
+
+        public void BackupDefaultParameter(MergedCompiledCommandParameter parameter) { }
+
+        public void RestoreDefaultParameterValues(IEnumerable<MergedCompiledCommandParameter> parameters) { }
+
+        public CommandParameterInternal RentPipelineCpi() => null!;
+
+        public void ReturnPipelineCpi(CommandParameterInternal cpi) { }
+
+        public bool ApplyDefaultParameterBinding(string caller, bool isDynamic, uint currentParameterSetFlag) => false;
     }
 }

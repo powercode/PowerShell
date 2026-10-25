@@ -9,28 +9,6 @@ using System.Management.Automation.Language;
 namespace System.Management.Automation;
 
 /// <summary>
-/// Provides the binding context that <see cref="DelayBindScriptBlockHandler"/> needs
-/// from its owning parameter binder controller.
-/// </summary>
-internal interface IDelayBindScriptBlockContext
-{
-    /// <summary>The invocation info for the current command (used in exception messages).</summary>
-    InvocationInfo InvocationInfo { get; }
-
-    /// <summary>Returns the script extent for error reporting on the given argument.</summary>
-    IScriptExtent GetErrorExtent(CommandParameterInternal argument);
-
-    /// <summary>Binds an argument to a parameter via the appropriate sub-binder.</summary>
-    bool BindToAssociatedBinder(
-        CommandParameterInternal argument,
-        MergedCompiledCommandParameter parameter,
-        ParameterBindingFlags flags);
-
-    /// <summary>Pending delay-bind ScriptBlock entries keyed by parameter.</summary>
-    Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument> DelayBindScriptBlocks { get; }
-}
-
-/// <summary>
 /// Encapsulates the delay-bind ScriptBlock deferral, invocation, and per-pipeline-object
 /// result binding.
 /// </summary>
@@ -54,18 +32,20 @@ internal sealed class DelayBindScriptBlockHandler
         public override string ToString() => _argument.ArgumentValue.ToString();
     }
 
-    private readonly IDelayBindScriptBlockContext _context;
+    private readonly IBindingStateContext _stateContext;
+    private readonly IBindingOperationsContext _opsContext;
 
-    internal DelayBindScriptBlockHandler(IDelayBindScriptBlockContext context)
+    internal DelayBindScriptBlockHandler(IBindingStateContext stateContext, IBindingOperationsContext opsContext)
     {
-        _context = context;
+        _stateContext = stateContext;
+        _opsContext = opsContext;
     }
 
     private string DebuggerDisplayValue
-        => $"DelayBindHandler: PendingCount={_context.DelayBindScriptBlocks.Count}";
+        => $"DelayBindHandler: PendingCount={_stateContext.DelayBindScriptBlocks.Count}";
 
     /// <summary>Exposes the parameter keys that have pending delay-bind entries.</summary>
-    internal ICollection<MergedCompiledCommandParameter> Keys => _context.DelayBindScriptBlocks.Keys;
+    internal ICollection<MergedCompiledCommandParameter> Keys => _stateContext.DelayBindScriptBlocks.Keys;
 
     /// <summary>
     /// Creates a new <see cref="DelayedScriptBlockArgument"/> owned by this handler.
@@ -78,9 +58,10 @@ internal sealed class DelayBindScriptBlockHandler
     /// </summary>
     internal void TryAdd(MergedCompiledCommandParameter parameter, DelayedScriptBlockArgument delayedArg)
     {
-        if (!_context.DelayBindScriptBlocks.ContainsKey(parameter))
+        var delayedScriptBlocks = _stateContext.DelayBindScriptBlocks;
+        if (!delayedScriptBlocks.ContainsKey(parameter))
         {
-            _context.DelayBindScriptBlocks.Add(parameter, delayedArg);
+            delayedScriptBlocks.Add(parameter, delayedArg);
         }
     }
 
@@ -97,6 +78,7 @@ internal sealed class DelayBindScriptBlockHandler
     {
         thereWasSomethingToBind = false;
         bool result = true;
+        var invocationInfo = _stateContext.InvocationInfo;
 
         // NOTE: we are not doing backup and restore of default parameter
         // values here.  It is not needed because each script block will be
@@ -108,7 +90,7 @@ internal sealed class DelayBindScriptBlockHandler
         // Loop through each of the delay bind script blocks and invoke them.
         // Bind the result to the associated parameter
 
-        foreach (KeyValuePair<MergedCompiledCommandParameter, DelayedScriptBlockArgument> delayedScriptBlock in _context.DelayBindScriptBlocks)
+        foreach (KeyValuePair<MergedCompiledCommandParameter, DelayedScriptBlockArgument> delayedScriptBlock in _stateContext.DelayBindScriptBlocks)
         {
             thereWasSomethingToBind = true;
 
@@ -149,8 +131,8 @@ internal sealed class DelayBindScriptBlockHandler
             {
                 ParameterBindingException.ThrowScriptBlockArgumentInvocationFailed(
                     error,
-                    _context.InvocationInfo,
-                    _context.GetErrorExtent(argument),
+                    invocationInfo,
+                    _opsContext.GetErrorExtent(argument),
                     parameter.Parameter.Name,
                     null,
                     null,
@@ -160,8 +142,8 @@ internal sealed class DelayBindScriptBlockHandler
             if (output == null || output.Count == 0)
             {
                 ParameterBindingException.ThrowScriptBlockArgumentNoOutput(
-                    _context.InvocationInfo,
-                    _context.GetErrorExtent(argument),
+                    invocationInfo,
+                    _opsContext.GetErrorExtent(argument),
                     parameter.Parameter.Name,
                     null);
             }
@@ -181,7 +163,7 @@ internal sealed class DelayBindScriptBlockHandler
                 argument.ArgumentAst, newValue,
                 false);
 
-            if (!_context.BindToAssociatedBinder(newArgument, parameter, ParameterBindingFlags.ShouldCoerceType))
+            if (!_opsContext.BindToAssociatedBinder(newArgument, parameter, ParameterBindingFlags.ShouldCoerceType))
             {
                 result = false;
             }
