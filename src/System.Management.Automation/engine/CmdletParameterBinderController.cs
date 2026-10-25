@@ -8,14 +8,10 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
-using System.Linq;
-using System.Management.Automation.Host;
 using System.Management.Automation.Internal;
 using System.Management.Automation.Language;
 using System.Diagnostics;
-using System.Management.Automation.Runspaces;
 using System.Runtime.ExceptionServices;
-using System.Text;
 
 namespace System.Management.Automation
 {
@@ -48,48 +44,20 @@ namespace System.Management.Automation
         /// <param name="parameterBinder">
         /// The default parameter binder to use.
         /// </param>
-        internal CmdletParameterBinderController(
-            Cmdlet cmdlet,
-            CommandMetadata commandMetadata,
-            ParameterBinderBase parameterBinder)
-            : base(
-                cmdlet.MyInvocation,
-                cmdlet.Context,
-                parameterBinder)
+        internal CmdletParameterBinderController(Cmdlet cmdlet, CommandMetadata commandMetadata, ParameterBinderBase parameterBinder)
+            : base(cmdlet.MyInvocation, cmdlet.Context, parameterBinder)
         {
-            if (cmdlet! == null)
-            {
-                throw PSTraceSource.NewArgumentNullException(nameof(cmdlet));
-            }
+            PSTraceSource.ThrowIfNull(cmdlet);
+            PSTraceSource.ThrowIfNull(commandMetadata);
 
-            if (commandMetadata! == null)
-            {
-                throw PSTraceSource.NewArgumentNullException(nameof(commandMetadata));
-            }
-
-            this.Command = cmdlet;
+            Command = cmdlet;
             _commandRuntime = (MshCommandRuntime)cmdlet.CommandRuntime;
             _commandMetadata = commandMetadata;
 
-            _commonParametersBinder = new ReflectionParameterBinder(
-                new CommonParameters(_commandRuntime),
-                this.Command,
-                this.CommandLineParameters);
-
-            _shouldProcessParameterBinder = new ReflectionParameterBinder(
-                new ShouldProcessParameters(_commandRuntime),
-                this.Command,
-                this.CommandLineParameters);
-
-            _pagingParameterBinder = new ReflectionParameterBinder(
-                new PagingParameters(_commandRuntime),
-                this.Command,
-                this.CommandLineParameters);
-
-            _transactionParameterBinder = new ReflectionParameterBinder(
-                new TransactionParameters(_commandRuntime),
-                this.Command,
-                this.CommandLineParameters);
+            _commonParametersBinder = new ReflectionParameterBinder(new CommonParameters(_commandRuntime), cmdlet, CommandLineParameters);
+            _shouldProcessParameterBinder = new ReflectionParameterBinder(new ShouldProcessParameters(_commandRuntime), cmdlet, CommandLineParameters);
+            _pagingParameterBinder = new ReflectionParameterBinder(new PagingParameters(_commandRuntime), cmdlet, CommandLineParameters);
+            _transactionParameterBinder = new ReflectionParameterBinder(new TransactionParameters(_commandRuntime), cmdlet, CommandLineParameters);
 
             // Record the command name in the binding state for debugger display.
             State.CommandName = commandMetadata.Name;
@@ -100,7 +68,7 @@ namespace System.Management.Automation
             if (commandMetadata.ImplementsDynamicParameters)
             {
                 // ReplaceMetadata makes a copy for us, so we can use that collection as is.
-                initialParameters = this.BindableParameters.ReplaceMetadata(commandMetadata.StaticCommandParameterMetadata);
+                initialParameters = BindableParameters.ReplaceMetadata(commandMetadata.StaticCommandParameterMetadata);
             }
             else
             {
@@ -117,23 +85,11 @@ namespace System.Management.Automation
             // In DEBUG builds, assert that the rented state is fully clean.
             State.AssertClean(initialParameters.Count);
 
-            ParameterSetResolver = new System.Management.Automation.ParameterSetResolver(
-                commandMetadata: _commandMetadata,
-                bindableParameters: this.BindableParameters,
-                context: this);
+            ParameterSetResolver = new ParameterSetResolver(_commandMetadata, BindableParameters, context: this);
 
-            _defaultParameterValueBinder = new DefaultParameterValueBinder(
-                commandMetadata: _commandMetadata,
-                commandRuntime: _commandRuntime,
-                context: cmdlet.Context,
-                bindableParameters: this.BindableParameters,
-                bindingContext: this);
+            _defaultParameterValueBinder = new DefaultParameterValueBinder(_commandMetadata, _commandRuntime, cmdlet.Context, BindableParameters, bindingContext: this);
 
-            _mandatoryParameterPrompter = new MandatoryParameterPrompter(
-                parameterSetResolver: ParameterSetResolver,
-                context: this.Context,
-                command: this.Command,
-                bindingContext: this);
+            _mandatoryParameterPrompter = new MandatoryParameterPrompter(ParameterSetResolver, Context, Command, bindingContext: this);
 
             _pipelineParameterBinder = new PipelineParameterBinder(this);
             _delayBindScriptBlockHandler = new DelayBindScriptBlockHandler(this);
@@ -148,201 +104,17 @@ namespace System.Management.Automation
         /// <see cref="ExecutionContext"/> so it can be reused by the next command invocation.
         /// Called from <see cref="CommandProcessor"/> during disposal.
         /// </summary>
-        internal void ReturnState()
-        {
-            Context.ReturnBindingState(State);
-        }
+        internal void ReturnState() => Context.ReturnBindingState(State);
 
         private string DebuggerDisplayValue
         {
             get
             {
-                string commandName = InvocationInfo?.MyCommand?.Name ?? "(unknown)";
-                uint setFlag = ParameterSetResolver?.CurrentParameterSetFlag ?? 0;
+                string commandName = InvocationInfo.MyCommand?.Name ?? "(unknown)";
+                uint setFlag = ParameterSetResolver.CurrentParameterSetFlag;
                 return $"CmdletBinder: {commandName}, ParamSet=0x{setFlag:X8}";
             }
         }
-
-        ICollection<MergedCompiledCommandParameter> IParameterBindingContext.UnboundParameters => UnboundParameters;
-
-        Dictionary<string, MergedCompiledCommandParameter> IParameterBindingContext.BoundParameters => BoundParameters;
-
-        InvocationInfo IParameterBindingContext.InvocationInfo => Command.MyInvocation;
-
-        void IParameterBindingContext.SetParameterSetName(string parameterSetName)
-            => Command.SetParameterSetName(parameterSetName);
-
-        void IParameterBindingContext.ThrowBindingException(ParameterBindingException exception)
-            => ThrowOrElaborateBindingException(exception);
-
-        bool IDefaultParameterBindingContext.DispatchBindToSubBinder(
-            uint validParameterSetFlag,
-            CommandParameterInternal argument,
-            MergedCompiledCommandParameter parameter,
-            ParameterBindingFlags flags)
-            => DispatchBindToSubBinder(validParameterSetFlag, argument, parameter, flags);
-
-        Dictionary<string, CommandParameterInternal> IDefaultParameterBindingContext.BoundArguments
-            => BoundArguments;
-
-        Dictionary<string, MergedCompiledCommandParameter> IDefaultParameterBindingContext.BoundParameters
-            => BoundParameters;
-
-        Collection<string> IDefaultParameterBindingContext.BoundDefaultParameters
-            => BoundDefaultParameters;
-
-        bool IMandatoryParameterPrompterContext.ResolveAndBindNamedParameter(
-            CommandParameterInternal argument,
-            ParameterBindingFlags flags)
-            => ResolveAndBindNamedParameter(argument, flags);
-
-        HashSet<string> IDefaultParameterBindingContext.CopyBoundPositionalParameters()
-            => DefaultParameterBinder.CommandLineParameters.CopyBoundPositionalParameters();
-
-        List<string>? IDefaultParameterBindingContext.DefaultParameterAliasList
-        {
-            get => State.DefaultParameterAliasList;
-            set => State.DefaultParameterAliasList = value;
-        }
-
-        HashSet<string> IDefaultParameterBindingContext.DefaultParameterWarningSet
-            => State.DefaultParameterWarningSet;
-
-        Dictionary<MergedCompiledCommandParameter, object>? IDefaultParameterBindingContext.AllDefaultParameterValuePairs
-        {
-            get => State.AllDefaultParameterValuePairs;
-            set => State.AllDefaultParameterValuePairs = value;
-        }
-
-        bool IDefaultParameterBindingContext.UseDefaultParameterBinding
-        {
-            get => State.UseDefaultParameterBinding;
-            set => State.UseDefaultParameterBinding = value;
-        }
-
-        IList<MergedCompiledCommandParameter> IPipelineParameterBindingContext.UnboundParameters => UnboundParameters;
-
-        Collection<MergedCompiledCommandParameter> IPipelineParameterBindingContext.ParametersBoundThroughPipelineInput
-            => ParametersBoundThroughPipelineInput;
-
-        ParameterSetResolver IPipelineParameterBindingContext.ParameterSetResolver => ParameterSetResolver;
-
-        bool IPipelineParameterBindingContext.DefaultParameterBindingInUse
-        {
-            get => DefaultParameterBindingInUse;
-            set => DefaultParameterBindingInUse = value;
-        }
-
-        uint IPipelineParameterBindingContext.DefaultParameterSetFlag => _commandMetadata.DefaultParameterSetFlag;
-
-        string IPipelineParameterBindingContext.CommandName => _commandMetadata.Name;
-
-        bool IPipelineParameterBindingContext.InvokeAndBindDelayBindScriptBlock(PSObject inputToOperateOn, out bool thereWasSomethingToBind)
-            => _delayBindScriptBlockHandler.InvokeAndBind(inputToOperateOn, out thereWasSomethingToBind);
-
-        InvocationInfo IDelayBindScriptBlockContext.InvocationInfo => Command.MyInvocation;
-
-        IScriptExtent IDelayBindScriptBlockContext.GetErrorExtent(CommandParameterInternal argument)
-            => GetErrorExtent(argument);
-
-        bool IDelayBindScriptBlockContext.BindToAssociatedBinder(
-            CommandParameterInternal argument,
-            MergedCompiledCommandParameter parameter,
-            ParameterBindingFlags flags)
-            => BindToAssociatedBinder(argument, parameter, flags);
-
-        Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument> IDelayBindScriptBlockContext.DelayBindScriptBlocks
-            => State.DelayBindScriptBlocks;
-
-        void IPipelineParameterBindingContext.BackupDefaultParameter(MergedCompiledCommandParameter parameter)
-            => _defaultValueManager.Backup(parameter);
-
-        void IPipelineParameterBindingContext.RestoreDefaultParameterValues(IEnumerable<MergedCompiledCommandParameter> parameters)
-            => _defaultValueManager.Restore(parameters);
-
-        bool IPipelineParameterBindingContext.DispatchBindToSubBinder(
-            uint validParameterSetFlag,
-            CommandParameterInternal argument,
-            MergedCompiledCommandParameter parameter,
-            ParameterBindingFlags flags)
-            => DispatchBindToSubBinder(validParameterSetFlag, argument, parameter, flags);
-
-        [System.Diagnostics.CodeAnalysis.DoesNotReturn]
-        void IPipelineParameterBindingContext.ThrowOrElaborateBindingException(ParameterBindingException ex)
-            => ThrowOrElaborateBindingException(ex);
-
-        CommandParameterInternal IPipelineParameterBindingContext.RentPipelineCpi()
-            => State.RentPipelineCpi();
-
-        bool IPipelineParameterBindingContext.ApplyDefaultParameterBinding(string caller, bool isDynamic, uint currentParameterSetFlag)
-            => _defaultParameterValueBinder.ApplyDefaultParameterBinding(caller, isDynamic, currentParameterSetFlag);
-
-        bool IDynamicParameterHandlerContext.ImplementsDynamicParameters
-            => _commandMetadata.ImplementsDynamicParameters;
-
-        Cmdlet IDynamicParameterHandlerContext.Command => Command;
-
-        ExecutionContext IDynamicParameterHandlerContext.Context => Context;
-
-        InvocationInfo IDynamicParameterHandlerContext.InvocationInfo => Command.MyInvocation;
-
-        MergedCommandParameterMetadata IDynamicParameterHandlerContext.BindableParameters => BindableParameters;
-
-        IList<MergedCompiledCommandParameter> IDynamicParameterHandlerContext.UnboundParameters => UnboundParameters;
-
-        Collection<CommandParameterInternal> IDynamicParameterHandlerContext.UnboundArguments
-        {
-            get => UnboundArguments;
-            set => UnboundArguments = value;
-        }
-
-        uint IDynamicParameterHandlerContext.CurrentParameterSetFlag => ParameterSetResolver.CurrentParameterSetFlag;
-
-        uint IDynamicParameterHandlerContext.DefaultParameterSetFlag
-        {
-            get => _commandMetadata.DefaultParameterSetFlag;
-            set => _commandMetadata.DefaultParameterSetFlag = value;
-        }
-
-        string IDynamicParameterHandlerContext.DefaultParameterSetName => _commandMetadata.DefaultParameterSetName;
-
-        CommandLineParameters IDynamicParameterHandlerContext.CommandLineParameters => CommandLineParameters;
-
-        void IDynamicParameterHandlerContext.ReparseUnboundArguments() => ReparseUnboundArguments();
-
-        void IDynamicParameterHandlerContext.BindNamedParameters(
-            uint parameterSetFlag, Collection<CommandParameterInternal> args)
-            => BindNamedParameters(parameterSetFlag, args);
-
-        void IDynamicParameterHandlerContext.BindPositionalParameters(
-            Collection<CommandParameterInternal> args,
-            uint currentParameterSetFlag,
-            uint defaultParameterSetFlag,
-            out ParameterBindingException? outgoingBindingException)
-            => BindPositionalParameters(args, currentParameterSetFlag, defaultParameterSetFlag, out outgoingBindingException);
-
-        InvocationInfo IDefaultValueManagerContext.InvocationInfo => Command.MyInvocation;
-
-        IScriptExtent IDefaultValueManagerContext.GetErrorExtent(CommandParameterInternal argument)
-            => GetErrorExtent(argument);
-
-        object? IDefaultValueManagerContext.GetDefaultParameterValue(string name)
-            => GetDefaultParameterValue(name);
-
-        bool IDefaultValueManagerContext.RestoreParameter(CommandParameterInternal argument, MergedCompiledCommandParameter parameter)
-            => RestoreParameter(argument, parameter);
-
-        Dictionary<string, MergedCompiledCommandParameter> IDefaultValueManagerContext.BoundParameters => BoundParameters;
-
-        IList<MergedCompiledCommandParameter> IDefaultValueManagerContext.UnboundParameters => UnboundParameters;
-
-        Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.BoundArguments => BoundArguments;
-
-        void IDefaultValueManagerContext.ReturnPipelineCpi(CommandParameterInternal cpi)
-            => State.ReturnPipelineCpi(cpi);
-
-        Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.DefaultParameterValues
-            => State.DefaultParameterValues;
 
         #region helper_methods
 
@@ -351,16 +123,17 @@ namespace System.Management.Automation
         /// </summary>
         /// <remarks>
         /// The command-line binding orchestration executes these high-level phases in order:
-        ///
-        /// 1. Run non-validating command-line binding (<see cref="BindCommandLineParametersNoValidation(Collection{CommandParameterInternal})"/>).
-        /// 2. Determine whether pipeline input is expected for this invocation.
-        /// 3. Validate and narrow candidate parameter sets for strict execution mode.
-        /// 4. Re-apply default parameter binding for mandatory-check scenarios when a single set is selected.
-        /// 5. If pipeline input is expected and multiple sets remain, filter out sets that cannot take pipeline input.
-        /// 6. Handle unbound mandatory parameters (prompt or throw as appropriate for command visibility and mode).
-        /// 7. Bind remaining unbound script parameters for script binder scenarios.
-        /// 8. If no more pipeline input is expected, verify that a single parameter set is selected.
-        /// 9. Persist pre-pipeline parameter set flags for per-input-object pipeline rebinding.
+        /// <list type="number">
+        ///   <item><description>Run non-validating command-line binding (<see cref="BindCommandLineParametersNoValidation(Collection{CommandParameterInternal})"/>).</description></item>
+        ///   <item><description>Determine whether pipeline input is expected for this invocation.</description></item>
+        ///   <item><description>Validate and narrow candidate parameter sets for strict execution mode.</description></item>
+        ///   <item><description>Re-apply default parameter binding for mandatory-check scenarios when a single set is selected.</description></item>
+        ///   <item><description>If pipeline input is expected and multiple sets remain, filter out sets that cannot take pipeline input.</description></item>
+        ///   <item><description>Handle unbound mandatory parameters (prompt or throw as appropriate for command visibility and mode).</description></item>
+        ///   <item><description>Bind remaining unbound script parameters for script binder scenarios.</description></item>
+        ///   <item><description>If no more pipeline input is expected, verify that a single parameter set is selected.</description></item>
+        ///   <item><description>Persist pre-pipeline parameter set flags for per-input-object pipeline rebinding.</description></item>
+        /// </list>
         /// </remarks>
         /// <param name="arguments">
         /// Parameters to the command.
@@ -379,67 +152,89 @@ namespace System.Management.Automation
 
             BindCommandLineParametersNoValidation(arguments);
 
-            // Is pipeline input expected?
             bool isPipelineInputExpected = !(_commandRuntime.IsClosed && _commandRuntime.InputPipe.Empty);
 
-            int validParameterSetCount;
+            int validParameterSetCount = DetermineValidParameterSetCount(isPipelineInputExpected);
+
+            TryApplyDefaultsForMandatoryCheck(validParameterSetCount);
+
+            if (isPipelineInputExpected)
+            {
+                validParameterSetCount = FilterParameterSetsForPipelineInput(validParameterSetCount);
+            }
+
+            HandleMandatoryParameterCheck(validParameterSetCount, isPipelineInputExpected);
 
             if (!isPipelineInputExpected)
             {
-                // Since pipeline input is not expected, ensure that we have a single
-                // parameter set and that all the mandatory
-                // parameters for the working parameter set are specified, or prompt
-
-                validParameterSetCount = ParameterSetResolver.ValidateParameterSets(false, true, ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
+                ParameterSetResolver.VerifyParameterSetSelected();
             }
-            else
+
+            ParameterSetResolver.PrePipelineProcessingParameterSetFlags = ParameterSetResolver.CurrentParameterSetFlag;
+        }
+
+        // Returns the number of valid parameter sets based on whether pipeline input is expected.
+        // When pipeline input is not expected, ValidateParameterSets is called with strict mode
+        // so mandatory checks fire immediately.
+        private int DetermineValidParameterSetCount(bool isPipelineInputExpected)
+        {
+            if (!isPipelineInputExpected)
             {
-                // Use ValidateParameterSets to get the number of valid parameter
-                // sets.
-                validParameterSetCount = ParameterSetResolver.ValidateParameterSets(true, false, ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
+                return ParameterSetResolver.ValidateParameterSets(false, true, ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
             }
 
-            // If the parameter set is determined and the default parameters are not used
-            // we try the default parameter binding again because it may contain some mandatory
-            // parameters
+            return ParameterSetResolver.ValidateParameterSets(true, false, ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
+        }
+
+        // If a single parameter set has been determined and $PSDefaultParameterValues has not yet
+        // been applied, re-apply it now so that mandatory parameters it supplies are visible
+        // during the upcoming mandatory-parameter check.
+        private void TryApplyDefaultsForMandatoryCheck(int validParameterSetCount)
+        {
             if (validParameterSetCount == 1 && !DefaultParameterBindingInUse)
             {
-                if (_defaultParameterValueBinder.ApplyDefaultParameterBinding(
-                    "Mandatory Checking",
-                    isDynamic: false,
+                if (_defaultParameterValueBinder.ApplyDefaultParameterBinding("Mandatory Checking", isDynamic: false,
                     currentParameterSetFlag: ParameterSetResolver.CurrentParameterSetFlag))
                 {
                     DefaultParameterBindingInUse = true;
                 }
             }
+        }
 
-            // If there are multiple valid parameter sets and we are expecting pipeline inputs,
-            // we should filter out those parameter sets that cannot take pipeline inputs anymore.
-            if (validParameterSetCount > 1 && isPipelineInputExpected)
+        // Removes parameter sets that cannot accept pipeline input when more than one set is
+        // still in play, then re-validates to get the updated count.
+        private int FilterParameterSetsForPipelineInput(int validParameterSetCount)
+        {
+            if (validParameterSetCount > 1)
             {
                 uint filteredValidParameterSetFlags = ParameterSetResolver.FilterParameterSetsTakingNoPipelineInput(_delayBindScriptBlockHandler.Keys);
                 if (filteredValidParameterSetFlags != ParameterSetResolver.CurrentParameterSetFlag)
                 {
                     ParameterSetResolver.CurrentParameterSetFlag = filteredValidParameterSetFlags;
-                    // The valid parameter set flag is narrowed down, we get the new validParameterSetCount
                     validParameterSetCount = ParameterSetResolver.ValidateParameterSets(true, false, ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
                 }
             }
 
-            using (ParameterBinderBase.bindingTracer.TraceScope(
-                "MANDATORY PARAMETER CHECK on cmdlet [{0}]",
-                _commandMetadata.Name))
+            return validParameterSetCount;
+        }
+
+        // Prompts for or throws on any unbound mandatory parameters, then binds remaining
+        // unbound script parameters for script-binder scenarios.
+        private void HandleMandatoryParameterCheck(int validParameterSetCount, bool isPipelineInputExpected)
+        {
+            using (ParameterBinderBase.bindingTracer.TraceScope("MANDATORY PARAMETER CHECK on cmdlet [{0}]", _commandMetadata.Name))
             {
                 try
                 {
-                    // The missingMandatoryParameters out parameter is used for error reporting when binding from the pipeline.
-                    // We're not binding from the pipeline here, and if a mandatory non-pipeline parameter is missing, it will
-                    // be prompted for, or an exception will be raised, so we can ignore the missingMandatoryParameters out parameter.
-                    Collection<MergedCompiledCommandParameter> missingMandatoryParameters;
-
+                    
                     // We shouldn't prompt for mandatory parameters if this command is private.
-                    bool promptForMandatoryParameters = (Command.CommandInfo.Visibility == SessionStateEntryVisibility.Public);
-                    _mandatoryParameterPrompter.HandleUnboundMandatoryParameters(validParameterSetCount, true, promptForMandatoryParameters, isPipelineInputExpected, out missingMandatoryParameters);
+                    bool promptForMandatoryParameters = Command.CommandInfo.Visibility == SessionStateEntryVisibility.Public;
+
+                    // The missingMandatoryParameters out parameter is used for error reporting when
+                    // binding from the pipeline. We're not binding from the pipeline here: if a
+                    // mandatory non-pipeline parameter is missing it will be prompted for or an
+                    // exception will be raised, so we can ignore the out parameter.                    
+                    _mandatoryParameterPrompter.HandleUnboundMandatoryParameters(validParameterSetCount, true, promptForMandatoryParameters, isPipelineInputExpected, out _);
 
                     if (DefaultParameterBinder is ScriptParameterBinder)
                     {
@@ -451,19 +246,6 @@ namespace System.Management.Automation
                     ThrowOrElaborateBindingException(pbex);
                 }
             }
-
-            // If there is no more expected input, ensure there is a single
-            // parameter set selected
-
-            if (!isPipelineInputExpected)
-            {
-                ParameterSetResolver.VerifyParameterSetSelected();
-            }
-
-            // Set the prepipeline parameter set flags so that they can be restored
-            // between each pipeline object.
-
-            ParameterSetResolver.PrePipelineProcessingParameterSetFlags = ParameterSetResolver.CurrentParameterSetFlag;
         }
 
         /// <summary>
@@ -472,68 +254,93 @@ namespace System.Management.Automation
         /// </summary>
         /// <remarks>
         /// The non-validating binding pipeline executes these phases in order:
-        ///
-        /// 1. Initialize unbound arguments from command-line tokens.
-        /// 2. Parse $PSDefaultParameterValues for this command.
-        /// 3. Re-pair parameter names with argument values (<see cref="ParameterBinderController.ReparseUnboundArguments"/>).
-        /// 4. Bind named parameters with exact name-to-parameter matching.
-        /// 5. Bind positional parameters with the 4-pass algorithm:
-        ///    a. Default parameter set, no type coercion.
-        ///    b. Other parameter sets, no type coercion.
-        ///    c. Default parameter set, with type coercion.
-        ///    d. Other parameter sets, with type coercion.
-        /// 6. Apply $PSDefaultParameterValues after positional binding.
-        /// 7. Validate that at least one parameter set remains resolvable.
-        /// 8. Handle dynamic parameters and re-run matching with expanded metadata.
-        /// 9. Re-apply $PSDefaultParameterValues after dynamic binding.
-        /// 10. Bind ValueFromRemainingArguments parameters.
-        /// 11. Verify all command-line arguments were consumed.
+        /// <list type="number">
+        ///   <item><description>Initialize unbound arguments from command-line tokens.</description></item>
+        ///   <item><description>Parse $PSDefaultParameterValues for this command.</description></item>
+        ///   <item><description>Re-pair parameter names with argument values (<see cref="ParameterBinderController.ReparseUnboundArguments"/>).</description></item>
+        ///   <item><description>Bind named parameters with exact name-to-parameter matching.</description></item>
+        ///   <item>
+        ///     <description>Bind positional parameters with the 4-pass algorithm:</description>
+        ///     <list type="bullet">
+        ///       <item><description>Default parameter set, no type coercion.</description></item>
+        ///       <item><description>Other parameter sets, no type coercion.</description></item>
+        ///       <item><description>Default parameter set, with type coercion.</description></item>
+        ///       <item><description>Other parameter sets, with type coercion.</description></item>
+        ///     </list>
+        ///   </item>
+        ///   <item><description>Apply $PSDefaultParameterValues after positional binding.</description></item>
+        ///   <item><description>Validate that at least one parameter set remains resolvable.</description></item>
+        ///   <item><description>Handle dynamic parameters and re-run matching with expanded metadata.</description></item>
+        ///   <item><description>Re-apply $PSDefaultParameterValues after dynamic binding.</description></item>
+        ///   <item><description>Bind ValueFromRemainingArguments parameters.</description></item>
+        ///   <item><description>Verify all command-line arguments were consumed.</description></item>
+        /// </list>
         /// </remarks>
         internal void BindCommandLineParametersNoValidation(Collection<CommandParameterInternal> arguments)
         {
-            var psCompiledScriptCmdlet = this.Command as PSScriptCmdlet;
-            psCompiledScriptCmdlet?.PrepareForBinding(this.CommandLineParameters);
+            PrepareForBinding(arguments);
+
+            BindNamedCommandLineParameters();
+
+            ParameterBindingException? reportedBindingException = BindPositionalCommandLineParameters();
+
+            TryApplyDefaultsAfterPositionalBind();
+
+            ParameterSetResolver.ValidateParameterSets(true, false, ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
+
+            ParameterBindingException? dynamicBindingException = BindDynamicParameters();
+
+            TryApplyDefaultsAfterDynamicBind();
+
+            reportedBindingException ??= dynamicBindingException;
+
+            HandleRemainingArguments();
+
+            VerifyArgumentsProcessed(reportedBindingException);
+        }
+
+        // Initializes binding state: prepares any script cmdlet, loads command-line tokens into
+        // UnboundArguments, parses $PSDefaultParameterValues, and re-pairs names with values.
+        private void PrepareForBinding(Collection<CommandParameterInternal> arguments)
+        {
+            (Command as PSScriptCmdlet)?.PrepareForBinding(CommandLineParameters);
 
             InitUnboundArguments(arguments);
-            CommandMetadata cmdletMetadata = _commandMetadata;
-            // Parse $PSDefaultParameterValues to get all valid <parameter, value> pairs
+
             _defaultParameterValueBinder.ResetForNewBinding();
             _defaultParameterValueBinder.GetDefaultParameterValuePairs(true);
-            // Set to false at the beginning
             DefaultParameterBindingInUse = false;
-            // Clear the bound default parameters at the beginning
             BoundDefaultParameters.Clear();
 
-            // Reparse the arguments based on the merged metadata
             ReparseUnboundArguments();
+        }
 
-            using (ParameterBinderBase.bindingTracer.TraceScope(
-                "BIND NAMED cmd line args [{0}]",
-                _commandMetadata.Name))
+        // Binds named parameters (exact name-to-parameter matching) from the command line.
+        private void BindNamedCommandLineParameters()
+        {
+            using (ParameterBinderBase.bindingTracer.TraceScope("BIND NAMED cmd line args [{0}]", _commandMetadata.Name))
             {
-                // Bind the actual arguments
-                BindNamedParameters(ParameterSetResolver.CurrentParameterSetFlag, this.UnboundArguments);
+                BindNamedParameters(ParameterSetResolver.CurrentParameterSetFlag, UnboundArguments);
             }
+        }
 
-            ParameterBindingException? reportedBindingException;
-            ParameterBindingException? currentBindingException;
-
-            using (ParameterBinderBase.bindingTracer.TraceScope(
-                "BIND POSITIONAL cmd line args [{0}]",
-                _commandMetadata.Name))
+        // Runs the 4-pass positional binding algorithm and returns any binding exception to carry
+        // forward for later error reporting.
+        private ParameterBindingException? BindPositionalCommandLineParameters()
+        {
+            using (ParameterBinderBase.bindingTracer.TraceScope("BIND POSITIONAL cmd line args [{0}]", _commandMetadata.Name))
             {
-                // Now that we know the parameter set, bind the positional parameters
-                BindPositionalParameters(
-                    UnboundArguments,
-                    ParameterSetResolver.CurrentParameterSetFlag,
-                    cmdletMetadata.DefaultParameterSetFlag,
-                    out currentBindingException);
+                BindPositionalParameters(UnboundArguments, ParameterSetResolver.CurrentParameterSetFlag,
+                    _commandMetadata.DefaultParameterSetFlag, out ParameterBindingException? bindingException);
 
-                reportedBindingException = currentBindingException;
+                return bindingException;
             }
+        }
 
-            // Try applying the default parameter binding after POSITIONAL BIND so that the default parameter
-            // values can influence the parameter set selection earlier than the default parameter set.
+        // Applies $PSDefaultParameterValues after positional binding so that default values can
+        // influence parameter-set selection before the default set is applied.
+        private void TryApplyDefaultsAfterPositionalBind()
+        {
             if (_defaultParameterValueBinder.ApplyDefaultParameterBinding(
                 "POSITIONAL BIND",
                 isDynamic: false,
@@ -541,35 +348,24 @@ namespace System.Management.Automation
             {
                 DefaultParameterBindingInUse = true;
             }
+        }
 
-            // We need to make sure there is at least one valid parameter set. Its
-            // OK to allow more than one as long as one of them takes pipeline input.
-            ParameterSetResolver.ValidateParameterSets(true, false, ParameterSetResolver.AtLeastOneUnboundValidParameterSetTakesPipelineInput);
+        // Expands dynamic parameters and binds them. Returns any binding exception generated
+        // during dynamic parameter handling for later error reporting.
+        private ParameterBindingException? BindDynamicParameters()
+        {
+            _dynamicParameterHandler.Handle(out ParameterBindingException? bindingException);
+            return bindingException;
+        }
 
-            // Always get the dynamic parameters as there may be mandatory parameters there
-
-            // Now try binding the dynamic parameters
-            _dynamicParameterHandler.Handle(out currentBindingException);
-
-            // Try binding the default parameters again. After dynamic binding, new parameter metadata are
-            // included, so it's possible a previously unsuccessful binding will succeed.
-            if (_defaultParameterValueBinder.ApplyDefaultParameterBinding(
-                "DYNAMIC BIND",
-                isDynamic: true,
-                currentParameterSetFlag: ParameterSetResolver.CurrentParameterSetFlag))
+        // Re-applies $PSDefaultParameterValues after dynamic binding so that newly added
+        // parameter metadata can be matched against default values.
+        private void TryApplyDefaultsAfterDynamicBind()
+        {
+            if (_defaultParameterValueBinder.ApplyDefaultParameterBinding("DYNAMIC BIND", isDynamic: true, currentParameterSetFlag: ParameterSetResolver.CurrentParameterSetFlag))
             {
                 DefaultParameterBindingInUse = true;
             }
-
-            // If this generated an exception (but we didn't have one from the non-dynamic
-            // parameters, report on this one.
-            reportedBindingException ??= currentBindingException;
-
-            // If the cmdlet implements a ValueFromRemainingArguments parameter (VarArgs)
-            // bind the unbound arguments to that parameter.
-            HandleRemainingArguments();
-
-            VerifyArgumentsProcessed(reportedBindingException);
         }
 
         internal IDictionary? DefaultParameterValues
@@ -679,10 +475,7 @@ namespace System.Management.Automation
         /// Validate the given named parameter against the specified parameter set,
         /// and then bind the argument to the parameter.
         /// </summary>
-        protected override void BindNamedParameter(
-            uint parameterSets,
-            CommandParameterInternal argument,
-            MergedCompiledCommandParameter parameter)
+        protected override void BindNamedParameter(uint parameterSets, CommandParameterInternal argument, MergedCompiledCommandParameter parameter)
         {
             if ((parameter.Parameter.ParameterSetFlags & parameterSets) == 0 &&
                 !parameter.Parameter.IsInAllSets)
@@ -786,100 +579,108 @@ namespace System.Management.Automation
             // set is valid, so we have to take a best guess on pipeline input
             // based on the current valid parameter sets.
 
-            bool continueWithBinding = true;
-
-            if ((flags & ParameterBindingFlags.DelayBindScriptBlock) != 0 &&
-                parameter.Parameter.DoesParameterSetTakePipelineInput(parameterSets) &&
-                argument.ArgumentSpecified)
+            if (TryDelayBindScriptBlock(parameterSets, argument, parameter, flags))
             {
-                object argumentValue = argument.ArgumentValue;
-                if ((argumentValue is ScriptBlock || argumentValue is DelayBindScriptBlockHandler.DelayedScriptBlockArgument) &&
-                    !IsParameterScriptBlockBindable(parameter))
-                {
-                    // Now check to see if the command expects to have pipeline input.
-                    // If not, we should throw an exception now to inform the
-                    // user with more information than they would get if it was
-                    // considered an unbound mandatory parameter.
-
-                    if (_commandRuntime.IsClosed && _commandRuntime.InputPipe.Empty)
-                    {
-                        ParameterBindingException.ThrowScriptBlockArgumentNoInput(
-                            this.Command.MyInvocation,
-                            GetErrorExtent(argument),
-                            parameter.Parameter.Name,
-                            parameter.Parameter.Type);
-                    }
-
-                    ParameterBinderBase.bindingTracer.WriteLine(
-                        "Adding ScriptBlock to delay-bind list for parameter '{0}'",
-                        parameter.Parameter.Name);
-
-                    // We need to delay binding of this argument to the parameter
-
-                    DelayBindScriptBlockHandler.DelayedScriptBlockArgument delayedArg =
-                        argumentValue as DelayBindScriptBlockHandler.DelayedScriptBlockArgument
-                        ?? _delayBindScriptBlockHandler.CreateEntry(argument);
-                    _delayBindScriptBlockHandler.TryAdd(parameter, delayedArg);
-
-                    // We treat the parameter as bound, but really the
-                    // script block gets run for each pipeline object and
-                    // the result is bound.
-
-                    if (parameter.Parameter.ParameterSetFlags != 0)
-                    {
-                        ParameterSetResolver.NarrowByParameterSetFlags(parameter.Parameter.ParameterSetFlags);
-                    }
-
-                    BindingState.SwapRemove(UnboundParameters, parameter);
-
-                    BoundParameters[parameter.Parameter.Name] = parameter;
-                    BoundArguments[parameter.Parameter.Name] = argument;
-
-                    if (DefaultParameterBinder.RecordBoundParameters &&
-                        !DefaultParameterBinder.CommandLineParameters.ContainsKey(parameter.Parameter.Name))
-                    {
-                        DefaultParameterBinder.CommandLineParameters.Add(parameter.Parameter.Name, delayedArg);
-                    }
-
-                    continueWithBinding = false;
-                }
+                return false;
             }
 
-            bool result = false;
-            if (continueWithBinding)
+            try
             {
-                try
+                return BindToAssociatedBinder(argument, parameter, flags);
+            }
+            catch (Exception? e)
+            {
+                bool rethrow = true;
+                if ((flags & ParameterBindingFlags.ShouldCoerceType) == 0)
                 {
-                    result = BindToAssociatedBinder(argument, parameter, flags);
-                }
-                catch (Exception? e)
-                {
-                    bool rethrow = true;
-                    if ((flags & ParameterBindingFlags.ShouldCoerceType) == 0)
+                    // Attributes are used to do type coercion and result in various exceptions.
+                    // We assume that if we aren't trying to do type coercion, we should avoid
+                    // propagating type conversion exceptions.
+                    while (e != null)
                     {
-                        // Attributes are used to do type coercion and result in various exceptions.
-                        // We assume that if we aren't trying to do type coercion, we should avoid
-                        // propagating type conversion exceptions.
-                        while (e != null)
+                        if (e is PSInvalidCastException)
                         {
-                            if (e is PSInvalidCastException)
-                            {
-                                rethrow = false;
-                                break;
-                            }
-
-                            e = e.InnerException;
+                            rethrow = false;
+                            break;
                         }
-                    }
 
-                    if (rethrow)
-                    {
-                        throw;
+                        e = e.InnerException;
                     }
+                }
+
+                if (rethrow)
+                {
+                    throw;
                 }
             }
 
-            return result;
+            return false;
+        }
+
+        /// <summary>
+        /// Checks whether <paramref name="argument"/> is a ScriptBlock that must be delay-bound
+        /// until a pipeline object is available. When it is, records the delayed binding and
+        /// returns <see langword="true"/> so the caller skips normal binding.
+        /// </summary>
+        private bool TryDelayBindScriptBlock(
+            uint parameterSets,
+            CommandParameterInternal argument,
+            MergedCompiledCommandParameter parameter,
+            ParameterBindingFlags flags)
+        {
+            if ((flags & ParameterBindingFlags.DelayBindScriptBlock) == 0 ||
+                !parameter.Parameter.DoesParameterSetTakePipelineInput(parameterSets) ||
+                !argument.ArgumentSpecified)
+            {
+                return false;
+            }
+
+            object argumentValue = argument.ArgumentValue;
+            if (!(argumentValue is ScriptBlock || argumentValue is DelayBindScriptBlockHandler.DelayedScriptBlockArgument) ||
+                IsParameterScriptBlockBindable(parameter))
+            {
+                return false;
+            }
+
+            // If the command expects no pipeline input, throw now so the user gets a better
+            // error than "unbound mandatory parameter".
+            if (_commandRuntime.IsClosed && _commandRuntime.InputPipe.Empty)
+            {
+                ParameterBindingException.ThrowScriptBlockArgumentNoInput(
+                    this.Command.MyInvocation,
+                    GetErrorExtent(argument),
+                    parameter.Parameter.Name,
+                    parameter.Parameter.Type);
+            }
+
+            ParameterBinderBase.bindingTracer.WriteLine(
+                "Adding ScriptBlock to delay-bind list for parameter '{0}'",
+                parameter.Parameter.Name);
+
+            // We need to delay binding of this argument to the parameter.
+            // The script block is run for each pipeline object and its result is bound.
+            DelayBindScriptBlockHandler.DelayedScriptBlockArgument delayedArg =
+                argumentValue as DelayBindScriptBlockHandler.DelayedScriptBlockArgument
+                ?? _delayBindScriptBlockHandler.CreateEntry(argument);
+            _delayBindScriptBlockHandler.TryAdd(parameter, delayedArg);
+
+            if (parameter.Parameter.ParameterSetFlags != 0)
+            {
+                ParameterSetResolver.NarrowByParameterSetFlags(parameter.Parameter.ParameterSetFlags);
+            }
+
+            BindingState.SwapRemove(UnboundParameters, parameter);
+
+            BoundParameters[parameter.Parameter.Name] = parameter;
+            BoundArguments[parameter.Parameter.Name] = argument;
+
+            if (DefaultParameterBinder.RecordBoundParameters &&
+                !DefaultParameterBinder.CommandLineParameters.ContainsKey(parameter.Parameter.Name))
+            {
+                DefaultParameterBinder.CommandLineParameters.Add(parameter.Parameter.Name, delayedArg);
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -899,79 +700,47 @@ namespace System.Management.Automation
         /// True if the parameter was successfully bound. False if <paramref name="flags"/>
         /// has the flag <see cref="ParameterBindingFlags.ShouldCoerceType"/> set and the type does not match the parameter type.
         /// </returns>
-        private bool BindToAssociatedBinder(
-            CommandParameterInternal argument,
-            MergedCompiledCommandParameter parameter,
-            ParameterBindingFlags flags)
+        private bool BindToAssociatedBinder(CommandParameterInternal argument, MergedCompiledCommandParameter parameter, ParameterBindingFlags flags)
         {
             bool result = false;
 
             switch (parameter.BinderAssociation)
             {
                 case ParameterBinderAssociation.DeclaredFormalParameters:
-                    result =
-                        DefaultParameterBinder.CoerceValidateAndBind(
-                            argument,
-                            parameter.Parameter,
-                            flags);
+                    result = DefaultParameterBinder.CoerceValidateAndBind(argument, parameter.Parameter, flags);
                     break;
 
                 case ParameterBinderAssociation.CommonParameters:
-                    result =
-                        _commonParametersBinder.CoerceValidateAndBind(
-                            argument,
-                            parameter.Parameter,
-                            flags);
+                    result = _commonParametersBinder.CoerceValidateAndBind(argument, parameter.Parameter, flags);
                     break;
 
                 case ParameterBinderAssociation.ShouldProcessParameters:
-                    Diagnostics.Assert(
-                        _commandMetadata.SupportsShouldProcess,
+                    Diagnostics.Assert(_commandMetadata.SupportsShouldProcess,
                         "The metadata for the ShouldProcessParameters should only be available if the command supports ShouldProcess");
 
-                    result =
-                        _shouldProcessParameterBinder.CoerceValidateAndBind(
-                            argument,
-                            parameter.Parameter,
-                            flags);
+                    result = _shouldProcessParameterBinder.CoerceValidateAndBind(argument, parameter.Parameter, flags);
                     break;
 
                 case ParameterBinderAssociation.PagingParameters:
-                    Diagnostics.Assert(
-                        _commandMetadata.SupportsPaging,
-                        "The metadata for the PagingParameters should only be available if the command supports paging");
+                    Diagnostics.Assert(_commandMetadata.SupportsPaging, "The metadata for the PagingParameters should only be available if the command supports paging");
 
-                    result =
-                        _pagingParameterBinder.CoerceValidateAndBind(
-                            argument,
-                            parameter.Parameter,
-                            flags);
+                    result = _pagingParameterBinder.CoerceValidateAndBind(argument, parameter.Parameter, flags);
                     break;
 
                 case ParameterBinderAssociation.TransactionParameters:
-                    Diagnostics.Assert(
-                        _commandMetadata.SupportsTransactions,
+                    Diagnostics.Assert(_commandMetadata.SupportsTransactions,
                         "The metadata for the TransactionsParameters should only be available if the command supports transactions");
 
-                    result =
-                        _transactionParameterBinder.CoerceValidateAndBind(
-                            argument,
-                            parameter.Parameter,
-                            flags);
+                    result = _transactionParameterBinder.CoerceValidateAndBind(argument, parameter.Parameter, flags);
                     break;
 
                 case ParameterBinderAssociation.DynamicParameters:
-                    Diagnostics.Assert(
-                        _commandMetadata.ImplementsDynamicParameters,
+                    Diagnostics.Assert(_commandMetadata.ImplementsDynamicParameters, 
                         "The metadata for the dynamic parameters should only be available if the command supports IDynamicParameters");
 
                     if (_dynamicParameterHandler.Binder != null)
                     {
-                        result =
-                            _dynamicParameterHandler.Binder.CoerceValidateAndBind(
-                                argument,
-                                parameter.Parameter,
-                                flags);
+                        result = _dynamicParameterHandler.Binder.CoerceValidateAndBind(argument, parameter.Parameter, flags);
                     }
 
                     break;
@@ -979,45 +748,46 @@ namespace System.Management.Automation
 
             if (result && ((flags & ParameterBindingFlags.IsDefaultValue) == 0))
             {
-                // Update the current valid parameter set flags
-
-                if (parameter.Parameter.ParameterSetFlags != 0)
-                {
-                    ParameterSetResolver.NarrowByParameterSetFlags(parameter.Parameter.ParameterSetFlags);
-                }
-
-                BindingState.SwapRemove(UnboundParameters, parameter);
-
-                if (!BoundParameters.ContainsKey(parameter.Parameter.Name))
-                {
-                    BoundParameters.Add(parameter.Parameter.Name, parameter);
-                }
-
-                if (!BoundArguments.ContainsKey(parameter.Parameter.Name))
-                {
-                    BoundArguments.Add(parameter.Parameter.Name, argument);
-                }
-
-                if (parameter.Parameter.ObsoleteAttribute != null &&
-                    (flags & ParameterBindingFlags.IsDefaultValue) == 0 &&
-                    !BoundObsoleteParameterNames.Contains(parameter.Parameter.Name))
-                {
-                    string obsoleteWarning = string.Format(
-                        CultureInfo.InvariantCulture,
-                        ParameterBinderStrings.UseOfDeprecatedParameterWarning,
-                        parameter.Parameter.Name,
-                        parameter.Parameter.ObsoleteAttribute.Message);
-                    var warningRecord = new WarningRecord(ParameterBinderBase.FQIDParameterObsolete, obsoleteWarning);
-
-                    BoundObsoleteParameterNames.Add(parameter.Parameter.Name);
-
-                    State.ObsoleteParameterWarningList ??= new List<WarningRecord>();
-
-                    State.ObsoleteParameterWarningList.Add(warningRecord);
-                }
+                RecordSuccessfulBind(parameter, argument, flags);
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Records a successful parameter binding: narrows the valid parameter sets, moves the
+        /// parameter from unbound to bound, and queues an obsolete warning when applicable.
+        /// </summary>
+        private void RecordSuccessfulBind(MergedCompiledCommandParameter parameter, CommandParameterInternal argument, ParameterBindingFlags flags)
+        {
+            if (parameter.Parameter.ParameterSetFlags != 0)
+            {
+                ParameterSetResolver.NarrowByParameterSetFlags(parameter.Parameter.ParameterSetFlags);
+            }
+
+            BindingState.SwapRemove(UnboundParameters, parameter);
+
+            BoundParameters.TryAdd(parameter.Parameter.Name, parameter);
+
+            BoundArguments.TryAdd(parameter.Parameter.Name, argument);
+
+            if (parameter.Parameter.ObsoleteAttribute != null &&
+                (flags & ParameterBindingFlags.IsDefaultValue) == 0 &&
+                !BoundObsoleteParameterNames.Contains(parameter.Parameter.Name))
+            {
+                string obsoleteWarning = string.Format(
+                    CultureInfo.InvariantCulture,
+                    ParameterBinderStrings.UseOfDeprecatedParameterWarning,
+                    parameter.Parameter.Name,
+                    parameter.Parameter.ObsoleteAttribute.Message);
+                var warningRecord = new WarningRecord(ParameterBinderBase.FQIDParameterObsolete, obsoleteWarning);
+
+                BoundObsoleteParameterNames.Add(parameter.Parameter.Name);
+
+                State.ObsoleteParameterWarningList ??= new List<WarningRecord>();
+
+                State.ObsoleteParameterWarningList.Add(warningRecord);
+            }
         }
 
         /// <summary>
@@ -1063,62 +833,68 @@ namespace System.Management.Automation
 
                 if (varargsParameter != null)
                 {
-                    using (ParameterBinderBase.bindingTracer.TraceScope(
-                        "BIND REMAININGARGUMENTS cmd line args to param: [{0}]",
-                        varargsParameter.Parameter.Name))
+                    BindVarargsArguments(varargsParameter);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Builds the combined argument list from all remaining unbound arguments and binds it
+        /// to the given <c>ValueFromRemainingArguments</c> parameter.
+        /// </summary>
+        private void BindVarargsArguments(MergedCompiledCommandParameter varargsParameter)
+        {
+            using (ParameterBinderBase.bindingTracer.TraceScope("BIND REMAININGARGUMENTS cmd line args to param: [{0}]", varargsParameter.Parameter.Name))
+            {
+                // Accumulate the unbound arguments into a list and then bind it to the parameter.
+                List<object> valueFromRemainingArguments = new();
+
+                foreach (CommandParameterInternal argument in UnboundArguments)
+                {
+                    if (argument.ParameterNameSpecified)
                     {
-                        // Accumulate the unbound arguments in to an list and then bind it to the parameter
+                        Diagnostics.Assert(!string.IsNullOrEmpty(argument.ParameterText), "Don't add a null argument");
+                        valueFromRemainingArguments.Add(argument.ParameterText);
+                    }
 
-                        List<object> valueFromRemainingArguments = new List<object>();
-
-                        foreach (CommandParameterInternal argument in UnboundArguments)
+                    if (argument.ArgumentSpecified)
+                    {
+                        object argumentValue = argument.ArgumentValue;
+                        if (argumentValue != AutomationNull.Value && argumentValue != UnboundParameter.Value)
                         {
-                            if (argument.ParameterNameSpecified)
-                            {
-                                Diagnostics.Assert(!string.IsNullOrEmpty(argument.ParameterText), "Don't add a null argument");
-                                valueFromRemainingArguments.Add(argument.ParameterText);
-                            }
-
-                            if (argument.ArgumentSpecified)
-                            {
-                                object argumentValue = argument.ArgumentValue;
-                                if (argumentValue != AutomationNull.Value && argumentValue != UnboundParameter.Value)
-                                {
-                                    valueFromRemainingArguments.Add(argumentValue);
-                                }
-                            }
+                            valueFromRemainingArguments.Add(argumentValue);
                         }
-
-                        // If there are multiple arguments, it's not clear how best to represent the extent as the extent
-                        // may be disjoint, as in 'echo a -verbose b', we have 'a' and 'b' in UnboundArguments.
-                        var argumentAst = UnboundArguments.Count == 1 ? UnboundArguments[0].ArgumentAst : null;
-                        var cpi = CommandParameterInternal.CreateParameterWithArgument(
-                            /*parameterAst*/null, varargsParameter.Parameter.Name, "-" + varargsParameter.Parameter.Name + ":",
-                            argumentAst, valueFromRemainingArguments, false);
-
-                        // To make all of the following work similarly (the first is handled elsewhere, but second and third are
-                        // handled here):
-                        //     Set-ClusterOwnerNode -Owners foo,bar
-                        //     Set-ClusterOwnerNode foo bar
-                        //     Set-ClusterOwnerNode foo,bar
-                        // we unwrap our List, but only if there is a single argument which is a collection.
-                        if (valueFromRemainingArguments.Count == 1 && LanguagePrimitives.IsObjectEnumerable(valueFromRemainingArguments[0]))
-                        {
-                            cpi.SetArgumentValue(UnboundArguments[0].ArgumentAst, valueFromRemainingArguments[0]);
-                        }
-
-                        try
-                        {
-                            BindToAssociatedBinder(cpi, varargsParameter, ParameterBindingFlags.ShouldCoerceType);
-                        }
-                        catch (ParameterBindingException pbex)
-                        {
-                            ThrowOrElaborateBindingException(pbex);
-                        }
-
-                        UnboundArguments.Clear();
                     }
                 }
+
+                // If there are multiple arguments, it's not clear how best to represent the extent as the extent
+                // may be disjoint, as in 'echo a -verbose b', we have 'a' and 'b' in UnboundArguments.
+                var argumentAst = UnboundArguments.Count == 1 ? UnboundArguments[0].ArgumentAst : null;
+                string parameterName = "-" + varargsParameter.Parameter.Name + ":";
+                var cpi = CommandParameterInternal.CreateParameterWithArgument(parameterAst: null, varargsParameter.Parameter.Name, parameterName,
+                    argumentAst, valueFromRemainingArguments, spaceAfterParameter: false);
+
+                // To make all the following work similarly (the first is handled elsewhere, but second and third are
+                // handled here):
+                //     Set-ClusterOwnerNode -Owners foo,bar
+                //     Set-ClusterOwnerNode foo bar
+                //     Set-ClusterOwnerNode foo,bar
+                // we unwrap our List, but only if there is a single argument which is a collection.
+                if (valueFromRemainingArguments.Count == 1 && LanguagePrimitives.IsObjectEnumerable(valueFromRemainingArguments[0]))
+                {
+                    cpi.SetArgumentValue(UnboundArguments[0].ArgumentAst, valueFromRemainingArguments[0]);
+                }
+
+                try
+                {
+                    BindToAssociatedBinder(cpi, varargsParameter, ParameterBindingFlags.ShouldCoerceType);
+                }
+                catch (ParameterBindingException pbex)
+                {
+                    ThrowOrElaborateBindingException(pbex);
+                }
+
+                UnboundArguments.Clear();
             }
         }
 
@@ -1192,11 +968,7 @@ namespace System.Management.Automation
         internal object? GetDefaultParameterValue(string name)
         {
             MergedCompiledCommandParameter? matchingParameter =
-                BindableParameters.GetMatchingParameter(
-                    name,
-                    false,
-                    true,
-                    null);
+                BindableParameters.GetMatchingParameter(name, throwOnParameterNotFound: false, tryExactMatching: true, invocationInfo: null);
 
             object? result = null;
 
@@ -1206,11 +978,7 @@ namespace System.Management.Automation
             }
             catch (GetValueException getValueException)
             {
-                ParameterBindingParameterDefaultValueException.ThrowGetDefaultValueFailed(
-                    getValueException,
-                    this.Command.MyInvocation,
-                    name,
-                    getValueException.Message);
+                ParameterBindingParameterDefaultValueException.ThrowGetDefaultValueFailed(getValueException, Command.MyInvocation, name, getValueException.Message);
             }
 
             return result;
@@ -1248,13 +1016,7 @@ namespace System.Management.Automation
         /// <summary>
         /// Keep names of the parameters for which we have generated obsolete warning messages.
         /// </summary>
-        private HashSet<string> BoundObsoleteParameterNames
-        {
-            get
-            {
-                return State.BoundObsoleteParameterNames ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            }
-        }
+        private HashSet<string> BoundObsoleteParameterNames => State.BoundObsoleteParameterNames ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private readonly ReflectionParameterBinder _commonParametersBinder;
         private readonly ReflectionParameterBinder _shouldProcessParameterBinder;
@@ -1266,6 +1028,197 @@ namespace System.Management.Automation
         /// </summary>
 
         #endregion private_members
+
+        #region IParameterBindingContext
+
+        ICollection<MergedCompiledCommandParameter> IParameterBindingContext.UnboundParameters => UnboundParameters;
+
+        Dictionary<string, MergedCompiledCommandParameter> IParameterBindingContext.BoundParameters => BoundParameters;
+
+        InvocationInfo IParameterBindingContext.InvocationInfo => Command.MyInvocation;
+
+        void IParameterBindingContext.SetParameterSetName(string parameterSetName) => Command.SetParameterSetName(parameterSetName);
+
+        void IParameterBindingContext.ThrowBindingException(ParameterBindingException exception) => ThrowOrElaborateBindingException(exception);
+
+        #endregion IParameterBindingContext
+
+        #region IDefaultParameterBindingContext
+
+        bool IDefaultParameterBindingContext.DispatchBindToSubBinder(
+            uint validParameterSetFlag,
+            CommandParameterInternal argument,
+            MergedCompiledCommandParameter parameter,
+            ParameterBindingFlags flags)
+            => DispatchBindToSubBinder(validParameterSetFlag, argument, parameter, flags);
+
+        Dictionary<string, CommandParameterInternal> IDefaultParameterBindingContext.BoundArguments => BoundArguments;
+
+        Dictionary<string, MergedCompiledCommandParameter> IDefaultParameterBindingContext.BoundParameters => BoundParameters;
+
+        Collection<string> IDefaultParameterBindingContext.BoundDefaultParameters => BoundDefaultParameters;
+
+        HashSet<string> IDefaultParameterBindingContext.CopyBoundPositionalParameters()
+            => DefaultParameterBinder.CommandLineParameters.CopyBoundPositionalParameters();
+
+        List<string>? IDefaultParameterBindingContext.DefaultParameterAliasList
+        {
+            get => State.DefaultParameterAliasList;
+            set => State.DefaultParameterAliasList = value;
+        }
+
+        HashSet<string> IDefaultParameterBindingContext.DefaultParameterWarningSet => State.DefaultParameterWarningSet;
+
+        Dictionary<MergedCompiledCommandParameter, object>? IDefaultParameterBindingContext.AllDefaultParameterValuePairs
+        {
+            get => State.AllDefaultParameterValuePairs;
+            set => State.AllDefaultParameterValuePairs = value;
+        }
+
+        bool IDefaultParameterBindingContext.UseDefaultParameterBinding
+        {
+            get => State.UseDefaultParameterBinding;
+            set => State.UseDefaultParameterBinding = value;
+        }
+
+        #endregion IDefaultParameterBindingContext
+
+        #region IMandatoryParameterPrompterContext
+
+        bool IMandatoryParameterPrompterContext.ResolveAndBindNamedParameter(CommandParameterInternal argument, ParameterBindingFlags flags)
+            => ResolveAndBindNamedParameter(argument, flags);
+
+        #endregion IMandatoryParameterPrompterContext
+
+        #region IPipelineParameterBindingContext
+
+        IList<MergedCompiledCommandParameter> IPipelineParameterBindingContext.UnboundParameters => UnboundParameters;
+
+        Collection<MergedCompiledCommandParameter> IPipelineParameterBindingContext.ParametersBoundThroughPipelineInput
+            => ParametersBoundThroughPipelineInput;
+
+        ParameterSetResolver IPipelineParameterBindingContext.ParameterSetResolver => ParameterSetResolver;
+
+        bool IPipelineParameterBindingContext.DefaultParameterBindingInUse
+        {
+            get => DefaultParameterBindingInUse;
+            set => DefaultParameterBindingInUse = value;
+        }
+
+        uint IPipelineParameterBindingContext.DefaultParameterSetFlag => _commandMetadata.DefaultParameterSetFlag;
+
+        string IPipelineParameterBindingContext.CommandName => _commandMetadata.Name;
+
+        bool IPipelineParameterBindingContext.InvokeAndBindDelayBindScriptBlock(PSObject inputToOperateOn, out bool thereWasSomethingToBind)
+            => _delayBindScriptBlockHandler.InvokeAndBind(inputToOperateOn, out thereWasSomethingToBind);
+
+        void IPipelineParameterBindingContext.BackupDefaultParameter(MergedCompiledCommandParameter parameter)
+            => _defaultValueManager.Backup(parameter);
+
+        void IPipelineParameterBindingContext.RestoreDefaultParameterValues(IEnumerable<MergedCompiledCommandParameter> parameters)
+            => _defaultValueManager.Restore(parameters);
+
+        bool IPipelineParameterBindingContext.DispatchBindToSubBinder(
+            uint validParameterSetFlag,
+            CommandParameterInternal argument,
+            MergedCompiledCommandParameter parameter,
+            ParameterBindingFlags flags)
+            => DispatchBindToSubBinder(validParameterSetFlag, argument, parameter, flags);
+
+        [DoesNotReturn]
+        void IPipelineParameterBindingContext.ThrowOrElaborateBindingException(ParameterBindingException ex)
+            => ThrowOrElaborateBindingException(ex);
+
+        CommandParameterInternal IPipelineParameterBindingContext.RentPipelineCpi()
+            => State.RentPipelineCpi();
+
+        bool IPipelineParameterBindingContext.ApplyDefaultParameterBinding(string caller, bool isDynamic, uint currentParameterSetFlag)
+            => _defaultParameterValueBinder.ApplyDefaultParameterBinding(caller, isDynamic, currentParameterSetFlag);
+
+        #endregion IPipelineParameterBindingContext
+
+        #region IDelayBindScriptBlockContext
+
+        InvocationInfo IDelayBindScriptBlockContext.InvocationInfo => Command.MyInvocation;
+
+        IScriptExtent IDelayBindScriptBlockContext.GetErrorExtent(CommandParameterInternal argument) => GetErrorExtent(argument);
+
+        bool IDelayBindScriptBlockContext.BindToAssociatedBinder(CommandParameterInternal argument, MergedCompiledCommandParameter parameter, ParameterBindingFlags flags)
+            => BindToAssociatedBinder(argument, parameter, flags);
+
+        Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument> IDelayBindScriptBlockContext.DelayBindScriptBlocks
+            => State.DelayBindScriptBlocks;
+
+        #endregion IDelayBindScriptBlockContext
+
+        #region IDynamicParameterHandlerContext
+
+        bool IDynamicParameterHandlerContext.ImplementsDynamicParameters => _commandMetadata.ImplementsDynamicParameters;
+
+        Cmdlet IDynamicParameterHandlerContext.Command => Command;
+
+        ExecutionContext IDynamicParameterHandlerContext.Context => Context;
+
+        InvocationInfo IDynamicParameterHandlerContext.InvocationInfo => Command.MyInvocation;
+
+        MergedCommandParameterMetadata IDynamicParameterHandlerContext.BindableParameters => BindableParameters;
+
+        IList<MergedCompiledCommandParameter> IDynamicParameterHandlerContext.UnboundParameters => UnboundParameters;
+
+        Collection<CommandParameterInternal> IDynamicParameterHandlerContext.UnboundArguments
+        {
+            get => UnboundArguments;
+            set => UnboundArguments = value;
+        }
+
+        uint IDynamicParameterHandlerContext.CurrentParameterSetFlag => ParameterSetResolver.CurrentParameterSetFlag;
+
+        uint IDynamicParameterHandlerContext.DefaultParameterSetFlag
+        {
+            get => _commandMetadata.DefaultParameterSetFlag;
+            set => _commandMetadata.DefaultParameterSetFlag = value;
+        }
+
+        string IDynamicParameterHandlerContext.DefaultParameterSetName => _commandMetadata.DefaultParameterSetName;
+
+        CommandLineParameters IDynamicParameterHandlerContext.CommandLineParameters => CommandLineParameters;
+
+        void IDynamicParameterHandlerContext.ReparseUnboundArguments() => ReparseUnboundArguments();
+
+        void IDynamicParameterHandlerContext.BindNamedParameters(uint parameterSetFlag, Collection<CommandParameterInternal> args)
+            => BindNamedParameters(parameterSetFlag, args);
+
+        void IDynamicParameterHandlerContext.BindPositionalParameters(
+            Collection<CommandParameterInternal> args,
+            uint currentParameterSetFlag,
+            uint defaultParameterSetFlag,
+            out ParameterBindingException? outgoingBindingException)
+            => BindPositionalParameters(args, currentParameterSetFlag, defaultParameterSetFlag, out outgoingBindingException);
+
+        #endregion IDynamicParameterHandlerContext
+
+        #region IDefaultValueManagerContext
+
+        InvocationInfo IDefaultValueManagerContext.InvocationInfo => Command.MyInvocation;
+
+        IScriptExtent IDefaultValueManagerContext.GetErrorExtent(CommandParameterInternal argument) => GetErrorExtent(argument);
+
+        object? IDefaultValueManagerContext.GetDefaultParameterValue(string name) => GetDefaultParameterValue(name);
+
+        bool IDefaultValueManagerContext.RestoreParameter(CommandParameterInternal argument, MergedCompiledCommandParameter parameter)
+            => RestoreParameter(argument, parameter);
+
+        Dictionary<string, MergedCompiledCommandParameter> IDefaultValueManagerContext.BoundParameters => BoundParameters;
+
+        IList<MergedCompiledCommandParameter> IDefaultValueManagerContext.UnboundParameters => UnboundParameters;
+
+        Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.BoundArguments => BoundArguments;
+
+        void IDefaultValueManagerContext.ReturnPipelineCpi(CommandParameterInternal cpi) => State.ReturnPipelineCpi(cpi);
+
+        Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.DefaultParameterValues => State.DefaultParameterValues;
+
+        #endregion IDefaultValueManagerContext
 
         protected override void SaveDefaultScriptParameterValue(string name, string parameterText, object value)
             => _defaultValueManager.SaveScriptParameterValue(name, parameterText, value);

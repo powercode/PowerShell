@@ -188,7 +188,7 @@ namespace System.Management.Automation
             get { return _commandLineParameters ??= new CommandLineParameters(); }
 
             // Setter is needed to pass into RuntimeParameterBinder instances
-            set { _commandLineParameters = value; }
+            init { _commandLineParameters = value; }
         }
 
         private CommandLineParameters? _commandLineParameters;
@@ -282,8 +282,7 @@ namespace System.Management.Automation
         /// Flags for type coercion and validation.
         /// </param>
         /// <returns>
-        /// True if the parameter was successfully bound. False if <paramref name="coerceTypeIfNeeded"/>
-        /// is false and the type does not match the parameter type.
+        /// True if the parameter was successfully bound. False if the type does not match the parameter type.
         /// </returns>
         /// <remarks>
         /// The binding algorithm goes as follows:
@@ -306,25 +305,12 @@ namespace System.Management.Automation
         /// or
         /// If the binding to the parameter fails.
         /// </exception>
-        internal virtual bool CoerceValidateAndBind(
-            CommandParameterInternal parameter,
-            CompiledCommandParameter parameterMetadata,
-            ParameterBindingFlags flags)
+        internal virtual bool CoerceValidateAndBind(CommandParameterInternal parameter, CompiledCommandParameter parameterMetadata, ParameterBindingFlags flags)
         {
-            if (parameter == null)
-            {
-                throw PSTraceSource.NewArgumentNullException(nameof(parameter));
-            }
-
-            if (parameterMetadata == null)
-            {
-                throw PSTraceSource.NewArgumentNullException(nameof(parameterMetadata));
-            }
-
-            using (bindingTracer.TraceScope(
-                       "BIND arg [{0}] to parameter [{1}]",
-                       parameter.ArgumentValue,
-                       parameterMetadata.Name))
+            PSTraceSource.ThrowIfNull(parameter);
+            PSTraceSource.ThrowIfNull(parameterMetadata);
+            
+            using (bindingTracer.TraceScope("BIND arg [{0}] to parameter [{1}]", parameter.ArgumentValue, parameterMetadata.Name))
             {
                 // Set the complete parameter name
 
@@ -334,8 +320,7 @@ namespace System.Management.Automation
 
                 parameterValue = ApplyArgumentTransformations(parameter, parameterMetadata, parameterValue, flags);
 
-                bool shouldContinueBinding;
-                parameterValue = ApplyTypeCoercion(parameter, parameterMetadata, parameterValue, flags, out shouldContinueBinding);
+                parameterValue = ApplyTypeCoercion(parameter, parameterMetadata, parameterValue, flags, out bool shouldContinueBinding);
                 if (!shouldContinueBinding)
                 {
                     RecordBindingResult(parameter, parameterValue, result: false);
@@ -369,9 +354,7 @@ namespace System.Management.Automation
             // No transformation is done for default values in script when the value is null and optional.
             foreach (ArgumentTransformationAttribute dma in parameterMetadata.ArgumentTransformationAttributes)
             {
-                using (bindingTracer.TraceScope(
-                    "Executing DATA GENERATION metadata: [{0}]",
-                    dma.GetType()))
+                using (bindingTracer.TraceScope("Executing DATA GENERATION metadata: [{0}]", dma.GetType()))
                 {
                     try
                     {
@@ -396,9 +379,7 @@ namespace System.Management.Automation
                     }
                     catch (Exception e) // Catch-all OK, 3rd party callout
                     {
-                        bindingTracer.WriteLine(
-                            "ERROR: DATA GENERATION: {0}",
-                            e.Message);
+                        bindingTracer.WriteLine("ERROR: DATA GENERATION: {0}", e.Message);
 
                         ParameterBindingArgumentTransformationException.ThrowParameterArgumentTransformationError(
                             e,
@@ -479,9 +460,7 @@ namespace System.Management.Automation
             {
                 var validationAttribute = parameterMetadata.ValidationAttributes[i];
 
-                using (bindingTracer.TraceScope(
-                    "Executing VALIDATION metadata: [{0}]",
-                    validationAttribute.GetType()))
+                using (bindingTracer.TraceScope("Executing VALIDATION metadata: [{0}]", validationAttribute.GetType()))
                 {
                     try
                     {
@@ -489,9 +468,7 @@ namespace System.Management.Automation
                     }
                     catch (Exception e) // Catch-all OK, 3rd party callout
                     {
-                        bindingTracer.WriteLine(
-                            "ERROR: VALIDATION FAILED: {0}",
-                            e.Message);
+                        bindingTracer.WriteLine("ERROR: VALIDATION FAILED: {0}", e.Message);
 
                         ParameterBindingValidationException.ThrowParameterArgumentValidationError(
                             e,
@@ -523,7 +500,7 @@ namespace System.Management.Automation
         {
             bool isDefaultValue = (flags & ParameterBindingFlags.IsDefaultValue) != 0;
             ScriptParameterBinder? spb = this as ScriptParameterBinder;
-            bool usesCmdletBinding = spb != null && spb.Script.UsesCmdletBinding;
+            bool usesCmdletBinding = spb is { Script.UsesCmdletBinding: true };
 
             if (parameterMetadata.ObsoleteAttribute == null || isDefaultValue || spb == null || usesCmdletBinding)
             {
@@ -687,9 +664,7 @@ namespace System.Management.Automation
                 // is not null and not empty or that the parameter can accept null or empty.
                 if (parameterValue is not string stringParamValue)
                 {
-                    Diagnostics.Assert(
-                        false,
-                        "Type coercion should have already converted the argument value to a string");
+                    Diagnostics.Assert(false, "Type coercion should have already converted the argument value to a string");
                     return;
                 }
 
@@ -724,14 +699,12 @@ namespace System.Management.Automation
 
             // All these collection types implement IEnumerable
             IEnumerator ienum = LanguagePrimitives.GetEnumerator(parameterValue);
-            Diagnostics.Assert(
-                ienum != null,
-                "Type coercion should have already converted the argument value to an IEnumerator");
+            Diagnostics.Assert(ienum != null, "Type coercion should have already converted the argument value to an IEnumerator");
 
             // Ensure that each element abides by the metadata
             bool isEmpty = true;
             Type elementType = parameterMetadata.CollectionTypeInformation.ElementType;
-            bool isElementValueType = elementType != null && elementType.IsValueType;
+            bool isElementValueType = elementType is { IsValueType: true };
 
             // Note - we explicitly don't pass the context here because we don't want
             // the overhead of the calls that check for stopping.
@@ -760,18 +733,10 @@ namespace System.Management.Automation
             {
                 bindingTracer.WriteLine("ERROR: Argument cannot be an empty collection");
 
-                string errorId, resourceString;
-                if (parameterMetadata.CollectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array)
-                {
-                    errorId = "ParameterArgumentValidationErrorEmptyArrayNotAllowed";
-                    resourceString = ParameterBinderStrings.ParameterArgumentValidationErrorEmptyArrayNotAllowed;
-                }
-                else
-                {
-                    errorId = "ParameterArgumentValidationErrorEmptyCollectionNotAllowed";
-                    resourceString = ParameterBinderStrings.ParameterArgumentValidationErrorEmptyCollectionNotAllowed;
-                }
-
+                var (errorId, resourceString) = parameterMetadata.CollectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array 
+                    ? ("ParameterArgumentValidationErrorEmptyArrayNotAllowed", ParameterBinderStrings.ParameterArgumentValidationErrorEmptyArrayNotAllowed) 
+                    : ("ParameterArgumentValidationErrorEmptyCollectionNotAllowed",  ParameterBinderStrings.ParameterArgumentValidationErrorEmptyCollectionNotAllowed);
+                
                 ParameterBindingValidationException.ThrowValidateNullOrEmpty(
                     this.InvocationInfo,
                     GetErrorExtent(parameter),
@@ -805,7 +770,7 @@ namespace System.Management.Automation
             // the value is an PSObject and the parameter type is not object and
             //     the PSObject.BaseObject type does not match or is not a subclass
             //     of the parameter type, or
-            // the value must be encoded into a collection but it is not of the correct element type
+            // the value must be encoded into a collection, but it is not of the correct element type
             //
             // then return false
 
@@ -814,12 +779,12 @@ namespace System.Management.Automation
                 return true;
             }
 
-            if (parameterValue is PSObject psobj && !psobj.ImmediateBaseObjectIsEmpty)
+            if (parameterValue is PSObject { ImmediateBaseObjectIsEmpty: false } psObj)
             {
                 // See if the base object is of the same type or
                 // as subclass of the parameter
 
-                parameterValue = psobj.BaseObject;
+                parameterValue = psObj.BaseObject;
 
                 if (parameterType.IsInstanceOfType(parameterValue))
                 {
@@ -834,7 +799,6 @@ namespace System.Management.Automation
             {
                 // See if the value needs to be encoded in a collection
 
-                bool coercionRequired;
                 object? encodedValue =
                     _typeCoercer.EncodeCollection(
                         parameter,
@@ -842,8 +806,8 @@ namespace System.Management.Automation
                         parameterMetadata.CollectionTypeInformation,
                         parameterType,
                         parameterValue,
-                        false,
-                        out coercionRequired);
+                        coerceElementTypeIfNeeded: false,
+                        out bool coercionRequired);
 
                 if (encodedValue == null || coercionRequired)
                 {
@@ -867,26 +831,14 @@ namespace System.Management.Automation
         /// </summary>
         private readonly InvocationInfo _invocationInfo;
 
-        internal InvocationInfo InvocationInfo
-        {
-            get
-            {
-                return _invocationInfo;
-            }
-        }
+        internal InvocationInfo InvocationInfo => _invocationInfo;
 
         /// <summary>
         /// The context of the currently running engine.
         /// </summary>
         private readonly ExecutionContext _context;
 
-        internal ExecutionContext Context
-        {
-            get
-            {
-                return _context;
-            }
-        }
+        internal ExecutionContext Context => _context;
 
         /// <summary>
         /// An instance of InternalCommand that the binder is binding to.
@@ -895,13 +847,7 @@ namespace System.Management.Automation
 
         private readonly ParameterTypeCoercer _typeCoercer;
 
-        internal InternalCommand? Command
-        {
-            get
-            {
-                return _command;
-            }
-        }
+        internal InternalCommand? Command => _command;
 
         /// <summary>
         /// The engine APIs that need to be passed the attributes when evaluated.
@@ -971,27 +917,13 @@ namespace System.Management.Automation
     /// <remarks>It's a singleton class. Sealed to prevent subclassing</remarks>
     internal sealed class UnboundParameter
     {
-        #region ctor
-
         // Private constructor
         private UnboundParameter() { }
-
-        #endregion ctor
-
-        #region private_members
-
-        // Private member for Value.
-
-        #endregion private_members
-
-        #region public_property
-
+        
         /// <summary>
         /// Represents an object of the same class (singleton class).
         /// </summary>
         internal static object Value { get; } = new object();
-
-        #endregion public_property
     }
 
     // This class is a thin wrapper around Dictionary, but adds a member BoundPositionally.
@@ -1017,7 +949,7 @@ namespace System.Management.Automation
     [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal sealed class CommandLineParameters
     {
-        private readonly PSBoundParametersDictionary _dictionary = new PSBoundParametersDictionary();
+        private readonly PSBoundParametersDictionary _dictionary = new();
 
         private string DebuggerDisplayValue => $"CommandLineParameters: Count={_dictionary.Count}";
 
@@ -1082,7 +1014,7 @@ namespace System.Management.Automation
 
         internal HashSet<string> CopyBoundPositionalParameters()
         {
-            HashSet<string> result = new HashSet<string>(StringComparer.CurrentCultureIgnoreCase);
+            HashSet<string> result = new(StringComparer.CurrentCultureIgnoreCase);
             foreach (string item in _dictionary.BoundPositionally)
             {
                 result.Add(item);
