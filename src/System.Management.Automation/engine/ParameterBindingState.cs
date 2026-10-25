@@ -47,7 +47,9 @@ namespace System.Management.Automation
         /// <summary>
         /// Names of parameters that were bound via <c>$PSDefaultParameterValues</c>.
         /// </summary>
-        internal List<string> BoundDefaultParameters { get; } = [];
+        private List<string>? _boundDefaultParameters;
+
+        internal List<string> BoundDefaultParameters => _boundDefaultParameters ??= [];
 
         /// <summary>
         /// Whether default parameter binding from <c>$PSDefaultParameterValues</c> is active.
@@ -57,7 +59,10 @@ namespace System.Management.Automation
         /// <summary>
         /// Parameters that received their value from the pipeline input.
         /// </summary>
-        internal List<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput { get; } = [];
+        private List<MergedCompiledCommandParameter>? _parametersBoundThroughPipelineInput;
+
+        internal List<MergedCompiledCommandParameter> ParametersBoundThroughPipelineInput
+            => _parametersBoundThroughPipelineInput ??= [];
 
         // ── Default-value tracking ──────────────────────────────────────────────────
 
@@ -65,16 +70,20 @@ namespace System.Management.Automation
         /// Saved default values for restoration after each pipeline-object is processed,
         /// keyed by parameter name (OrdinalIgnoreCase).
         /// </summary>
-        internal Dictionary<string, CommandParameterInternal> DefaultParameterValues { get; }
-            = new Dictionary<string, CommandParameterInternal>(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, CommandParameterInternal>? _defaultParameterValues;
+
+        internal Dictionary<string, CommandParameterInternal> DefaultParameterValues
+            => _defaultParameterValues ??= new(StringComparer.OrdinalIgnoreCase);
 
         // ── Delay-bind ScriptBlock state ──────────────────────────────────────────────
 
         /// <summary>
         /// ScriptBlock arguments deferred for per-pipeline-object evaluation, keyed by parameter.
         /// </summary>
-        internal Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument> DelayBindScriptBlocks { get; }
-            = new Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument>();
+        private Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument>? _delayBindScriptBlocks;
+
+        internal Dictionary<MergedCompiledCommandParameter, DelayBindScriptBlockHandler.DelayedScriptBlockArgument> DelayBindScriptBlocks
+            => _delayBindScriptBlocks ??= new();
 
         // ── $PSDefaultParameterValues state ──────────────────────────────────────────
 
@@ -87,8 +96,10 @@ namespace System.Management.Automation
         /// Keys for which a <c>$PSDefaultParameterValues</c> warning has already been emitted.
         /// Prevents duplicate warnings within a single invocation.
         /// </summary>
-        internal HashSet<string> DefaultParameterWarningSet { get; }
-            = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private HashSet<string>? _defaultParameterWarningSet;
+
+        internal HashSet<string> DefaultParameterWarningSet
+            => _defaultParameterWarningSet ??= new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// The last computed set of qualified default parameter value pairs.
@@ -202,10 +213,10 @@ namespace System.Management.Automation
                 int bound = BoundParameters.Count;
                 int total = bound + UnboundParameters.Count;
                 int args = UnboundArguments.Count;
-                int pipeline = ParametersBoundThroughPipelineInput.Count;
-                int defaults = BoundDefaultParameters.Count;
-                int defVals = DefaultParameterValues.Count;
-                int delayBind = DelayBindScriptBlocks.Count;
+                int pipeline = _parametersBoundThroughPipelineInput?.Count ?? 0;
+                int defaults = _boundDefaultParameters?.Count ?? 0;
+                int defVals = _defaultParameterValues?.Count ?? 0;
+                int delayBind = _delayBindScriptBlocks?.Count ?? 0;
                 string psDefaults = UseDefaultParameterBinding ? "InUse" : "Disabled";
                 int obsolete = BoundObsoleteParameterNames?.Count ?? 0;
                 return $"BindingState: {name}, Bound={bound}/{total}, Args={args}, Pipeline={pipeline}, Defaults={defaults}, DefVals={defVals}, DelayBind={delayBind}, PSDefaults={psDefaults}, Obsolete={obsolete}";
@@ -233,21 +244,21 @@ namespace System.Management.Automation
             UnboundParameters.Clear();
             UnboundParameters.AddRange(allParameters);
             BoundParameters.Clear();
-            ParametersBoundThroughPipelineInput.Clear();
+            _parametersBoundThroughPipelineInput?.Clear();
 
             // Default parameter tracking
-            BoundDefaultParameters.Clear();
+            _boundDefaultParameters?.Clear();
             DefaultParameterBindingInUse = false;
 
             // Default-value tracking
-            DefaultParameterValues.Clear();
+            _defaultParameterValues?.Clear();
 
             // Delay-bind ScriptBlock state
-            DelayBindScriptBlocks.Clear();
+            _delayBindScriptBlocks?.Clear();
 
             // $PSDefaultParameterValues state
             DefaultParameterAliasList = null;
-            DefaultParameterWarningSet.Clear();
+            _defaultParameterWarningSet?.Clear();
             AllDefaultParameterValuePairs = null;
             UseDefaultParameterBinding = true;
 
@@ -275,14 +286,14 @@ namespace System.Management.Automation
             Debug.Assert(BoundParameters.Count == 0, $"[{caller}] BoundParameters not clean after Reset");
             Debug.Assert(BoundArguments.Count == 0, $"[{caller}] BoundArguments not clean after Reset");
             Debug.Assert(UnboundArguments.Count == 0, $"[{caller}] UnboundArguments not clean after Reset");
-            Debug.Assert(ParametersBoundThroughPipelineInput.Count == 0, $"[{caller}] PipelineInput not clean after Reset");
-            Debug.Assert(BoundDefaultParameters.Count == 0, $"[{caller}] BoundDefaultParameters not clean after Reset");
+            Debug.Assert((_parametersBoundThroughPipelineInput?.Count ?? 0) == 0, $"[{caller}] PipelineInput not clean after Reset");
+            Debug.Assert((_boundDefaultParameters?.Count ?? 0) == 0, $"[{caller}] BoundDefaultParameters not clean after Reset");
             Debug.Assert(!DefaultParameterBindingInUse, $"[{caller}] DefaultParameterBindingInUse not clean after Reset");
             Debug.Assert(UnboundParameters.Count == expectedUnboundCount, $"[{caller}] UnboundParameters count mismatch after Reset: expected {expectedUnboundCount}, got {UnboundParameters.Count}");
-            Debug.Assert(DefaultParameterValues.Count == 0, $"[{caller}] DefaultParameterValues not clean after Reset");
-            Debug.Assert(DelayBindScriptBlocks.Count == 0, $"[{caller}] DelayBindScriptBlocks not clean after Reset");
+            Debug.Assert((_defaultParameterValues?.Count ?? 0) == 0, $"[{caller}] DefaultParameterValues not clean after Reset");
+            Debug.Assert((_delayBindScriptBlocks?.Count ?? 0) == 0, $"[{caller}] DelayBindScriptBlocks not clean after Reset");
             Debug.Assert(DefaultParameterAliasList == null, $"[{caller}] DefaultParameterAliasList not clean after Reset");
-            Debug.Assert(DefaultParameterWarningSet.Count == 0, $"[{caller}] DefaultParameterWarningSet not clean after Reset");
+            Debug.Assert((_defaultParameterWarningSet?.Count ?? 0) == 0, $"[{caller}] DefaultParameterWarningSet not clean after Reset");
             Debug.Assert(AllDefaultParameterValuePairs == null, $"[{caller}] AllDefaultParameterValuePairs not clean after Reset");
             Debug.Assert(UseDefaultParameterBinding, $"[{caller}] UseDefaultParameterBinding not reset to true after Reset");
             Debug.Assert(BoundObsoleteParameterNames == null, $"[{caller}] BoundObsoleteParameterNames not clean after Reset");

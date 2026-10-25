@@ -69,8 +69,8 @@ internal sealed class ParameterSetResolver
     internal static ParameterSetResolver CreateDefault()
     {
         return new ParameterSetResolver(
-            commandMetadata: new CommandMetadata(typeof(PSCmdlet)),
-            bindableParameters: new MergedCommandParameterMetadata(),
+            commandMetadata: s_defaultCommandMetadata,
+            bindableParameters: s_defaultBindableParameters,
             stateContext: s_defaultContext,
             opsContext: s_defaultContext);
     }
@@ -868,6 +868,8 @@ internal sealed class ParameterSetResolver
     }
 
     private static readonly DefaultBindingContext s_defaultContext = new DefaultBindingContext();
+    private static readonly CommandMetadata s_defaultCommandMetadata = new(typeof(PSCmdlet));
+    private static readonly MergedCommandParameterMetadata s_defaultBindableParameters = new();
 
     private sealed class DefaultBindingContext : IBindingStateContext, IBindingOperationsContext
     {
