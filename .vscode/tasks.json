@@ -41,7 +41,7 @@
         {
             "label": "Bootstrap",
             "type": "shell",
-            "command": "Import-Module '${workspaceFolder}/build.psm1'; Start-PSBootstrap",
+            "command": "Import-Module '${workspaceFolder}/build.psm1'; Start-PSBootstrap -Scenario:Dotnet;Start-ResGen;Start-TypeGen",
             "problemMatcher": []
         },
         {
