@@ -646,4 +646,564 @@ Describe "Tests for parameter binding" -Tags "CI" {
             $result.Param3 | Should -BeExactly 'Z'
         }
     }
+
+    Context 'Named parameter matching edge cases' {
+        BeforeAll {
+            function Test-NamedMatchExact {
+                [CmdletBinding()]
+                param(
+                    [string] $Path,
+                    [string] $PathInfo
+                )
+                @{ Path = $Path; PathInfo = $PathInfo }
+            }
+
+            function Test-NamedMatchPrefix {
+                [CmdletBinding()]
+                param(
+                    [string] $Path
+                )
+                $Path
+            }
+
+            function Test-NamedMatchAmbiguous {
+                [CmdletBinding()]
+                param(
+                    [string] $Path,
+                    [string] $Process
+                )
+                @{ Path = $Path; Process = $Process }
+            }
+
+            function Test-NamedMatchAlias {
+                [CmdletBinding()]
+                param(
+                    [Alias('CN')]
+                    [string] $ComputerName
+                )
+                $ComputerName
+            }
+
+            function Test-NamedMatchAliasVsPrefix {
+                [CmdletBinding()]
+                param(
+                    [Alias('CN')]
+                    [string] $ComputerName,
+                    [string] $Content
+                )
+                @{ ComputerName = $ComputerName; Content = $Content }
+            }
+        }
+
+        It 'Exact match takes precedence over prefix match when both exist' {
+            $result = Test-NamedMatchExact -Path 'p1' -PathInfo 'p2'
+            $result.Path | Should -BeExactly 'p1'
+            $result.PathInfo | Should -BeExactly 'p2'
+        }
+
+        It 'Prefix match works with minimum unique characters' {
+            $result = Test-NamedMatchPrefix -Pa 'hello'
+            $result | Should -BeExactly 'hello'
+        }
+
+        It 'Ambiguous prefix throws AmbiguousParameter error' {
+            { Test-NamedMatchAmbiguous -P 'val' } | Should -Throw -ErrorId 'AmbiguousParameter,Test-NamedMatchAmbiguous'
+        }
+
+        It 'Alias match works' {
+            $result = Test-NamedMatchAlias -CN 'server1'
+            $result | Should -BeExactly 'server1'
+        }
+
+        It 'Alias exact match takes precedence over parameter prefix match' {
+            # -CN is an exact alias match; -Co would be an ambiguous prefix if both ComputerName and Content are present
+            $result = Test-NamedMatchAliasVsPrefix -CN 'server1' -Content 'data'
+            $result.ComputerName | Should -BeExactly 'server1'
+            $result.Content | Should -BeExactly 'data'
+        }
+
+        It 'Case-insensitive matching works' {
+            $result = Test-NamedMatchPrefix -path 'hello'
+            $result | Should -BeExactly 'hello'
+        }
+
+        It 'Case-insensitive prefix match works' {
+            # -PA (uppercase) also prefix-matches Path
+            $result = Test-NamedMatchPrefix -PA 'hello'
+            $result | Should -BeExactly 'hello'
+        }
+
+        It 'Parameter not found throws NamedParameterNotFound error' {
+            { Test-NamedMatchPrefix -NonExistent 'val' } | Should -Throw -ErrorId 'NamedParameterNotFound,Test-NamedMatchPrefix'
+        }
+
+        It 'Parameter already bound throws ParameterAlreadyBound error' {
+            { Test-NamedMatchPrefix -Path 'a' -Path 'b' } | Should -Throw -ErrorId 'ParameterAlreadyBound,Test-NamedMatchPrefix'
+        }
+    }
+
+    Context 'Positional parameter binding edge cases' {
+        It 'Positional parameter in one set but not another — positional binding selects the set with a position' {
+            function Test-PositionalOneSet {
+                [CmdletBinding(DefaultParameterSetName = 'SetA')]
+                param(
+                    [Parameter(ParameterSetName = 'SetA', Position = 0)]
+                    [Parameter(ParameterSetName = 'SetB')]
+                    [string] $Alpha,
+
+                    [Parameter(ParameterSetName = 'SetB', Mandatory = $true)]
+                    [string] $Discriminator
+                )
+                @{ ParameterSet = $PSCmdlet.ParameterSetName; Alpha = $Alpha }
+            }
+
+            $result = Test-PositionalOneSet 'hello'
+            $result.ParameterSet | Should -BeExactly 'SetA'
+            $result.Alpha | Should -BeExactly 'hello'
+        }
+
+        It 'Position gaps (0, 2, 5) — arguments fill positions in ascending position order' {
+            function Test-PositionGaps {
+                [CmdletBinding()]
+                param(
+                    [Parameter(Position = 0)] [string] $A,
+                    [Parameter(Position = 2)] [string] $B,
+                    [Parameter(Position = 5)] [string] $C
+                )
+                @{ A = $A; B = $B; C = $C }
+            }
+
+            $result = Test-PositionGaps 'alpha' 'bravo' 'charlie'
+            $result.A | Should -BeExactly 'alpha'
+            $result.B | Should -BeExactly 'bravo'
+            $result.C | Should -BeExactly 'charlie'
+        }
+
+        It 'All-sets positional parameter (no ParameterSetName) works with any parameter set' {
+            function Test-AllSetsPositional {
+                [CmdletBinding(DefaultParameterSetName = 'SetA')]
+                param(
+                    [Parameter(Position = 0)]
+                    [string] $Common,
+
+                    [Parameter(ParameterSetName = 'SetA')]
+                    [switch] $UseA,
+
+                    [Parameter(ParameterSetName = 'SetB')]
+                    [switch] $UseB
+                )
+                @{ ParameterSet = $PSCmdlet.ParameterSetName; Common = $Common }
+            }
+
+            $resultA = Test-AllSetsPositional 'hello' -UseA
+            $resultA.Common | Should -BeExactly 'hello'
+            $resultA.ParameterSet | Should -BeExactly 'SetA'
+
+            $resultB = Test-AllSetsPositional 'world' -UseB
+            $resultB.Common | Should -BeExactly 'world'
+            $resultB.ParameterSet | Should -BeExactly 'SetB'
+        }
+
+        It 'Named parameter binding followed by positional — positional fills remaining unbound slot' {
+            function Test-NamedThenPositional {
+                [CmdletBinding()]
+                param(
+                    [Parameter(Position = 0)] [string] $First,
+                    [Parameter(Position = 1)] [string] $Second
+                )
+                @{ First = $First; Second = $Second }
+            }
+
+            $result = Test-NamedThenPositional -Second 'two' 'one'
+            $result.First | Should -BeExactly 'one'
+            $result.Second | Should -BeExactly 'two'
+        }
+
+        It 'Default parameter set is preferred when two sets have a parameter at the same position' {
+            function Test-DefaultSetPreference {
+                [CmdletBinding(DefaultParameterSetName = 'Alpha')]
+                param(
+                    [Parameter(ParameterSetName = 'Alpha', Position = 0)]
+                    [string] $AlphaValue,
+
+                    [Parameter(ParameterSetName = 'Beta', Position = 0)]
+                    [string] $BetaValue
+                )
+                @{ ParameterSet = $PSCmdlet.ParameterSetName; AlphaValue = $AlphaValue; BetaValue = $BetaValue }
+            }
+
+            $result = Test-DefaultSetPreference 'test'
+            $result.ParameterSet | Should -BeExactly 'Alpha'
+            $result.AlphaValue | Should -BeExactly 'test'
+        }
+
+        It 'Named parameter selects set, then positional binds within that set' {
+            function Test-SetThenPositional {
+                [CmdletBinding()]
+                param(
+                    [Parameter(ParameterSetName = 'SetA', Position = 0)]
+                    [string] $Alpha,
+
+                    [Parameter(ParameterSetName = 'SetA')]
+                    [switch] $UseA,
+
+                    [Parameter(ParameterSetName = 'SetB', Position = 0)]
+                    [string] $Beta,
+
+                    [Parameter(ParameterSetName = 'SetB')]
+                    [switch] $UseB
+                )
+                @{ ParameterSet = $PSCmdlet.ParameterSetName; Alpha = $Alpha; Beta = $Beta }
+            }
+
+            $resultA = Test-SetThenPositional -UseA 'hello'
+            $resultA.ParameterSet | Should -BeExactly 'SetA'
+            $resultA.Alpha | Should -BeExactly 'hello'
+
+            $resultB = Test-SetThenPositional -UseB 'world'
+            $resultB.ParameterSet | Should -BeExactly 'SetB'
+            $resultB.Beta | Should -BeExactly 'world'
+        }
+
+        It 'ValueFromRemainingArguments does not steal from positional binding' {
+            function Test-VRAOrder {
+                [CmdletBinding()]
+                param(
+                    [Parameter(Position = 0)] [string] $Named,
+                    [Parameter(ValueFromRemainingArguments = $true)] [string[]] $Rest
+                )
+                @{ Named = $Named; Rest = $Rest }
+            }
+
+            $result = Test-VRAOrder 'first' 'extra1' 'extra2'
+            $result.Named | Should -BeExactly 'first'
+            $result.Rest | Should -HaveCount 2
+            $result.Rest[0] | Should -BeExactly 'extra1'
+            $result.Rest[1] | Should -BeExactly 'extra2'
+        }
+
+        It 'Positional argument beyond number of positional parameters binds to ValueFromRemainingArguments' {
+            function Test-PositionalOverflow {
+                [CmdletBinding()]
+                param(
+                    [Parameter(Position = 0)] [string] $First,
+                    [Parameter(ValueFromRemainingArguments = $true)] [string[]] $Rest
+                )
+                @{ First = $First; Rest = $Rest }
+            }
+
+            $result = Test-PositionalOverflow 'pos0' 'overflow1' 'overflow2'
+            $result.First | Should -BeExactly 'pos0'
+            $result.Rest | Should -HaveCount 2
+        }
+    }
+
+    Context 'Argument reparsing edge cases' {
+        BeforeAll {
+            function Test-Reparse {
+                [CmdletBinding()]
+                param(
+                    [string] $Name,
+                    [switch] $Verbose2,
+                    [bool]   $Flag,
+                    [string] $Other
+                )
+                @{
+                    Name    = $Name
+                    Verbose2 = $Verbose2.IsPresent
+                    Flag    = $Flag
+                    Other   = $Other
+                }
+            }
+        }
+
+        It 'Switch parameter with no argument defaults to True' {
+            $result = Test-Reparse -Verbose2
+            $result.Verbose2 | Should -BeTrue
+        }
+
+        It 'Switch parameter with explicit colon-False is False' {
+            $result = Test-Reparse -Verbose2:$false
+            $result.Verbose2 | Should -BeFalse
+        }
+
+        It 'Bool parameter with colon-true syntax is True' {
+            $result = Test-Reparse -Flag:$true
+            $result.Flag | Should -BeTrue
+        }
+
+        It 'Bool parameter with no argument throws MissingArgument' {
+            { Test-Reparse -Flag } | Should -Throw -ErrorId 'MissingArgument,Test-Reparse'
+        }
+
+        It 'Bool parameter with explicit colon-False is False' {
+            $result = Test-Reparse -Flag:$false
+            $result.Flag | Should -BeFalse
+        }
+
+        It 'Named string parameter followed by value binds correctly' {
+            $result = Test-Reparse -Name 'hello'
+            $result.Name | Should -BeExactly 'hello'
+        }
+
+        It 'Named string parameter with colon syntax binds correctly' {
+            $result = Test-Reparse -Name:'hello'
+            $result.Name | Should -BeExactly 'hello'
+        }
+
+        It 'Named string parameter with no value and no following arg throws MissingArgument' {
+            { Test-Reparse -Name } | Should -Throw -ErrorId 'MissingArgument,Test-Reparse'
+        }
+
+        It 'Named string parameter followed by another named parameter throws MissingArgument' {
+            { Test-Reparse -Name -Other } | Should -Throw -ErrorId 'MissingArgument,Test-Reparse'
+        }
+
+        It 'Multiple named parameters each with values bind independently' {
+            $result = Test-Reparse -Name 'alpha' -Other 'beta'
+            $result.Name  | Should -BeExactly 'alpha'
+            $result.Other | Should -BeExactly 'beta'
+        }
+
+        It 'Named + switch interspersed all bind correctly' {
+            $result = Test-Reparse -Name 'foo' -Verbose2 -Other 'bar'
+            $result.Name    | Should -BeExactly 'foo'
+            $result.Verbose2 | Should -BeTrue
+            $result.Other   | Should -BeExactly 'bar'
+        }
+    }
+
+    Context 'Type coercion edge cases during parameter binding' {
+        It 'String value coerced to [int] parameter' {
+            function Test-CoerceInt {
+                [CmdletBinding()]
+                param([int] $Value)
+                $Value
+            }
+            $result = Test-CoerceInt -Value '42'
+            $result | Should -Be 42
+            $result | Should -BeOfType [int]
+        }
+
+        It 'Int value coerced to [string] parameter' {
+            function Test-CoerceStr {
+                [CmdletBinding()]
+                param([string] $Value)
+                $Value
+            }
+            $result = Test-CoerceStr -Value 99
+            $result | Should -BeExactly '99'
+            $result | Should -BeOfType [string]
+        }
+
+        It 'Single value coerced to [string[]] parameter becomes single-element array' {
+            function Test-CoerceArray {
+                [CmdletBinding()]
+                param([string[]] $Values)
+                $Values
+            }
+            # PowerShell unrolls single-element arrays on function return;
+            # wrap in @() to verify only one element was bound.
+            $result = @(Test-CoerceArray -Values 'hello')
+            $result | Should -HaveCount 1
+            $result[0] | Should -BeExactly 'hello'
+        }
+
+        It 'Array value bound to [string[]] parameter keeps all elements' {
+            function Test-CoerceArrayMulti {
+                [CmdletBinding()]
+                param([string[]] $Values)
+                $Values
+            }
+            $result = Test-CoerceArrayMulti -Values @('a', 'b', 'c')
+            $result | Should -HaveCount 3
+        }
+
+        It 'String coerced to [System.Uri] parameter' {
+            function Test-CoerceUri {
+                [CmdletBinding()]
+                param([System.Uri] $Uri)
+                $Uri.AbsoluteUri
+            }
+            $result = Test-CoerceUri -Uri 'https://example.com'
+            $result | Should -Match 'example\.com'
+        }
+
+        It 'String coerced to [System.Version] parameter' {
+            function Test-CoerceVersion {
+                [CmdletBinding()]
+                param([System.Version] $Ver)
+                $Ver.Major
+            }
+            $result = Test-CoerceVersion -Ver '3.14.0'
+            $result | Should -Be 3
+        }
+
+        It '$null coerced to [int] parameter becomes 0 (no exception)' {
+            function Test-NullInt {
+                [CmdletBinding()]
+                param([int] $Value = 0)
+                $Value
+            }
+            # $null is converted to 0 for [int] parameters in PowerShell.
+            $result = Test-NullInt -Value $null
+            $result | Should -Be 0
+        }
+
+        It 'Unconvertible string throws ParameterArgumentTransformationError for [int]' {
+            function Test-BadInt {
+                [CmdletBinding()]
+                param([int] $Value)
+                $Value
+            }
+            { Test-BadInt -Value 'not-a-number' } | Should -Throw -ErrorId 'ParameterArgumentTransformationError,Test-BadInt'
+        }
+
+        It 'Enum string coerced to attribute param enum (PSCmdlet ParameterSet)' {
+            function Test-CoerceEnum {
+                [CmdletBinding()]
+                param(
+                    [Parameter()]
+                    [System.IO.FileMode] $Mode
+                )
+                $Mode
+            }
+            $result = Test-CoerceEnum -Mode 'Open'
+            $result | Should -Be ([System.IO.FileMode]::Open)
+        }
+
+        It 'ScriptBlock value bound to [ScriptBlock] parameter without coercion' {
+            function Test-SBParam {
+                [CmdletBinding()]
+                param([scriptblock] $Filter)
+                $Filter
+            }
+            $sb = { $_ -gt 0 }
+            $result = Test-SBParam -Filter $sb
+            $result | Should -BeOfType [scriptblock]
+        }
+    }
+
+    Context 'Parameter validation attribute edge cases' {
+        It '[ValidateNotNull] rejects null' {
+            function Test-VNN {
+                [CmdletBinding()]
+                # Use [object] type to allow null — [string] converts $null to empty string
+                param([ValidateNotNull()] [object] $Value)
+                $Value
+            }
+            { Test-VNN -Value $null } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VNN'
+        }
+
+        It '[ValidateNotNullOrEmpty] rejects empty string' {
+            function Test-VNNOE {
+                [CmdletBinding()]
+                param([ValidateNotNullOrEmpty()] [string] $Value)
+                $Value
+            }
+            { Test-VNNOE -Value '' } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VNNOE'
+        }
+
+        It '[ValidateNotNullOrEmpty] accepts non-empty string' {
+            function Test-VNNOEPass {
+                [CmdletBinding()]
+                param([ValidateNotNullOrEmpty()] [string] $Value)
+                $Value
+            }
+            Test-VNNOEPass -Value 'hello' | Should -BeExactly 'hello'
+        }
+
+        It '[ValidateRange] rejects out-of-range value' {
+            function Test-VRange {
+                [CmdletBinding()]
+                param([ValidateRange(1, 10)] [int] $Value)
+                $Value
+            }
+            { Test-VRange -Value 0  } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VRange'
+            { Test-VRange -Value 11 } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VRange'
+        }
+
+        It '[ValidateRange] accepts in-range value' {
+            function Test-VRangePass {
+                [CmdletBinding()]
+                param([ValidateRange(1, 10)] [int] $Value)
+                $Value
+            }
+            Test-VRangePass -Value 5 | Should -Be 5
+        }
+
+        It '[ValidateSet] rejects value not in set' {
+            function Test-VSet {
+                [CmdletBinding()]
+                param([ValidateSet('Red', 'Green', 'Blue')] [string] $Color)
+                $Color
+            }
+            { Test-VSet -Color 'Purple' } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VSet'
+        }
+
+        It '[ValidateSet] case-insensitive match succeeds and preserves input case' {
+            function Test-VSetCase {
+                [CmdletBinding()]
+                param([ValidateSet('Red', 'Green', 'Blue')] [string] $Color)
+                $Color
+            }
+            # ValidateSet matches case-insensitively but returns the original input value
+            Test-VSetCase -Color 'red' | Should -BeExactly 'red'
+        }
+
+        It '[ValidatePattern] rejects non-matching string' {
+            function Test-VPat {
+                [CmdletBinding()]
+                param([ValidatePattern('^\d+$')] [string] $Value)
+                $Value
+            }
+            { Test-VPat -Value 'abc' } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VPat'
+        }
+
+        It '[ValidatePattern] accepts matching string' {
+            function Test-VPatPass {
+                [CmdletBinding()]
+                param([ValidatePattern('^\d+$')] [string] $Value)
+                $Value
+            }
+            Test-VPatPass -Value '123' | Should -BeExactly '123'
+        }
+
+        It '[ValidateLength] rejects string outside length bounds' {
+            function Test-VLen {
+                [CmdletBinding()]
+                param([ValidateLength(2, 5)] [string] $Value)
+                $Value
+            }
+            { Test-VLen -Value 'a'      } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VLen'
+            { Test-VLen -Value 'toolong' } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VLen'
+        }
+
+        It '[ValidateScript] rejects when script returns falsy' {
+            function Test-VScript {
+                [CmdletBinding()]
+                param([ValidateScript({ $_ -gt 0 })] [int] $Value)
+                $Value
+            }
+            { Test-VScript -Value -1 } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VScript'
+        }
+
+        It '[ValidateScript] accepts when script returns truthy' {
+            function Test-VScriptPass {
+                [CmdletBinding()]
+                param([ValidateScript({ $_ -gt 0 })] [int] $Value)
+                $Value
+            }
+            Test-VScriptPass -Value 5 | Should -Be 5
+        }
+
+        It '[ValidateCount] rejects array with wrong element count' {
+            function Test-VCount {
+                [CmdletBinding()]
+                param([ValidateCount(2, 4)] [string[]] $Values)
+                $Values
+            }
+            { Test-VCount -Values @('a') } | Should -Throw -ErrorId 'ParameterArgumentValidationError,Test-VCount'
+        }
+    }
 }
