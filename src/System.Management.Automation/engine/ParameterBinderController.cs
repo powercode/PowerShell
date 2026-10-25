@@ -163,7 +163,7 @@ namespace System.Management.Automation
         /// </exception>
         protected void ReparseUnboundArguments()
         {
-            Collection<CommandParameterInternal> result = new Collection<CommandParameterInternal>();
+            int writeIndex = 0;
 
             for (int index = 0; index < UnboundArguments.Count; ++index)
             {
@@ -173,7 +173,7 @@ namespace System.Management.Automation
                 // argument, we have nothing to reparse for this argument.
                 if (!argument.ParameterNameSpecified || argument.ArgumentSpecified)
                 {
-                    result.Add(argument);
+                    UnboundArguments[writeIndex++] = argument;
                     continue;
                 }
 
@@ -189,7 +189,7 @@ namespace System.Management.Automation
                 {
                     // Since we couldn't find a match, just add the argument as it was
                     // and continue
-                    result.Add(argument);
+                    UnboundArguments[writeIndex++] = argument;
                     continue;
                 }
 
@@ -200,7 +200,7 @@ namespace System.Management.Automation
 
                 if (IsSwitchAndSetValue(parameterName, argument, matchingParameter.Parameter))
                 {
-                    result.Add(argument);
+                    UnboundArguments[writeIndex++] = argument;
                     continue;
                 }
 
@@ -236,7 +236,7 @@ namespace System.Management.Automation
                         ++index;
                         argument.ParameterName = matchingParameter.Parameter.Name;
                         argument.SetArgumentValue(nextArgument.ArgumentAst, nextArgument.ParameterText);
-                        result.Add(argument);
+                        UnboundArguments[writeIndex++] = argument;
                         continue;
                     }
 
@@ -246,7 +246,7 @@ namespace System.Management.Automation
                     ++index;
                     argument.ParameterName = matchingParameter.Parameter.Name;
                     argument.SetArgumentValue(nextArgument.ArgumentAst, nextArgument.ArgumentValue);
-                    result.Add(argument);
+                    UnboundArguments[writeIndex++] = argument;
                 }
                 else
                 {
@@ -257,7 +257,10 @@ namespace System.Management.Automation
                 }
             }
 
-            UnboundArguments = result;
+            while (UnboundArguments.Count > writeIndex)
+            {
+                UnboundArguments.RemoveAt(UnboundArguments.Count - 1);
+            }
         }
 
         protected void InitUnboundArguments(Collection<CommandParameterInternal> arguments)
@@ -435,7 +438,8 @@ namespace System.Management.Automation
                     argument.ParameterName,
                     (flags & ParameterBindingFlags.ThrowOnParameterNotFound) != 0,
                     true,
-                    new InvocationInfo(InvocationInfo.MyCommand, argument.ParameterExtent));
+                    InvocationInfo.MyCommand,
+                    argument.ParameterExtent);
 
             if (matchingParameter != null)
             {
@@ -529,7 +533,7 @@ namespace System.Management.Automation
 
             if (result && ((flags & ParameterBindingFlags.IsDefaultValue) == 0))
             {
-                UnboundParameters.Remove(parameter);
+                BindingState.SwapRemove(UnboundParameters, parameter);
                 BoundParameters.Add(parameter.Parameter.Name, parameter);
             }
 
@@ -570,16 +574,16 @@ namespace System.Management.Automation
         /// or
         /// If the binding to the parameter fails.
         /// </exception>
-        protected Collection<CommandParameterInternal> BindNamedParameters(uint parameterSets, Collection<CommandParameterInternal> arguments)
+        protected void BindNamedParameters(uint parameterSets, Collection<CommandParameterInternal> arguments)
         {
-            Collection<CommandParameterInternal> result = new Collection<CommandParameterInternal>();
             HashSet<string>? boundExplicitNamedParams = null;
 
-            foreach (CommandParameterInternal argument in arguments)
+            for (int i = 0; i < arguments.Count; i++)
             {
+                CommandParameterInternal argument = arguments[i];
+
                 if (!argument.ParameterNameSpecified)
                 {
-                    result.Add(argument);
                     continue;
                 }
 
@@ -587,10 +591,11 @@ namespace System.Management.Automation
                 // or in case of a cmdlet or an advanced function, it might match up to a dynamic parameter.
                 MergedCompiledCommandParameter parameter =
                     BindableParameters.GetMatchingParameter(
-                        name: argument.ParameterName,
+                        argument.ParameterName,
                         throwOnParameterNotFound: false,
                         tryExactMatching: true,
-                        invocationInfo: new InvocationInfo(InvocationInfo.MyCommand, argument.ParameterExtent));
+                        InvocationInfo.MyCommand,
+                        argument.ParameterExtent);
 
                 // If the parameter is not in the specified parameter set, throw a binding exception
                 if (parameter != null)
@@ -610,6 +615,7 @@ namespace System.Management.Automation
                             // is superseded by the explicit one. For example:
                             //   $splat = @{ Path = $path1 }
                             //   dir @splat -Path $path2
+                            arguments.RemoveAt(i--);
                             continue;
                         }
                     }
@@ -626,6 +632,7 @@ namespace System.Management.Automation
                     }
 
                     BindNamedParameter(parameterSets, argument, parameter);
+                    arguments.RemoveAt(i--);
                 }
                 else if (argument.ParameterName.Equals(Parser.VERBATIM_PARAMETERNAME, StringComparison.Ordinal))
                 {
@@ -633,14 +640,10 @@ namespace System.Management.Automation
                     // a using expression ($using:x).  We then access these values via PSBoundParameters, so
                     // "bind" them here.
                     DefaultParameterBinder.CommandLineParameters.SetImplicitUsingParameters(argument.ArgumentValue);
+                    arguments.RemoveAt(i--);
                 }
-                else
-                {
-                    result.Add(argument);
-                }
+                // else: leave in collection for positional binding
             }
-
-            return result;
         }
 
         /// <summary>
@@ -679,146 +682,141 @@ namespace System.Management.Automation
         /// or
         /// If the binding to the parameter fails.
         /// </exception>
-        internal Collection<CommandParameterInternal> BindPositionalParameters(
+        internal void BindPositionalParameters(
             Collection<CommandParameterInternal> unboundArguments,
             uint validParameterSets,
             uint defaultParameterSet,
             out ParameterBindingException? outgoingBindingException
             )
         {
-            Collection<CommandParameterInternal> result = new();
             outgoingBindingException = null;
 
-            if (unboundArguments.Count > 0)
+            if (unboundArguments.Count == 0)
             {
-                // Create a new collection to iterate over so that we can remove
-                // unbound arguments while binding them.
+                return;
+            }
 
-                List<CommandParameterInternal> unboundArgumentsCollection = new(unboundArguments);
+            // Create a snapshot to iterate over so that we can repopulate unboundArguments in-place.
 
-                // Get a sorted dictionary of the positional parameters with the position
-                // as the key
+            List<CommandParameterInternal> unboundArgumentsCollection = new(unboundArguments);
 
-                SortedDictionary<int, Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter>> positionalParameterDictionary;
+            // Get a sorted dictionary of the positional parameters with the position
+            // as the key
 
-                try
+            SortedDictionary<int, Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter>> positionalParameterDictionary;
+
+            try
+            {
+                positionalParameterDictionary =
+                    EvaluateUnboundPositionalParameters(UnboundParameters, ParameterSetResolver.CurrentParameterSetFlag);
+            }
+            catch (InvalidOperationException)
+            {
+                // The parameter set declaration is ambiguous so
+                // throw an exception.
+
+                // This exception is thrown because the binder found two positional parameters
+                // from the same parameter set with the same position defined. This is not caused
+                // by introducing the default parameter binding.
+                throw ParameterBindingException.NewAmbiguousPositionalParameterNoName(InvocationInfo);
+            }
+
+            if (positionalParameterDictionary.Count == 0)
+            {
+                // Since no positional parameters were found, unboundArguments is unchanged.
+                return;
+            }
+
+            unboundArguments.Clear();
+            int unboundArgumentsIndex = 0;
+
+            foreach (Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter> nextPositionalParameters in positionalParameterDictionary.Values)
+            {
+                // Only continue if there are parameters at the specified position. Parameters
+                // can be removed as the parameter set gets narrowed down.
+
+                if (nextPositionalParameters.Count == 0)
                 {
-                    positionalParameterDictionary =
-                        EvaluateUnboundPositionalParameters(UnboundParameters, ParameterSetResolver.CurrentParameterSetFlag);
+                    continue;
                 }
-                catch (InvalidOperationException)
-                {
-                    // The parameter set declaration is ambiguous so
-                    // throw an exception.
 
-                    // This exception is thrown because the binder found two positional parameters
-                    // from the same parameter set with the same position defined. This is not caused
-                    // by introducing the default parameter binding.
-                    throw ParameterBindingException.NewAmbiguousPositionalParameterNoName(InvocationInfo);
+                CommandParameterInternal? argument = GetNextPositionalArgument(unboundArgumentsCollection, unboundArguments, ref unboundArgumentsIndex);
+
+                if (argument == null)
+                {
+                    break;
                 }
 
-                if (positionalParameterDictionary.Count > 0)
+                // Bind first to defaultParameterSet without type coercion, then to
+                // other sets without type coercion, then to the defaultParameterSet with
+                // type coercion and finally to the other sets with type coercion.
+
+                bool aParameterWasBound = false;
+                if (defaultParameterSet != 0 && (validParameterSets & defaultParameterSet) != 0)
                 {
-                    int unboundArgumentsIndex = 0;
+                    // Favor the default parameter set.
+                    // First try without type coercion
 
-                    foreach (Dictionary<MergedCompiledCommandParameter, PositionalCommandParameter> nextPositionalParameters in positionalParameterDictionary.Values)
+                    aParameterWasBound =
+                        BindPositionalParametersInSet(defaultParameterSet, nextPositionalParameters, argument, ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
+                }
+
+                if (!aParameterWasBound)
+                {
+                    // Try the non-default parameter sets
+                    // without type coercion.
+
+                    aParameterWasBound =
+                        BindPositionalParametersInSet(validParameterSets, nextPositionalParameters, argument, ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
+                }
+
+                if (!aParameterWasBound)
+                {
+                    // Now try the default parameter set with type coercion
+                    if (defaultParameterSet != 0 && (validParameterSets & defaultParameterSet) != 0)
                     {
-                        // Only continue if there are parameters at the specified position. Parameters
-                        // can be removed as the parameter set gets narrowed down.
+                        // Favor the default parameter set.
+                        // First try without type coercion
 
-                        if (nextPositionalParameters.Count == 0)
-                        {
-                            continue;
-                        }
-
-                        CommandParameterInternal? argument = GetNextPositionalArgument(unboundArgumentsCollection, result, ref unboundArgumentsIndex);
-
-                        if (argument == null)
-                        {
-                            break;
-                        }
-
-                        // Bind first to defaultParameterSet without type coercion, then to
-                        // other sets without type coercion, then to the defaultParameterSet with
-                        // type coercion and finally to the other sets with type coercion.
-
-                        bool aParameterWasBound = false;
-                        if (defaultParameterSet != 0 && (validParameterSets & defaultParameterSet) != 0)
-                        {
-                            // Favor the default parameter set.
-                            // First try without type coercion
-
-                            aParameterWasBound =
-                                BindPositionalParametersInSet(defaultParameterSet, nextPositionalParameters, argument, ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
-                        }
-
-                        if (!aParameterWasBound)
-                        {
-                            // Try the non-default parameter sets
-                            // without type coercion.
-
-                            aParameterWasBound =
-                                BindPositionalParametersInSet(validParameterSets, nextPositionalParameters, argument, ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
-                        }
-
-                        if (!aParameterWasBound)
-                        {
-                            // Now try the default parameter set with type coercion
-                            if (defaultParameterSet != 0 && (validParameterSets & defaultParameterSet) != 0)
-                            {
-                                // Favor the default parameter set.
-                                // First try without type coercion
-
-                                aParameterWasBound =
-                                    BindPositionalParametersInSet(defaultParameterSet, nextPositionalParameters, argument, 
-                                        ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
-                            }
-                        }
-
-                        if (!aParameterWasBound)
-                        {
-                            // Try the non-default parameter sets
-                            // with type coercion.
-
-                            aParameterWasBound =
-                                BindPositionalParametersInSet(validParameterSets, nextPositionalParameters, argument,
-                                    ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
-                        }
-
-                        if (!aParameterWasBound)
-                        {
-                            // Add the unprocessed argument to the results and continue
-                            result.Add(argument);
-                        }
-                        else
-                        {
-                            // Update the parameter sets if necessary
-                            if (validParameterSets != ParameterSetResolver.CurrentParameterSetFlag)
-                            {
-                                validParameterSets = ParameterSetResolver.CurrentParameterSetFlag;
-                                UpdatePositionalDictionary(positionalParameterDictionary, validParameterSets);
-                            }
-                        }
+                        aParameterWasBound =
+                            BindPositionalParametersInSet(defaultParameterSet, nextPositionalParameters, argument, 
+                                ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
                     }
+                }
 
-                    // Now for any arguments that were not processed, add them to
-                    // the result
+                if (!aParameterWasBound)
+                {
+                    // Try the non-default parameter sets
+                    // with type coercion.
 
-                    for (int index = unboundArgumentsIndex; index < unboundArgumentsCollection.Count; ++index)
-                    {
-                        result.Add(unboundArgumentsCollection[index]);
-                    }
+                    aParameterWasBound =
+                        BindPositionalParametersInSet(validParameterSets, nextPositionalParameters, argument,
+                            ParameterBindingFlags.ShouldCoerceType | ParameterBindingFlags.DelayBindScriptBlock, out outgoingBindingException);
+                }
+
+                if (!aParameterWasBound)
+                {
+                    // Add the unprocessed argument to the results and continue
+                    unboundArguments.Add(argument);
                 }
                 else
                 {
-                    // Since no positional parameters were found, add the arguments
-                    // to the result
-
-                    result = unboundArguments;
+                    // Update the parameter sets if necessary
+                    if (validParameterSets != ParameterSetResolver.CurrentParameterSetFlag)
+                    {
+                        validParameterSets = ParameterSetResolver.CurrentParameterSetFlag;
+                        UpdatePositionalDictionary(positionalParameterDictionary, validParameterSets);
+                    }
                 }
             }
 
-            return result;
+            // Now for any arguments that were not processed, add them to
+            // the result
+
+            for (int index = unboundArgumentsIndex; index < unboundArgumentsCollection.Count; ++index)
+            {
+                unboundArguments.Add(unboundArgumentsCollection[index]);
+            }
         }
 
         /// <summary>
@@ -1207,7 +1205,7 @@ namespace System.Management.Automation
         /// If the parameter binder might use the value more than once, this it can save the value to avoid
         /// re-evaluating complicated expressions.
         /// </summary>
-        protected virtual void SaveDefaultScriptParameterValue(string name, object value)
+        protected virtual void SaveDefaultScriptParameterValue(string name, string parameterText, object value)
         {
             // By default, parameter binders don't need to remember the value, the exception being the cmdlet parameter binder.
         }
@@ -1233,9 +1231,9 @@ namespace System.Management.Automation
                     Collections.IDictionary? implicitUsingParameters = DefaultParameterBinder.CommandLineParameters.GetImplicitUsingParameters();
 
                     object result = spb.GetDefaultScriptParameterValue(runtimeDefinedParameter, implicitUsingParameters);
-                    SaveDefaultScriptParameterValue(parameter.Parameter.Name, result);
+                    SaveDefaultScriptParameterValue(parameter.Parameter.Name, parameter.Parameter.ParameterText, result);
                     CommandParameterInternal argument = CommandParameterInternal.CreateParameterWithArgument(
-                        parameterAst: null, parameter.Parameter.Name, "-" + parameter.Parameter.Name + ":",
+                        parameterAst: null, parameter.Parameter.Name, parameter.Parameter.ParameterText,
                         argumentAst: null, result, false);
                     ParameterBindingFlags flags = ParameterBindingFlags.IsDefaultValue;
                     // Only coerce explicit values.  We default to null, which isn't always convertible.

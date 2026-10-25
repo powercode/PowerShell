@@ -35,6 +35,9 @@ internal interface IDefaultValueManagerContext
     /// <summary>Arguments already matched to a parameter, keyed by parameter name.</summary>
     Dictionary<string, CommandParameterInternal> BoundArguments { get; }
 
+    /// <summary>Returns a pipeline CPI to the pool after it is removed from BoundArguments.</summary>
+    void ReturnPipelineCpi(CommandParameterInternal cpi);
+
     /// <summary>Saved default values for restoration after each pipeline object is processed.</summary>
     Dictionary<string, CommandParameterInternal> DefaultParameterValues { get; }
 }
@@ -57,11 +60,11 @@ internal sealed class DefaultValueManager
     /// Records a script parameter's default value so it can be restored after pipeline binding.
     /// Called from the <c>SaveDefaultScriptParameterValue</c> override on the controller.
     /// </summary>
-    internal void SaveScriptParameterValue(string name, object value)
+    internal void SaveScriptParameterValue(string name, string parameterText, object value)
     {
         _context.DefaultParameterValues.Add(name,
             CommandParameterInternal.CreateParameterWithArgument(
-                /*parameterAst*/null, name, "-" + name + ":",
+                /*parameterAst*/null, name, parameterText,
                 /*argumentAst*/null, value,
                 false));
     }
@@ -77,7 +80,7 @@ internal sealed class DefaultValueManager
             _context.DefaultParameterValues.Add(
                 parameter.Parameter.Name,
                 CommandParameterInternal.CreateParameterWithArgument(
-                    /*parameterAst*/null, parameter.Parameter.Name, "-" + parameter.Parameter.Name + ":",
+                    /*parameterAst*/null, parameter.Parameter.Name, parameter.Parameter.ParameterText,
                     /*argumentAst*/null, defaultParameterValue,
                     false));
         }
@@ -153,12 +156,15 @@ internal sealed class DefaultValueManager
 
                 _context.BoundParameters.Remove(parameter.Parameter.Name);
 
-                if (!_context.UnboundParameters.Contains(parameter))
+                if (_context.UnboundParameters.IndexOf(parameter) < 0)
                 {
                     _context.UnboundParameters.Add(parameter);
                 }
 
-                _context.BoundArguments.Remove(parameter.Parameter.Name);
+                if (_context.BoundArguments.Remove(parameter.Parameter.Name, out CommandParameterInternal? removedCpi))
+                {
+                    _context.ReturnPipelineCpi(removedCpi);
+                }
             }
             else
             {
@@ -173,7 +179,7 @@ internal sealed class DefaultValueManager
 
                 // Ensure the parameter is not in the unboundParameters list
 
-                _context.UnboundParameters.Remove(parameter);
+                BindingState.SwapRemove(_context.UnboundParameters, parameter);
             }
         }
     }

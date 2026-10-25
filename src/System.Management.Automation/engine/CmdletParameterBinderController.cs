@@ -271,6 +271,9 @@ namespace System.Management.Automation
         void IPipelineParameterBindingContext.ThrowOrElaborateBindingException(ParameterBindingException ex)
             => ThrowOrElaborateBindingException(ex);
 
+        CommandParameterInternal IPipelineParameterBindingContext.RentPipelineCpi()
+            => State.RentPipelineCpi();
+
         bool IPipelineParameterBindingContext.ApplyDefaultParameterBinding(string caller, bool isDynamic, uint currentParameterSetFlag)
             => _defaultParameterValueBinder.ApplyDefaultParameterBinding(caller, isDynamic, currentParameterSetFlag);
 
@@ -307,11 +310,11 @@ namespace System.Management.Automation
 
         void IDynamicParameterHandlerContext.ReparseUnboundArguments() => ReparseUnboundArguments();
 
-        Collection<CommandParameterInternal> IDynamicParameterHandlerContext.BindNamedParameters(
+        void IDynamicParameterHandlerContext.BindNamedParameters(
             uint parameterSetFlag, Collection<CommandParameterInternal> args)
             => BindNamedParameters(parameterSetFlag, args);
 
-        Collection<CommandParameterInternal> IDynamicParameterHandlerContext.BindPositionalParameters(
+        void IDynamicParameterHandlerContext.BindPositionalParameters(
             Collection<CommandParameterInternal> args,
             uint currentParameterSetFlag,
             uint defaultParameterSetFlag,
@@ -334,6 +337,9 @@ namespace System.Management.Automation
         IList<MergedCompiledCommandParameter> IDefaultValueManagerContext.UnboundParameters => UnboundParameters;
 
         Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.BoundArguments => BoundArguments;
+
+        void IDefaultValueManagerContext.ReturnPipelineCpi(CommandParameterInternal cpi)
+            => State.ReturnPipelineCpi(cpi);
 
         Dictionary<string, CommandParameterInternal> IDefaultValueManagerContext.DefaultParameterValues
             => State.DefaultParameterValues;
@@ -506,7 +512,7 @@ namespace System.Management.Automation
                 _commandMetadata.Name))
             {
                 // Bind the actual arguments
-                UnboundArguments = BindNamedParameters(ParameterSetResolver.CurrentParameterSetFlag, this.UnboundArguments);
+                BindNamedParameters(ParameterSetResolver.CurrentParameterSetFlag, this.UnboundArguments);
             }
 
             ParameterBindingException? reportedBindingException;
@@ -517,12 +523,11 @@ namespace System.Management.Automation
                 _commandMetadata.Name))
             {
                 // Now that we know the parameter set, bind the positional parameters
-                UnboundArguments =
-                    BindPositionalParameters(
-                        UnboundArguments,
-                        ParameterSetResolver.CurrentParameterSetFlag,
-                        cmdletMetadata.DefaultParameterSetFlag,
-                        out currentBindingException);
+                BindPositionalParameters(
+                    UnboundArguments,
+                    ParameterSetResolver.CurrentParameterSetFlag,
+                    cmdletMetadata.DefaultParameterSetFlag,
+                    out currentBindingException);
 
                 reportedBindingException = currentBindingException;
             }
@@ -825,7 +830,7 @@ namespace System.Management.Automation
                         ParameterSetResolver.NarrowByParameterSetFlags(parameter.Parameter.ParameterSetFlags);
                     }
 
-                    UnboundParameters.Remove(parameter);
+                    BindingState.SwapRemove(UnboundParameters, parameter);
 
                     BoundParameters[parameter.Parameter.Name] = parameter;
                     BoundArguments[parameter.Parameter.Name] = argument;
@@ -981,7 +986,7 @@ namespace System.Management.Automation
                     ParameterSetResolver.NarrowByParameterSetFlags(parameter.Parameter.ParameterSetFlags);
                 }
 
-                UnboundParameters.Remove(parameter);
+                BindingState.SwapRemove(UnboundParameters, parameter);
 
                 if (!BoundParameters.ContainsKey(parameter.Parameter.Name))
                 {
@@ -1262,8 +1267,8 @@ namespace System.Management.Automation
 
         #endregion private_members
 
-        protected override void SaveDefaultScriptParameterValue(string name, object value)
-            => _defaultValueManager.SaveScriptParameterValue(name, value);
+        protected override void SaveDefaultScriptParameterValue(string name, string parameterText, object value)
+            => _defaultValueManager.SaveScriptParameterValue(name, parameterText, value);
 
     }
 

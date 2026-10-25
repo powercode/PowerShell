@@ -126,6 +126,44 @@ namespace System.Management.Automation
         /// </summary>
         internal List<WarningRecord>? ObsoleteParameterWarningList { get; set; }
 
+        // ── Pipeline CPI pool ─────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Per-invocation CPI pool for the pipeline binding hot path.
+        /// Sized for typical pipeline parameter counts (1-4); excess CPIs are GC'd normally.
+        /// </summary>
+        private CommandParameterInternal[]? _cpiPool;
+        private int _cpiPoolCount;
+
+        /// <summary>
+        /// Rents a <see cref="CommandParameterInternal"/> from the pool, or allocates a new one.
+        /// </summary>
+        internal CommandParameterInternal RentPipelineCpi()
+        {
+            if (_cpiPoolCount > 0)
+            {
+                var cpi = _cpiPool![--_cpiPoolCount];
+                _cpiPool[_cpiPoolCount] = null!; // don't hold refs
+                return cpi;
+            }
+
+            return new CommandParameterInternal();
+        }
+
+        /// <summary>
+        /// Returns a <see cref="CommandParameterInternal"/> to the pool after resetting its fields.
+        /// CPIs beyond the pool capacity are simply dropped for GC.
+        /// </summary>
+        internal void ReturnPipelineCpi(CommandParameterInternal cpi)
+        {
+            cpi.Reset();
+            _cpiPool ??= new CommandParameterInternal[4];
+            if (_cpiPoolCount < _cpiPool.Length)
+            {
+                _cpiPool[_cpiPoolCount++] = cpi;
+            }
+        }
+
         // ── Debugger display ──────────────────────────────────────────────────────────
 
         private string DebuggerDisplayValue
@@ -188,6 +226,10 @@ namespace System.Management.Automation
             // Obsolete-tracking state (Task 3.4)
             BoundObsoleteParameterNames = null;
             ObsoleteParameterWarningList = null;
+
+            // Pipeline CPI pool — drop all refs so pooled CPIs don't outlive this invocation
+            _cpiPoolCount = 0;
+            _cpiPool = null;
         }
 
         /// <summary>
@@ -212,6 +254,31 @@ namespace System.Management.Automation
             Debug.Assert(UseDefaultParameterBinding, $"[{caller}] UseDefaultParameterBinding not reset to true after Reset");
             Debug.Assert(BoundObsoleteParameterNames == null, $"[{caller}] BoundObsoleteParameterNames not clean after Reset");
             Debug.Assert(ObsoleteParameterWarningList == null, $"[{caller}] ObsoleteParameterWarningList not clean after Reset");
+        }
+
+        // ── O(1) list-removal helpers ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Removes <paramref name="item"/> from <paramref name="list"/> in O(1) by swapping it
+        /// with the last element and removing the tail. Order is NOT preserved.
+        /// </summary>
+        /// <returns><see langword="true"/> if the item was found and removed; otherwise <see langword="false"/>.</returns>
+        internal static bool SwapRemove<T>(IList<T> list, T item)
+        {
+            int index = list.IndexOf(item);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            int lastIndex = list.Count - 1;
+            if (index < lastIndex)
+            {
+                list[index] = list[lastIndex];
+            }
+
+            list.RemoveAt(lastIndex);
+            return true;
         }
     }
 }

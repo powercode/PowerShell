@@ -511,9 +511,6 @@ namespace System.Management.Automation
                 throw PSTraceSource.NewArgumentException(nameof(name));
             }
 
-            Collection<MergedCompiledCommandParameter> matchingParameters =
-                new Collection<MergedCompiledCommandParameter>();
-
             // Skip the leading '-' if present
             if (name.Length > 0 && CharExtensions.IsDash(name[0]))
             {
@@ -533,6 +530,10 @@ namespace System.Management.Automation
                     return exactMatch;
                 }
             }
+
+            // Collection only needed for the prefix-matching slow path.
+            Collection<MergedCompiledCommandParameter> matchingParameters =
+                new Collection<MergedCompiledCommandParameter>();
 
             // First try to match the bindable parameters
 

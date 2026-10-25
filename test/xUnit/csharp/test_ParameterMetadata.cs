@@ -139,6 +139,25 @@ namespace PSTests.Parallel
 
             Assert.Equal("MyNamespace.MyType", param.PSTypeName);
         }
+
+        [Fact]
+        public static void ParameterText_Returns_Cached_DashNameColon()
+        {
+            var rdp = new RuntimeDefinedParameter("MyParam", typeof(string), new Collection<Attribute>());
+            var param = new CompiledCommandParameter(rdp, false);
+
+            Assert.Equal("-MyParam:", param.ParameterText);
+        }
+
+        [Fact]
+        public static void ParameterText_Matches_Name_Pattern()
+        {
+            var rdp = new RuntimeDefinedParameter("ComputerName", typeof(string), new Collection<Attribute>());
+            var param = new CompiledCommandParameter(rdp, false);
+
+            Assert.Equal("-ComputerName:", param.ParameterText);
+            Assert.Same(param.ParameterText, param.ParameterText); // Verify it's the same instance (cached)
+        }
     }
 
     // -----------------------------------------------------------------------
