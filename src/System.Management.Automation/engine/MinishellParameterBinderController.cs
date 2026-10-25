@@ -8,6 +8,7 @@ using System.IO;
 using System.Management.Automation.Language;
 using System.Xml;
 
+using System.Diagnostics;
 using Dbg = System.Management.Automation.Diagnostics;
 
 namespace System.Management.Automation
@@ -16,6 +17,7 @@ namespace System.Management.Automation
     /// This is the interface between the NativeCommandProcessor and the
     /// parameter binders required to bind parameters to a minishell.
     /// </summary>
+    [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal class MinishellParameterBinderController : NativeCommandParameterBinderController
     {
         #region ctor
@@ -51,6 +53,15 @@ namespace System.Management.Automation
         /// IF true, child minishell is invoked with no-window.
         /// </summary>
         internal bool NonInteractive { get; private set; }
+
+        private string DebuggerDisplayValue
+        {
+            get
+            {
+                string commandName = InvocationInfo?.MyCommand?.Name ?? "(unknown)";
+                return $"MinishellBinder: {commandName}, In={InputFormat}, Out={OutputFormat}";
+            }
+        }
 
         /// <summary>
         /// Binds the specified parameters to the native command.

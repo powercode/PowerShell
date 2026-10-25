@@ -15,7 +15,7 @@ namespace System.Management.Automation
     /// its derived classes control the interaction between the command processor
     /// and the parameter binder(s). It holds the state of the arguments and parameters.
     /// </summary>
-    [DebuggerDisplay("InvocationInfo = {InvocationInfo}")]
+    [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal abstract class ParameterBinderController
     {
         #region ctor
@@ -42,6 +42,7 @@ namespace System.Management.Automation
             this.DefaultParameterBinder = parameterBinder;
             Context = context;
             InvocationInfo = invocationInfo;
+            ParameterSetResolver = System.Management.Automation.ParameterSetResolver.CreateDefault();
         }
 
         #endregion ctor
@@ -90,6 +91,8 @@ namespace System.Management.Automation
             get { return this.DefaultParameterBinder.CommandLineParameters; }
         }
 
+        internal ParameterSetResolver ParameterSetResolver { get; set; }
+
         /// <summary>
         /// Set true if the default parameter binding is in use.
         /// </summary>
@@ -113,6 +116,18 @@ namespace System.Management.Automation
         internal void ClearUnboundArguments()
         {
             UnboundArguments.Clear();
+        }
+
+        private string DebuggerDisplayValue
+        {
+            get
+            {
+                string commandName = InvocationInfo?.MyCommand?.Name ?? "(unknown)";
+                int bound = BoundParameters?.Count ?? 0;
+                int unbound = UnboundParameters?.Count ?? 0;
+                int unboundArgs = UnboundArguments?.Count ?? 0;
+                return $"BinderController: {commandName}, Bound={bound}, Unbound={unbound}, Args={unboundArgs}";
+            }
         }
 
         /// <summary>
@@ -440,7 +455,7 @@ namespace System.Management.Automation
                 }
 
                 flags &= ~ParameterBindingFlags.DelayBindScriptBlock;
-                result = DispatchBindToSubBinder(_currentParameterSetFlag, argument, matchingParameter, flags);
+                result = DispatchBindToSubBinder(ParameterSetResolver.CurrentParameterSetFlag, argument, matchingParameter, flags);
             }
 
             return result;
@@ -693,7 +708,7 @@ namespace System.Management.Automation
                 try
                 {
                     positionalParameterDictionary =
-                        EvaluateUnboundPositionalParameters(UnboundParameters, _currentParameterSetFlag);
+                        EvaluateUnboundPositionalParameters(UnboundParameters, ParameterSetResolver.CurrentParameterSetFlag);
                 }
                 catch (InvalidOperationException)
                 {
@@ -803,9 +818,9 @@ namespace System.Management.Automation
                         else
                         {
                             // Update the parameter sets if necessary
-                            if (validParameterSets != _currentParameterSetFlag)
+                            if (validParameterSets != ParameterSetResolver.CurrentParameterSetFlag)
                             {
-                                validParameterSets = _currentParameterSetFlag;
+                                validParameterSets = ParameterSetResolver.CurrentParameterSetFlag;
                                 UpdatePositionalDictionary(positionalParameterDictionary, validParameterSets);
                             }
                         }
@@ -1269,9 +1284,6 @@ namespace System.Management.Automation
                 }
             }
         }
-
-        internal uint _currentParameterSetFlag = uint.MaxValue;
-        internal uint _prePipelineProcessingParameterSetFlags = uint.MaxValue;
 
         protected IScriptExtent GetErrorExtent(CommandParameterInternal cpi)
         {

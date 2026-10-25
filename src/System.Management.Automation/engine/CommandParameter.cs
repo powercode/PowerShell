@@ -9,7 +9,7 @@ namespace System.Management.Automation
     /// <summary>
     /// Represents a parameter to the Command.
     /// </summary>
-    [DebuggerDisplay("{ParameterName}")]
+    [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal sealed class CommandParameterInternal
     {
         private sealed class Parameter
@@ -140,6 +140,31 @@ namespace System.Management.Automation
             {
                 var argExtent = ArgumentExtent;
                 return argExtent != PositionUtilities.EmptyExtent ? argExtent : ParameterExtent;
+            }
+        }
+
+        private string DebuggerDisplayValue
+        {
+            get
+            {
+                if (ParameterNameSpecified && ArgumentSpecified)
+                {
+                    string val = ArgumentValue?.ToString() ?? "null";
+                    if (val.Length > 50) val = val[..50] + "...";
+                    return $"-{_parameter.parameterName}: {val}";
+                }
+
+                if (ParameterNameSpecified)
+                    return $"-{_parameter.parameterName} (no arg)";
+
+                if (ArgumentSpecified)
+                {
+                    string val = ArgumentValue?.ToString() ?? "null";
+                    if (val.Length > 50) val = val[..50] + "...";
+                    return $"(positional) {val}";
+                }
+
+                return "(empty)";
             }
         }
 

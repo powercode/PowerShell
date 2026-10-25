@@ -14,6 +14,7 @@ namespace PSTests.Parallel
     // -----------------------------------------------------------------------
     // ParameterCollectionTypeInformation tests
     // -----------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class ParameterCollectionTypeInformationTests
     {
         [Fact]
@@ -72,6 +73,7 @@ namespace PSTests.Parallel
     // -----------------------------------------------------------------------
     // CompiledCommandParameter tests (constructed via RuntimeDefinedParameter)
     // -----------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class CompiledCommandParameterTests
     {
         [Fact]
@@ -142,6 +144,7 @@ namespace PSTests.Parallel
     // -----------------------------------------------------------------------
     // MergedCommandParameterMetadata tests
     // -----------------------------------------------------------------------
+    [Trait("Category", "ParameterBinding")]
     public static class MergedCommandParameterMetadataTests
     {
         /// <summary>

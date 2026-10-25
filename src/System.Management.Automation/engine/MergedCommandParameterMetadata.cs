@@ -3,12 +3,14 @@
 
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Management.Automation.Language;
 using System.Text;
 
 namespace System.Management.Automation
 {
+    [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal class MergedCommandParameterMetadata
     {
         /// <summary>
@@ -656,6 +658,16 @@ namespace System.Management.Automation
         /// </summary>
         internal IDictionary<string, MergedCompiledCommandParameter> BindableParameters { get { return _bindableParameters; } }
 
+        private string DebuggerDisplayValue
+        {
+            get
+            {
+                int paramCount = _bindableParameters?.Count ?? 0;
+                int aliasCount = _aliasedParameters?.Count ?? 0;
+                return $"MergedMetadata: Params={paramCount}, Aliases={aliasCount}, Sets={ParameterSetCount}";
+            }
+        }
+
         private IDictionary<string, MergedCompiledCommandParameter> _bindableParameters =
             new Dictionary<string, MergedCompiledCommandParameter>(StringComparer.OrdinalIgnoreCase);
 
@@ -686,6 +698,7 @@ namespace System.Management.Automation
     /// Makes an association between a CompiledCommandParameter and the type
     /// of the parameter binder used to bind the parameter.
     /// </summary>
+    [DebuggerDisplay("{Parameter.Name,nq} ({BinderAssociation})")]
     internal class MergedCompiledCommandParameter
     {
         /// <summary>

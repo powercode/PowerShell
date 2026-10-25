@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 
 namespace System.Management.Automation
 {
@@ -9,6 +10,7 @@ namespace System.Management.Automation
     /// This is the interface between the NativeCommandProcessor and the
     /// parameter binders required to bind parameters to a native command.
     /// </summary>
+    [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal class NativeCommandParameterBinderController : ParameterBinderController
     {
         #region ctor
@@ -26,6 +28,15 @@ namespace System.Management.Automation
         }
 
         #endregion ctor
+
+        private string DebuggerDisplayValue
+        {
+            get
+            {
+                string commandName = InvocationInfo?.MyCommand?.Name ?? "(unknown)";
+                return $"NativeBinder: {commandName}";
+            }
+        }
 
         /// <summary>
         /// Gets the command arguments in string form.

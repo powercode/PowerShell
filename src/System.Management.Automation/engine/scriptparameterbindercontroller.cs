@@ -3,6 +3,7 @@
 
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Management.Automation.Internal;
 
 namespace System.Management.Automation
@@ -11,6 +12,7 @@ namespace System.Management.Automation
     /// This is the interface between the ScriptCommandProcessor and the
     /// parameter binders required to bind parameters to a shell function.
     /// </summary>
+    [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
     internal class ScriptParameterBinderController : ParameterBinderController
     {
         #region ctor
@@ -64,6 +66,16 @@ namespace System.Management.Automation
         /// Holds the set of parameters that were not bound to any argument (i.e $args)
         /// </summary>
         internal List<object> DollarArgs { get; }
+
+        private string DebuggerDisplayValue
+        {
+            get
+            {
+                string commandName = InvocationInfo?.MyCommand?.Name ?? "(unknown)";
+                int argsCount = DollarArgs?.Count ?? 0;
+                return $"ScriptBinder: {commandName}, $args.Count={argsCount}";
+            }
+        }
 
         /// <summary>
         /// Binds the command line parameters for shell functions/filters/scripts/scriptblocks.

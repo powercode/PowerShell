@@ -1,8 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Diagnostics;
+
 namespace System.Management.Automation
 {
+    [DebuggerDisplay("Mandatory={IsMandatory}, Pos={Position}, Pipeline={valueFromPipeline}, ByPropName={valueFromPipelineByPropertyName}")]
     internal class ParameterSetSpecificMetadata
     {
         #region ctor
