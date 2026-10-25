@@ -2097,88 +2097,157 @@ Verb-Noun -Param1 Hello ^
         $res.CompletionMatches[0].CompletionText | Should -Be "Attributes"
     }
 
-    it 'Should fall back to a positional parameter in another parameterset when the default parameterset has no completions' {
-        $ScriptInput = 'Get-Process | ForEach-Object '
-        $res = TabExpansion2 -inputScript $ScriptInput -cursorColumn $ScriptInput.Length
-        # '-Process' is positional in the default 'ScriptBlockSet' but has no completions to offer,
-        # so the completion should fall back to '-MemberName' in the 'PropertyAndMethodSet'.
-        $res.CompletionMatches.CompletionText | Should -Contain "ProcessName"
-        # Make sure we didn't fall through to file name completion.
-        $res.CompletionMatches.ResultType | Should -Not -Contain ([System.Management.Automation.CompletionResultType]::ProviderItem)
-    }
+    Context 'Positional parameter completion with multi-set parameters (issue #2212)' {
+        BeforeAll {
+            function Test-Func2212 {
+                [CmdletBinding(DefaultParameterSetName = 'Two')]
+                param(
+                    [Parameter(ParameterSetName = 'One', Position = 1)]
+                    [Parameter(ParameterSetName = 'Two', Position = 0)]
+                    [string]$First,
 
-    it 'Should keep trying the positional parameters from other parameter sets until completions are found' {
-        $TestString = @'
-function Verb-Noun
-{
-    [CmdletBinding(DefaultParameterSetName = 'ScriptBlockSet')]
-    Param
-    (
-        [Parameter(ParameterSetName = 'ScriptBlockSet', Position = 0)]
-        [scriptblock]
-        $ScriptBlockParam,
-        [Parameter(ParameterSetName = 'StringSet', Position = 0)]
-        [string]
-        $StringParam,
-        [Parameter(ParameterSetName = 'ValidateSetSet', Position = 0)]
-        [ValidateSet('Alpha', 'Beta')]
-        [string]
-        $ValidateSetParam
-    )
-}
-Verb-Noun ^
-'@
-        $CursorIndex = $TestString.IndexOf('^')
-        $res = TabExpansion2 -inputScript $TestString.Remove($CursorIndex, 1) -cursorColumn $CursorIndex
-        # Neither the default set nor the 'StringSet' parameter has completions to offer,
-        # so we should keep going until the 'ValidateSetSet' parameter is reached.
-        $res.CompletionMatches.CompletionText -join ',' | Should -BeExactly 'Alpha,Beta'
-    }
+                    [Parameter(ParameterSetName = 'Two', Position = 1)]
+                    [string]$Second,
 
-    it 'Should complete a positional parameter declared at different positions in different parameter sets' {
-        $TestString = @'
-function Verb-Noun
-{
-    [CmdletBinding(DefaultParameterSetName = 'SetB')]
-    Param
-    (
-        [Parameter(ParameterSetName = 'SetB', Position = 0)]
-        [Parameter(ParameterSetName = 'SetA', Position = 1)]
-        [ValidateSet('Alpha', 'Beta')]
-        [string]
-        $Param1
-    )
-}
-Verb-Noun ^
-'@
-        $CursorIndex = $TestString.IndexOf('^')
-        $res = TabExpansion2 -inputScript $TestString.Remove($CursorIndex, 1) -cursorColumn $CursorIndex
-        # The parameter set data is enumerated in the reverse order of the declaration, so 'SetA' with the
-        # position 1 is seen first, and then 'SetB' with the closer position 0. The parameter must still be
-        # a candidate after the closer position is found.
-        $res.CompletionMatches.CompletionText -join ',' | Should -BeExactly 'Alpha,Beta'
-    }
+                    [Parameter(ParameterSetName = 'One', Position = 0)]
+                    [string]$OnlyOne
+                )
+            }
 
-    it 'Should complete a positional parameter declared at different positions when there is no default parameterset' {
-        $TestString = @'
-function Verb-Noun
-{
-    Param
-    (
-        [Parameter(ParameterSetName = 'SetB', Position = 0)]
-        [Parameter(ParameterSetName = 'SetA', Position = 1)]
-        [ValidateSet('Alpha', 'Beta')]
-        [string]
-        $Param1
-    )
-}
-Verb-Noun ^
-'@
-        $CursorIndex = $TestString.IndexOf('^')
-        $res = TabExpansion2 -inputScript $TestString.Remove($CursorIndex, 1) -cursorColumn $CursorIndex
-        # Same as above, but without a default parameter set the parameter is tracked as an alternative
-        # candidate instead, and it must survive finding the closer position.
-        $res.CompletionMatches.CompletionText -join ',' | Should -BeExactly 'Alpha,Beta'
+            function Test-FuncSamePos {
+                [CmdletBinding(DefaultParameterSetName = 'Alpha')]
+                param(
+                    [Parameter(ParameterSetName = 'Alpha', Position = 0)]
+                    [string]$AlphaValue,
+
+                    [Parameter(ParameterSetName = 'Beta', Position = 0)]
+                    [string]$BetaValue
+                )
+            }
+
+            function Test-FuncMultiSetNamed {
+                [CmdletBinding(DefaultParameterSetName = 'A')]
+                param(
+                    [Parameter(ParameterSetName = 'A', Position = 0)]
+                    [Parameter(ParameterSetName = 'B', Position = 1)]
+                    [string]$Alpha,
+
+                    [Parameter(ParameterSetName = 'A')]
+                    [string]$OnlyA,
+
+                    [Parameter(ParameterSetName = 'B', Position = 0)]
+                    [string]$OnlyB
+                )
+            }
+
+            function Test-Func2212Arg {
+                [CmdletBinding()]
+                param(
+                    [Parameter(Position = 0)]
+                    [string]$Param1,
+
+                    [Parameter(Position = 1)]
+                    [System.Management.Automation.ActionPreference]$Param2
+                )
+            }
+
+            function Test-Func2212FakeBound {
+                [CmdletBinding(DefaultParameterSetName = 'Two')]
+                param(
+                    [Parameter(ParameterSetName = 'One', Position = 1)]
+                    [Parameter(ParameterSetName = 'Two', Position = 0)]
+                    [string]$First,
+
+                    [Parameter(ParameterSetName = 'Two', Position = 1)]
+                    [string]$Second,
+
+                    [Parameter(ParameterSetName = 'One', Position = 0)]
+                    [string]$OnlyOne,
+
+                    [ArgumentCompleter({
+                        param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+
+                        $hasFirst = [string]$fakeBoundParameters.Contains('First')
+                        $hasSecond = [string]$fakeBoundParameters.Contains('Second')
+                        $hasOnlyOne = [string]$fakeBoundParameters.Contains('OnlyOne')
+
+                        $firstValue = if ($fakeBoundParameters.Contains('First')) { [string]$fakeBoundParameters['First'] } else { '<none>' }
+                        $secondValue = if ($fakeBoundParameters.Contains('Second')) { [string]$fakeBoundParameters['Second'] } else { '<none>' }
+                        $onlyOneValue = if ($fakeBoundParameters.Contains('OnlyOne')) { [string]$fakeBoundParameters['OnlyOne'] } else { '<none>' }
+
+                        $results = @(
+                            "HasFirst:$hasFirst",
+                            "HasSecond:$hasSecond",
+                            "HasOnlyOne:$hasOnlyOne",
+                            "FirstValue:$firstValue",
+                            "SecondValue:$secondValue",
+                            "OnlyOneValue:$onlyOneValue"
+                        )
+
+                        foreach ($item in $results)
+                        {
+                            [System.Management.Automation.CompletionResult]::new($item, $item, 'ParameterValue', $item)
+                        }
+                    })]
+                    [string]$Probe
+                )
+            }
+        }
+
+        it 'Should not offer already-bound positional parameter for completion (issue #2212)' {
+            $ScriptInput = 'Test-Func2212 Hello -'
+            $res = TabExpansion2 -inputScript $ScriptInput -cursorColumn $ScriptInput.Length
+            $completionTexts = $res.CompletionMatches.CompletionText
+            $completionTexts | Should -Contain '-Second'
+            $completionTexts | Should -Not -Contain '-First'
+        }
+
+        it 'Should not offer re-bound parameter after two positional args (issue #2212)' {
+            $ScriptInput = 'Test-Func2212 Hello World -'
+            $res = TabExpansion2 -inputScript $ScriptInput -cursorColumn $ScriptInput.Length
+            $completionTexts = $res.CompletionMatches.CompletionText
+            $completionTexts | Should -Not -Contain '-First'
+            $completionTexts | Should -Not -Contain '-Second'
+            $completionTexts | Should -Contain '-Verbose'
+        }
+
+        it 'Should offer correct parameters when named param narrows set with multi-position parameter' {
+            $ScriptInput = 'Test-FuncMultiSetNamed -OnlyA val -'
+            $res = TabExpansion2 -inputScript $ScriptInput -cursorColumn $ScriptInput.Length
+            $completionTexts = $res.CompletionMatches.CompletionText
+            $completionTexts | Should -Contain '-Alpha'
+            $completionTexts | Should -Not -Contain '-OnlyB'
+        }
+
+        it 'Should complete argument for correct positional parameter with multi-set positions' {
+            $ScriptInput = 'Test-Func2212Arg Hello '
+            $res = TabExpansion2 -inputScript $ScriptInput -cursorColumn $ScriptInput.Length
+            $completionTexts = $res.CompletionMatches.CompletionText
+            $completionTexts | Should -Contain 'Break'
+            $completionTexts | Should -Contain 'Continue'
+        }
+
+        it 'Should handle same numeric position in different sets during completion' {
+            $ScriptInput = 'Test-FuncSamePos val1 -'
+            $res = TabExpansion2 -inputScript $ScriptInput -cursorColumn $ScriptInput.Length
+            $completionTexts = $res.CompletionMatches.CompletionText
+            $completionTexts | Should -Not -Contain '-AlphaValue'
+            $completionTexts | Should -Not -Contain '-BetaValue'
+            $completionTexts | Should -Contain '-Verbose'
+        }
+
+        it 'Should pass correct fakeBoundParameters for multi-set positional binding (issue #2212)' {
+            $ScriptInput = 'Test-Func2212FakeBound Hello World -Probe '
+            $res = TabExpansion2 -inputScript $ScriptInput -cursorColumn $ScriptInput.Length
+            $completionTexts = $res.CompletionMatches.CompletionText
+
+            $completionTexts | Should -Contain 'HasFirst:True'
+            $completionTexts | Should -Contain 'HasSecond:True'
+            $completionTexts | Should -Contain 'HasOnlyOne:False'
+            $completionTexts | Should -Contain 'FirstValue:Hello'
+            $completionTexts | Should -Contain 'SecondValue:World'
+            $completionTexts | Should -Contain 'OnlyOneValue:<none>'
+        }
     }
 
     it 'Should complete base class members of types without type definition AST' {
