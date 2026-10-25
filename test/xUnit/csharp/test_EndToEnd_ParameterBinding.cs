@@ -12,6 +12,7 @@ namespace PSTests.Parallel
     // features: multi-set, positional, reparsing, coercion, and validation.
     // -----------------------------------------------------------------------
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class EndToEnd_MultiSetPositionalTests
     {
         // A function with two parameter sets, overlapping positional parameter.
@@ -74,6 +75,7 @@ namespace PSTests.Parallel
     }
 
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class EndToEnd_CoercionPlusValidationTests
     {
         [Fact]
@@ -158,6 +160,7 @@ namespace PSTests.Parallel
     }
 
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class EndToEnd_PositionalPlusSwitchTests
     {
         [Fact]
@@ -229,6 +232,7 @@ namespace PSTests.Parallel
     }
 
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class EndToEnd_PipelineBindingTests
     {
         [Fact]
@@ -281,6 +285,7 @@ namespace PSTests.Parallel
     // behavior across all pipeline shapes.
     // -----------------------------------------------------------------------
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class EndToEnd_PipelineCachingTests
     {
         private const string VfpFunctionScript = @"

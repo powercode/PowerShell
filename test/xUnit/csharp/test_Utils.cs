@@ -36,7 +36,16 @@ namespace PSTests.Parallel
         [InlineData(long.MaxValue, "8.000000000 EB")]
         public static void DisplayHumanReadableFileSize(long bytes, string expected)
         {
-            Assert.Equal(expected, Utils.DisplayHumanReadableFileSize(bytes));
+            var originalCulture = Thread.CurrentThread.CurrentCulture;
+            try
+            {
+                Thread.CurrentThread.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+                Assert.Equal(expected, Utils.DisplayHumanReadableFileSize(bytes));
+            }
+            finally
+            {
+                Thread.CurrentThread.CurrentCulture = originalCulture;
+            }
         }
 
         [Fact]

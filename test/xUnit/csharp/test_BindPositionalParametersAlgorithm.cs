@@ -19,6 +19,7 @@ namespace PSTests.Parallel
     /// All tests use <see cref="PowerShell.Create"/>.
     /// </summary>
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class BindPositionalParametersAlgorithmTests
     {
         [Fact]

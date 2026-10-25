@@ -17,6 +17,7 @@ namespace PSTests.Parallel
     /// <see cref="PowerShell.Create"/> and verifying exit-code or output behaviour.
     /// </summary>
     [Trait("Category", "ParameterBinding")]
+    [Trait("Category", "Integration")]
     public class NativeCommandParameterBindingTests
     {
         // Discovers the in-PATH pwsh/pwsh.exe to use as a native echo host.

@@ -20,7 +20,7 @@ namespace System.Management.Automation
     /// parameter binders required to bind parameters to a cmdlet.
     /// </summary>
     [DebuggerDisplay("{DebuggerDisplayValue,nq}")]
-    internal class CmdletParameterBinderController : ParameterBinderController, IBindingStateContext, IBindingOperationsContext
+    internal sealed class CmdletParameterBinderController : ParameterBinderController, IBindingStateContext, IBindingOperationsContext
     {
         #region tracer
 
