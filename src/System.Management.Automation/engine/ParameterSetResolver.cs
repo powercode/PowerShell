@@ -355,6 +355,36 @@ internal sealed class ParameterSetResolver
         return false;
     }
 
+    /// <summary>
+    /// Checks for missing mandatory parameters after pipeline binding without building prompting data.
+    /// </summary>
+    internal bool HasUnboundMandatoryParameters()
+    {
+        uint currentParameterSetFlag = CurrentParameterSetFlag;
+        var unboundParameters = _stateContext.UnboundParameters;
+        for (int i = 0; i < unboundParameters.Count; i++)
+        {
+            var parameter = unboundParameters[i].Parameter;
+            if (!parameter.IsMandatoryInSomeParameterSet ||
+                (!parameter.IsInAllSets && (parameter.ParameterSetFlags & currentParameterSetFlag) == 0))
+            {
+                continue;
+            }
+
+            foreach (var entry in parameter.ParameterSetData)
+            {
+                var setData = entry.Value;
+                if (setData.IsMandatory &&
+                    (setData.IsInAllSets || (setData.ParameterSetFlag & currentParameterSetFlag) != 0))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     internal List<MergedCompiledCommandParameter> GetMissingMandatoryParameters(int validParameterSetCount, bool isPipelineInputExpected)
     {
         List<MergedCompiledCommandParameter> result = new();

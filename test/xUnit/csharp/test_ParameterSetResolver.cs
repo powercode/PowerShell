@@ -472,6 +472,149 @@ namespace PSTests.Parallel
     [Trait("Category", "ParameterBinding")]
     public static class ParameterSetResolverMandatoryAnalysisTests
     {
+        [Theory]
+        [InlineData(0u)]
+        [InlineData(1u)]
+        [InlineData(2u)]
+        [InlineData(3u)]
+        [InlineData(0x80000000u)]
+        [InlineData(uint.MaxValue)]
+        public static void HasUnboundMandatoryParameters_MatchesLegacyForSetSpecificMetadata(uint currentSet)
+        {
+            var mixed = ParameterSetResolverTestFactory.MakeParam("Mixed", setName: "SetA");
+            mixed.Attributes.Add(new ParameterAttribute { ParameterSetName = "SetB", Mandatory = true });
+            var allSetMandatory = ParameterSetResolverTestFactory.MakeParam("AllSetMandatory", mandatory: true);
+            allSetMandatory.Attributes.Add(new ParameterAttribute { ParameterSetName = "SetA" });
+            var allSetOptional = ParameterSetResolverTestFactory.MakeParam("AllSetOptional");
+            allSetOptional.Attributes.Add(new ParameterAttribute { ParameterSetName = "SetB", Mandatory = true });
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(
+                mixed,
+                allSetMandatory,
+                allSetOptional,
+                ParameterSetResolverTestFactory.MakeParam("Optional", setName: "SetA"),
+                ParameterSetResolverTestFactory.MakeParam("ByValue", setName: "SetA", mandatory: true, valueFromPipeline: true),
+                ParameterSetResolverTestFactory.MakeParam("ByProperty", setName: "SetB", mandatory: true, valueFromPipelineByPropertyName: true));
+            var (resolver, context) = ParameterSetResolverTestFactory.CreateResolver(metadata);
+            resolver.CurrentParameterSetFlag = currentSet;
+
+            Assert.False(resolver.HasUnboundMandatoryParameters());
+            foreach (var parameter in metadata.BindableParameters.Values)
+            {
+                context.UnboundParameters.Clear();
+                context.UnboundParameters.Add(parameter);
+                bool expected = resolver.GetMissingMandatoryParameters(
+                    ParameterSetResolver.ValidParameterSetCount(currentSet),
+                    isPipelineInputExpected: false).Count > 0;
+
+                Assert.Equal(expected, resolver.HasUnboundMandatoryParameters());
+            }
+
+            context.UnboundParameters = new List<MergedCompiledCommandParameter>(metadata.BindableParameters.Values);
+            Assert.Equal(
+                resolver.GetMissingMandatoryParameters(
+                    ParameterSetResolver.ValidParameterSetCount(currentSet),
+                    isPipelineInputExpected: false).Count > 0,
+                resolver.HasUnboundMandatoryParameters());
+        }
+
+        [Fact]
+        public static void HasUnboundMandatoryParameters_HandlesHighestParameterSetBit()
+        {
+            var parameters = new RuntimeDefinedParameter[32];
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                parameters[i] = ParameterSetResolverTestFactory.MakeParam(
+                    $"Parameter{i}", setName: $"Set{i}", mandatory: true);
+            }
+
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(parameters);
+            var (resolver, _) = ParameterSetResolverTestFactory.CreateResolver(
+                metadata, unboundParameters: new List<MergedCompiledCommandParameter>(metadata.BindableParameters.Values));
+            resolver.CurrentParameterSetFlag = 0x80000000;
+
+            Assert.True(resolver.HasUnboundMandatoryParameters());
+            Assert.Single(resolver.GetMissingMandatoryParameters(1, isPipelineInputExpected: false));
+        }
+
+        [Fact]
+        public static void HasUnboundMandatoryParameters_ReadsCurrentStateWithoutMutatingIt()
+        {
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(
+                ParameterSetResolverTestFactory.MakeParam("Required", setName: "SetA", mandatory: true),
+                ParameterSetResolverTestFactory.MakeParam("Optional", setName: "SetB"));
+            var (resolver, context) = ParameterSetResolverTestFactory.CreateResolver(metadata);
+            var required = metadata.BindableParameters["Required"];
+            context.UnboundParameters.Add(required);
+            resolver.CurrentParameterSetFlag = metadata.BindableParameters["Optional"].Parameter.ParameterSetFlags;
+            resolver.PrePipelineProcessingParameterSetFlags = uint.MaxValue;
+            resolver.ParameterSetToBePrioritizedInPipelineBinding = resolver.CurrentParameterSetFlag;
+            uint prioritizedSet = resolver.ParameterSetToBePrioritizedInPipelineBinding;
+            var unboundParameters = context.UnboundParameters;
+
+            Assert.False(resolver.HasUnboundMandatoryParameters());
+            resolver.CurrentParameterSetFlag = required.Parameter.ParameterSetFlags;
+            Assert.True(resolver.HasUnboundMandatoryParameters());
+            Assert.Single(context.UnboundParameters);
+            Assert.Same(required, context.UnboundParameters[0]);
+
+            context.UnboundParameters.Clear();
+            context.BoundParameters.Add(required.Parameter.Name, required);
+            Assert.False(resolver.HasUnboundMandatoryParameters());
+            context.BoundParameters.Clear();
+            context.UnboundParameters.Add(required);
+            Assert.True(resolver.HasUnboundMandatoryParameters());
+
+            Assert.Same(unboundParameters, context.UnboundParameters);
+            Assert.Equal(required.Parameter.ParameterSetFlags, resolver.CurrentParameterSetFlag);
+            Assert.Equal(uint.MaxValue, resolver.PrePipelineProcessingParameterSetFlags);
+            Assert.Equal(prioritizedSet, resolver.ParameterSetToBePrioritizedInPipelineBinding);
+            Assert.Empty(context.BoundParameters);
+            Assert.Empty(context.BoundArguments);
+            Assert.Null(context.LastSetName);
+            Assert.Null(context.LastException);
+        }
+
+        [Theory]
+        [InlineData(0, false)]
+        [InlineData(31, false)]
+        [InlineData(31, true)]
+        public static void HasUnboundMandatoryParameters_DoesNotAllocate(int irrelevantParameterCount, bool missing)
+        {
+            var parameters = new RuntimeDefinedParameter[irrelevantParameterCount + 1];
+            parameters[0] = ParameterSetResolverTestFactory.MakeParam("Active", setName: "Active", mandatory: missing);
+            for (int i = 1; i < parameters.Length; i++)
+            {
+                parameters[i] = ParameterSetResolverTestFactory.MakeParam(
+                    $"Other{i}", setName: "Other", mandatory: true);
+            }
+
+            var metadata = ParameterSetResolverTestFactory.BuildMetadata(parameters);
+            var (resolver, _) = ParameterSetResolverTestFactory.CreateResolver(
+                metadata, unboundParameters: new List<MergedCompiledCommandParameter>(metadata.BindableParameters.Values));
+            resolver.CurrentParameterSetFlag = metadata.BindableParameters["Active"].Parameter.ParameterSetFlags;
+
+            const int iterations = 10_000;
+            for (int i = 0; i < iterations; i++)
+            {
+                resolver.HasUnboundMandatoryParameters();
+            }
+
+            int missingCount = 0;
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < iterations; i++)
+            {
+                if (resolver.HasUnboundMandatoryParameters())
+                {
+                    missingCount++;
+                }
+            }
+
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.Equal(0, allocated);
+            Assert.Equal(missing ? iterations : 0, missingCount);
+        }
+
         [Fact]
         public static void NewParameterSetPromptingData_MandatoryNonPipeline_AddsNonPipelineBucket()
         {

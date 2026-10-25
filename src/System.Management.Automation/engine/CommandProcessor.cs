@@ -556,6 +556,11 @@ namespace System.Management.Automation
                     "MANDATORY PARAMETER CHECK on cmdlet [{0}]",
                     this.CommandInfo.Name))
                 {
+                    if (!this.CmdletParameterBinderController.HasUnboundMandatoryParameters())
+                    {
+                        return true;
+                    }
+
                     // Check for unbound mandatory parameters but don't prompt
                     mandatoryParametersSpecified =
                         this.CmdletParameterBinderController.HandleUnboundMandatoryParameters(out missingMandatoryParameters);

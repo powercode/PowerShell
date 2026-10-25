@@ -911,6 +911,12 @@ namespace System.Management.Automation
             => _mandatoryParameterPrompter.HandleUnboundMandatoryParameters(out missingMandatoryParameters);
 
         /// <summary>
+        /// Checks whether post-pipeline mandatory parameter diagnostics are needed.
+        /// </summary>
+        internal bool HasUnboundMandatoryParameters()
+            => ParameterSetResolver.HasUnboundMandatoryParameters();
+
+        /// <summary>
         /// Binds the specified object or its properties to parameters
         /// that accept pipeline input.
         /// </summary>
