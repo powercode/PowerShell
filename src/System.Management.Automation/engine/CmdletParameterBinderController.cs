@@ -11,6 +11,7 @@ using System.Management.Automation.Host;
 using System.Management.Automation.Internal;
 using System.Management.Automation.Language;
 using System.Management.Automation.Runspaces;
+using System.Numerics;
 using System.Text;
 
 namespace System.Management.Automation
@@ -90,6 +91,19 @@ namespace System.Management.Automation
         /// <summary>
         /// Binds the specified command-line parameters to the target.
         /// </summary>
+        /// <remarks>
+        /// The command-line binding orchestration executes these high-level phases in order:
+        ///
+        /// 1. Run non-validating command-line binding (<see cref="BindCommandLineParametersNoValidation(Collection{CommandParameterInternal})"/>).
+        /// 2. Determine whether pipeline input is expected for this invocation.
+        /// 3. Validate and narrow candidate parameter sets for strict execution mode.
+        /// 4. Re-apply default parameter binding for mandatory-check scenarios when a single set is selected.
+        /// 5. If pipeline input is expected and multiple sets remain, filter out sets that cannot take pipeline input.
+        /// 6. Handle unbound mandatory parameters (prompt or throw as appropriate for command visibility and mode).
+        /// 7. Bind remaining unbound script parameters for script binder scenarios.
+        /// 8. If no more pipeline input is expected, verify that a single parameter set is selected.
+        /// 9. Persist pre-pipeline parameter set flags for per-input-object pipeline rebinding.
+        /// </remarks>
         /// <param name="arguments">
         /// Parameters to the command.
         /// </param>
@@ -199,6 +213,25 @@ namespace System.Management.Automation
         /// Binds the unbound arguments to parameters but does not
         /// perform mandatory parameter validation or parameter set validation.
         /// </summary>
+        /// <remarks>
+        /// The non-validating binding pipeline executes these phases in order:
+        ///
+        /// 1. Initialize unbound arguments from command-line tokens.
+        /// 2. Parse $PSDefaultParameterValues for this command.
+        /// 3. Re-pair parameter names with argument values (<see cref="ParameterBinderController.ReparseUnboundArguments"/>).
+        /// 4. Bind named parameters with exact name-to-parameter matching.
+        /// 5. Bind positional parameters with the 4-pass algorithm:
+        ///    a. Default parameter set, no type coercion.
+        ///    b. Other parameter sets, no type coercion.
+        ///    c. Default parameter set, with type coercion.
+        ///    d. Other parameter sets, with type coercion.
+        /// 6. Apply $PSDefaultParameterValues after positional binding.
+        /// 7. Validate that at least one parameter set remains resolvable.
+        /// 8. Handle dynamic parameters and re-run matching with expanded metadata.
+        /// 9. Re-apply $PSDefaultParameterValues after dynamic binding.
+        /// 10. Bind ValueFromRemainingArguments parameters.
+        /// 11. Verify all command-line arguments were consumed.
+        /// </remarks>
         internal void BindCommandLineParametersNoValidation(Collection<CommandParameterInternal> arguments)
         {
             var psCompiledScriptCmdlet = this.Command as PSScriptCmdlet;
@@ -1002,49 +1035,7 @@ namespace System.Management.Automation
         /// </returns>
         private bool RestoreParameter(CommandParameterInternal argumentToBind, MergedCompiledCommandParameter parameter)
         {
-            switch (parameter.BinderAssociation)
-            {
-                case ParameterBinderAssociation.DeclaredFormalParameters:
-                    DefaultParameterBinder.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
-                    break;
-
-                case ParameterBinderAssociation.CommonParameters:
-                    CommonParametersBinder.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
-                    break;
-
-                case ParameterBinderAssociation.ShouldProcessParameters:
-                    Diagnostics.Assert(
-                        _commandMetadata.SupportsShouldProcess,
-                        "The metadata for the ShouldProcessParameters should only be available if the command supports ShouldProcess");
-
-                    ShouldProcessParametersBinder.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
-                    break;
-
-                case ParameterBinderAssociation.PagingParameters:
-                    Diagnostics.Assert(
-                        _commandMetadata.SupportsPaging,
-                        "The metadata for the PagingParameters should only be available if the command supports paging");
-
-                    PagingParametersBinder.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
-                    break;
-
-                case ParameterBinderAssociation.TransactionParameters:
-                    Diagnostics.Assert(
-                        _commandMetadata.SupportsTransactions,
-                        "The metadata for the TransactionParameters should only be available if the command supports Transactions");
-
-                    TransactionParametersBinder.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
-                    break;
-
-                case ParameterBinderAssociation.DynamicParameters:
-                    Diagnostics.Assert(
-                        _commandMetadata.ImplementsDynamicParameters,
-                        "The metadata for the dynamic parameters should only be available if the command supports IDynamicParameters");
-
-                    _dynamicParameterBinder?.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
-
-                    break;
-            }
+            GetBinderForParameter(parameter)?.BindParameter(argumentToBind.ParameterName, argumentToBind.ArgumentValue, parameter.Parameter);
 
             return true;
         }
@@ -1742,6 +1733,131 @@ namespace System.Management.Automation
         /// consistent across parameter sets or there is no default parameter set then a
         /// ParameterBindingException is thrown with an errorId of AmbiguousParameterSet.
         /// </summary>
+        /// <remarks>
+        /// Pipeline mandatory-parameter resolution intentionally preserves viable sets for later pipeline
+        /// binding when possible instead of aggressively latching onto a single set.
+        ///
+        /// Scenario 1: Valid sets A and B share a common pipelineable mandatory parameter; B also has an
+        /// additional pipelineable mandatory parameter of a different type. Preserve A so pipeline input
+        /// that matches the common parameter type can still bind without forced coercion through B.
+        ///
+        /// Scenario 2: Same as Scenario 1 but with additional sets C and Default that have no extra
+        /// mandatory parameters. Preserve all non-conflicting sets (including Default) to avoid
+        /// premature resolution to B.
+        ///
+        /// Scenario 3: Valid sets A, B, and C each have different mandatory parameter configurations —
+        /// A has a pipelineable mandatory, B has a nonpipelineable mandatory, and C has only a
+        /// pipelineable non-mandatory. Preserve C when latching onto A would force an incompatible
+        /// binding path for the incoming pipeline object type.
+        ///
+        /// Scenario 4: Same as Scenario 3 but with a Default set that has no mandatory parameters.
+        /// Preserve C and Default so subsequent pipeline binding can choose a compatible set.
+        /// </remarks>
+        /// 
+        /// <example>
+        /// <para><strong>Scenario 1</strong> — Sets: A (common pipelineable mandatory), B (common + extra pipelineable mandatory).</para>
+        /// <code>
+        /// function Get-Cmdlet {
+        ///     [CmdletBinding()]
+        ///     param(
+        ///         [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        ///         [System.DateTime] $Date,
+        ///
+        ///         [Parameter(ParameterSetName="computer")]
+        ///         [Parameter(ParameterSetName="session")]
+        ///         $ComputerName,
+        ///
+        ///         [Parameter(ParameterSetName="session", Mandatory=$true, ValueFromPipeline=$true)]
+        ///         [System.TimeSpan] $TimeSpan
+        ///     )
+        ///     process { Write-Output $PSCmdlet.ParameterSetName }
+        /// }
+        /// # Get-Date | Get-Cmdlet → "computer"
+        /// # If mandatory resolution aggressively latches onto set "session" (B), pipeline binding fails.
+        /// # Preserving set "computer" (A) allows pipeline binding to succeed.
+        /// </code>
+        /// </example>
+        /// 
+        /// <example>
+        /// <para><strong>Scenario 2</strong> — Sets: A, B (same as Scenario 1), plus C and Default with no extra mandatory parameters.</para>
+        /// <code>
+        /// function Get-Cmdlet {
+        ///     [CmdletBinding(DefaultParameterSetName="computer")]
+        ///     param(
+        ///         [Parameter(ParameterSetName="new")]
+        ///         $NewName,
+        ///
+        ///         [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        ///         [System.DateTime] $Date,
+        ///
+        ///         [Parameter(ParameterSetName="computer")]
+        ///         [Parameter(ParameterSetName="session")]
+        ///         $ComputerName,
+        ///
+        ///         [Parameter(ParameterSetName="session", Mandatory=$true, ValueFromPipeline=$true)]
+        ///         [System.TimeSpan] $TimeSpan
+        ///     )
+        ///     process { Write-Output $PSCmdlet.ParameterSetName }
+        /// }
+        /// # Get-Date | Get-Cmdlet → "computer"
+        /// # Aggressively resolving to "session" (B) loses viable sets. Preserving A, C, and Default keeps them available.
+        /// </code>
+        /// </example>
+        /// 
+        /// <example>
+        /// <para><strong>Scenario 3</strong> — Sets: A (pipelineable mandatory), B (nonpipelineable mandatory), C (pipelineable non-mandatory only).</para>
+        /// <code>
+        /// function Get-Cmdlet {
+        ///     [CmdletBinding()]
+        ///     param(
+        ///         [Parameter(ParameterSetName="network", Mandatory=$true, ValueFromPipeline=$true)]
+        ///         [TimeSpan] $network,
+        ///
+        ///         [Parameter(ParameterSetName="computer", ValueFromPipelineByPropertyName=$true)]
+        ///         [string[]] $ComputerName,
+        ///
+        ///         [Parameter(ParameterSetName="computer", Mandatory=$true)]
+        ///         [switch] $DisableComputer,
+        ///
+        ///         [Parameter(ParameterSetName="session", ValueFromPipeline=$true)]
+        ///         [DateTime] $Date
+        ///     )
+        ///     process { Write-Output $PSCmdlet.ParameterSetName }
+        /// }
+        /// # Get-Date | Get-Cmdlet → "session"
+        /// # If mandatory resolution latches onto "network" (A), pipeline binding fails.
+        /// # Preserving set "session" (C) allows pipeline binding to succeed.
+        /// </code>
+        /// </example>
+        /// 
+        /// <example>
+        /// <para><strong>Scenario 4</strong> — Same as Scenario 3 plus a Default set with no mandatory parameters.</para>
+        /// <code>
+        /// function Get-Cmdlet {
+        ///     [CmdletBinding(DefaultParameterSetName="server")]
+        ///     param(
+        ///         [Parameter(ParameterSetName="network", Mandatory=$true, ValueFromPipeline=$true)]
+        ///         [TimeSpan] $network,
+        ///
+        ///         [Parameter(ParameterSetName="computer", ValueFromPipelineByPropertyName=$true)]
+        ///         [string[]] $ComputerName,
+        ///
+        ///         [Parameter(ParameterSetName="computer", Mandatory=$true)]
+        ///         [switch] $DisableComputer,
+        ///
+        ///         [Parameter(ParameterSetName="session")]
+        ///         [Parameter(ParameterSetName="server")]
+        ///         [string] $Param,
+        ///
+        ///         [Parameter(ValueFromPipeline=$true)]
+        ///         [DateTime] $Date
+        ///     )
+        ///     process { Write-Output $PSCmdlet.ParameterSetName }
+        /// }
+        /// # Get-Date | Get-Cmdlet → "server"
+        /// # Aggressively resolving to "network" (A) loses viable sets. Preserving C and Default keeps them available.
+        /// </code>
+        /// </example>
         /// <param name="validParameterSetCount">
         /// The number of valid parameter sets.
         /// </param>
@@ -1752,7 +1868,6 @@ namespace System.Management.Automation
         /// If there are multiple valid parameter sets and the missing mandatory parameters are
         /// not consistent across parameter sets, or there is no default parameter set.
         /// </exception>
-        [SuppressMessage("Microsoft.Maintainability", "CA1505:AvoidUnmaintainableCode", Justification = "Consider Simplifying it.")]
         private Collection<MergedCompiledCommandParameter> GetMissingMandatoryParameters(
             int validParameterSetCount,
             bool isPipelineInputExpected)
@@ -1762,59 +1877,13 @@ namespace System.Management.Automation
             uint defaultParameterSet = _commandMetadata.DefaultParameterSetFlag;
             uint commandMandatorySets = 0;
 
-            Dictionary<uint, ParameterSetPromptingData> promptingData = new Dictionary<uint, ParameterSetPromptingData>();
-
-            bool missingAMandatoryParameter = false;
-            bool missingAMandatoryParameterInAllSet = false;
-
-            // See if any of the unbound parameters are mandatory
-
-            foreach (MergedCompiledCommandParameter parameter in UnboundParameters)
-            {
-                // If a parameter is never mandatory, we can skip lots of work here.
-                if (!parameter.Parameter.IsMandatoryInSomeParameterSet)
-                {
-                    continue;
-                }
-
-                var matchingParameterSetMetadata = parameter.Parameter.GetMatchingParameterSetData(_currentParameterSetFlag);
-
-                uint parameterMandatorySets = 0;
-                bool thisParameterMissing = false;
-
-                foreach (ParameterSetSpecificMetadata parameterSetMetadata in matchingParameterSetMetadata)
-                {
-                    uint newMandatoryParameterSetFlag = NewParameterSetPromptingData(promptingData, parameter, parameterSetMetadata, defaultParameterSet, isPipelineInputExpected);
-
-                    if (newMandatoryParameterSetFlag != 0)
-                    {
-                        missingAMandatoryParameter = true;
-                        thisParameterMissing = true;
-
-                        if (newMandatoryParameterSetFlag != uint.MaxValue)
-                        {
-                            parameterMandatorySets |= (_currentParameterSetFlag & newMandatoryParameterSetFlag);
-                            commandMandatorySets |= (_currentParameterSetFlag & parameterMandatorySets);
-                        }
-                        else
-                        {
-                            missingAMandatoryParameterInAllSet = true;
-                        }
-                    }
-                }
-
-                // We are not expecting pipeline input
-                if (!isPipelineInputExpected)
-                {
-                    // The parameter is mandatory so we need to prompt for it
-                    if (thisParameterMissing)
-                    {
-                        result.Add(parameter);
-                        continue;
-                    }
-                    // The parameter was not mandatory in any parameter set
-                }
-            }
+            Dictionary<uint, ParameterSetPromptingData> promptingData = CollectMandatoryPromptingData(
+                defaultParameterSet,
+                isPipelineInputExpected,
+                result,
+                ref commandMandatorySets,
+                out bool missingAMandatoryParameter,
+                out bool missingAMandatoryParameterInAllSet);
 
             if (missingAMandatoryParameter && isPipelineInputExpected)
             {
@@ -1897,6 +1966,8 @@ namespace System.Management.Automation
                         if (_currentParameterSetFlag == defaultParameterSet)
                             Command.SetParameterSetName(CurrentParameterSetName);
                         else
+                            // Prioritize the default set during pipeline binding to preserve previous behavior
+                            // while still keeping additional viable sets available.
                             _parameterSetToBePrioritizedInPipelineBinding = defaultParameterSet;
                     }
                 }
@@ -1910,486 +1981,378 @@ namespace System.Management.Automation
                 }
                 else if (commandMandatorySetsCount == 1)
                 {
-                    // Since we have only one valid parameter set, add all
-                    foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
-                    {
-                        if ((promptingSetData.ParameterSet & commandMandatorySets) != 0 ||
-                            promptingSetData.IsAllSet)
-                        {
-                            foreach (MergedCompiledCommandParameter mandatoryParameter in promptingSetData.NonpipelineableMandatoryParameters.Keys)
-                            {
-                                result.Add(mandatoryParameter);
-                            }
-                        }
-                    }
+                    // Since we have only one valid parameter set, add all.
+                    CollectNonpipelineableMandatoryParameters(promptingData, commandMandatorySets, result);
                 }
                 else if (_parameterSetToBePrioritizedInPipelineBinding == 0)
                 {
-                    // We have more than one valid parameter set.  Need to figure out which one to
-                    // use.
-                    // First we need to process the default parameter set if it can fill its parameters
-                    // from the pipeline.
-
-                    bool latchOnToDefault = false;
-                    if (defaultParameterSet != 0 && (commandMandatorySets & defaultParameterSet) != 0)
+                    if (!TryLatchToDefaultParameterSet(promptingData, commandMandatorySets, defaultParameterSet, result))
                     {
-                        // Determine if another set could be satisfied by pipeline input - that is, it
-                        // has mandatory pipeline input parameters but no mandatory command-line only parameters.
-                        bool anotherSetTakesPipelineInput = false;
-                        foreach (ParameterSetPromptingData paramPromptingData in promptingData.Values)
-                        {
-                            if (!paramPromptingData.IsAllSet &&
-                                !paramPromptingData.IsDefaultSet &&
-                                paramPromptingData.PipelineableMandatoryParameters.Count > 0 &&
-                                paramPromptingData.NonpipelineableMandatoryParameters.Count == 0)
-                            {
-                                anotherSetTakesPipelineInput = true;
-                                break;
-                            }
-                        }
-
-                        // Determine if another set takes pipeline input by property name
-                        bool anotherSetTakesPipelineInputByPropertyName = false;
-                        foreach (ParameterSetPromptingData paramPromptingData in promptingData.Values)
-                        {
-                            if (!paramPromptingData.IsAllSet &&
-                                !paramPromptingData.IsDefaultSet &&
-                                paramPromptingData.PipelineableMandatoryByPropertyNameParameters.Count > 0)
-                            {
-                                anotherSetTakesPipelineInputByPropertyName = true;
-                                break;
-                            }
-                        }
-
-                        // See if we should pick the default set if it can bind strongly to the incoming objects
-                        ParameterSetPromptingData defaultSetPromptingData;
-                        if (promptingData.TryGetValue(defaultParameterSet, out defaultSetPromptingData))
-                        {
-                            bool defaultSetTakesPipelineInput = defaultSetPromptingData.PipelineableMandatoryParameters.Count > 0;
-                            bool defaultSetTakesPipelineInputByPropertyName = defaultSetPromptingData.PipelineableMandatoryByPropertyNameParameters.Count > 0;
-
-                            if (defaultSetTakesPipelineInputByPropertyName && !anotherSetTakesPipelineInputByPropertyName)
-                            {
-                                latchOnToDefault = true;
-                            }
-                            else if (defaultSetTakesPipelineInput && !anotherSetTakesPipelineInput)
-                            {
-                                latchOnToDefault = true;
-                            }
-                        }
-
-                        if (!latchOnToDefault)
-                        {
-                            // If only the all set takes pipeline input then latch on to the
-                            // default set
-
-                            if (!anotherSetTakesPipelineInput)
-                            {
-                                latchOnToDefault = true;
-                            }
-                        }
-
-                        if (!latchOnToDefault)
-                        {
-                            // Need to see if there are nonpipelineable mandatory parameters in the
-                            // all set.
-
-                            ParameterSetPromptingData allSetPromptingData;
-                            if (promptingData.TryGetValue(uint.MaxValue, out allSetPromptingData))
-                            {
-                                if (allSetPromptingData.NonpipelineableMandatoryParameters.Count > 0)
-                                {
-                                    latchOnToDefault = true;
-                                }
-                            }
-                        }
-
-                        if (latchOnToDefault)
-                        {
-                            // latch on to the default parameter set
-                            commandMandatorySets = defaultParameterSet;
-                            _currentParameterSetFlag = defaultParameterSet;
-                            Command.SetParameterSetName(CurrentParameterSetName);
-
-                            // Add all missing mandatory parameters that don't take pipeline input
-                            foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
-                            {
-                                if ((promptingSetData.ParameterSet & commandMandatorySets) != 0 ||
-                                    promptingSetData.IsAllSet)
-                                {
-                                    foreach (MergedCompiledCommandParameter mandatoryParameter in promptingSetData.NonpipelineableMandatoryParameters.Keys)
-                                    {
-                                        result.Add(mandatoryParameter);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if (!latchOnToDefault)
-                    {
-                        // When we select a mandatory set to latch on, we should try to preserve other parameter sets that contain no mandatory parameters or contain only common mandatory parameters
-                        // as much as possible, so as to support the binding for the following scenarios:
-                        //
-                        // (1) Scenario 1:
-                        // Valid parameter sets when it comes to the mandatory checking: A, B
-                        // Mandatory parameters in A, B:
-                        // Set      Nonpipelineable-Mandatory-InSet         Pipelineable-Mandatory-InSet       Common-Nonpipelineable-Mandatory       Common-Pipelineable-Mandatory
-                        // A        N/A                                     N/A                                N/A                                    AllParam (of type DateTime)
-                        // B        N/A                                     ParamB (of type TimeSpan)          N/A                                    AllParam (of type DateTime)
-                        //
-                        // Piped-in object: Get-Date
-                        //
-                        // (2) Scenario 2:
-                        // Valid parameter sets when it comes to the mandatory checking: A, B, C, Default
-                        // Mandatory parameters in A, B, C and Default:
-                        // Set      Nonpipelineable-Mandatory-InSet         Pipelineable-Mandatory-InSet       Common-Nonpipelineable-Mandatory       Common-Pipelineable-Mandatory
-                        // A        N/A                                     N/A                                N/A                                    AllParam (of type DateTime)
-                        // B        N/A                                     ParamB (of type TimeSpan)          N/A                                    AllParam (of type DateTime)
-                        // C        N/A                                     N/A                                N/A                                    AllParam (of type DateTime)
-                        // Default  N/A                                     N/A                                N/A                                    AllParam (of type DateTime)
-                        //
-                        // Piped-in object: Get-Date
-                        //
-                        // Before the fix, the mandatory checking will resolve the parameter set to be B in both scenario 1 and 2, which will fail in the subsequent pipeline binding.
-                        // After the fix, the parameter set "A" in the scenario 1 and the set "A", "C", "Default" in the scenario 2 will be preserved, and the subsequent pipeline binding will succeed.
-                        //
-                        // (3) Scenario 3:
-                        // Valid parameter sets when it comes to the mandatory checking: A, B, C
-                        // Mandatory parameters in A, B and C:
-                        // Set      Nonpipelineable-Mandatory-InSet         Pipelineable-Mandatory-InSet       Pipelineable-Nonmandatory-InSet       Common-Nonpipelineable-Mandatory       Common-Pipelineable-Mandatory       Common-Pipelineable-Nonmandatory
-                        // A        N/A                                     ParamA (of type TimeSpan)          N/A                                   N/A                                    N/A                                 N/A
-                        // B        ParamB-1                                N/A                                ParamB-2 (of type string[])           N/A                                    N/A                                 N/A
-                        // C        N/A                                     N/A                                ParamC (of type DateTime)             N/A                                    N/A                                 N/A
-                        //
-                        // (4) Scenario 4:
-                        // Valid parameter sets when it comes to the mandatory checking: A, B, C, Default
-                        // Mandatory parameters in A, B, C and Default:
-                        // Set      Nonpipelineable-Mandatory-InSet         Pipelineable-Mandatory-InSet       Pipelineable-Nonmandatory-InSet       Common-Nonpipelineable-Mandatory       Common-Pipelineable-Mandatory       Common-Pipelineable-Nonmandatory
-                        // A        N/A                                     ParamA (of type TimeSpan)          N/A                                   N/A                                    N/A                                 AllParam (of type DateTime)
-                        // B        ParamB-1                                N/A                                ParamB-2 (of type string[])           N/A                                    N/A                                 AllParam (of type DateTime)
-                        // C        N/A                                     N/A                                N/A                                   N/A                                    N/A                                 AllParam (of type DateTime)
-                        // Default  N/A                                     N/A                                N/A                                   N/A                                    N/A                                 AllParam (of type DateTime)
-                        //
-                        // Piped-in object: Get-Date
-                        //
-                        // Before the fix, the mandatory checking will resolve the parameter set to be A in both scenario 3 and 4, which will fail in the subsequent pipeline binding.
-                        // After the fix, the parameter set "C" in the scenario 1 and the set "C" and "Default" in the scenario 2 will be preserved, and the subsequent pipeline binding will succeed.
-                        //
-                        // Examples:
-                        // (1) Scenario 1
-                        // Function Get-Cmdlet
-                        // {
-                        //       [CmdletBinding()]
-                        //       param(
-                        //          [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
-                        //          [System.DateTime]
-                        //          $Date,
-                        //          [Parameter(ParameterSetName="computer")]
-                        //          [Parameter(ParameterSetName="session")]
-                        //          $ComputerName,
-                        //          [Parameter(ParameterSetName="session", Mandatory=$true, ValueFromPipeline=$true)]
-                        //          [System.TimeSpan]
-                        //          $TimeSpan
-                        //       )
-                        //
-                        //      Process
-                        //      {
-                        //         Write-Output $PsCmdlet.ParameterSetName
-                        //      }
-                        // }
-                        //
-                        // PS:\> Get-Date | Get-Cmdlet
-                        // PS:\> computer
-                        //
-                        // (2) Scenario 2
-                        //
-                        // Function Get-Cmdlet
-                        // {
-                        //       [CmdletBinding(DefaultParameterSetName="computer")]
-                        //       param(
-                        //          [Parameter(ParameterSetName="new")]
-                        //          $NewName,
-                        //          [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
-                        //          [System.DateTime]
-                        //          $Date,
-                        //          [Parameter(ParameterSetName="computer")]
-                        //          [Parameter(ParameterSetName="session")]
-                        //          $ComputerName,
-                        //          [Parameter(ParameterSetName="session", Mandatory=$true, ValueFromPipeline=$true)]
-                        //          [System.TimeSpan]
-                        //          $TimeSpan
-                        //       )
-                        //
-                        //      Process
-                        //      {
-                        //         Write-Output $PsCmdlet.ParameterSetName
-                        //      }
-                        // }
-                        //
-                        // PS:\> Get-Date | Get-Cmdlet
-                        // PS:\> computer
-                        //
-                        // (3) Scenario 3
-                        //
-                        // Function Get-Cmdlet
-                        // {
-                        //        [CmdletBinding()]
-                        //        param(
-                        //           [Parameter(ParameterSetName="network", Mandatory=$true, ValueFromPipeline=$true)]
-                        //           [TimeSpan]
-                        //           $network,
-                        //
-                        //           [Parameter(ParameterSetName="computer", ValueFromPipelineByPropertyName=$true)]
-                        //           [string[]]
-                        //           $ComputerName,
-                        //
-                        //           [Parameter(ParameterSetName="computer", Mandatory=$true)]
-                        //           [switch]
-                        //           $DisableComputer,
-                        //
-                        //           [Parameter(ParameterSetName="session", ValueFromPipeline=$true)]
-                        //           [DateTime]
-                        //           $Date
-                        //        )
-                        //
-                        //        Process
-                        //        {
-                        //           Write-Output $PsCmdlet.ParameterSetName
-                        //        }
-                        // }
-                        //
-                        // PS:\> Get-Date | Get-Cmdlet
-                        // PS:\> session
-                        //
-                        // (4) Scenario 4
-                        //
-                        // Function Get-Cmdlet
-                        // {
-                        //       [CmdletBinding(DefaultParameterSetName="server")]
-                        //       param(
-                        //          [Parameter(ParameterSetName="network", Mandatory=$true, ValueFromPipeline=$true)]
-                        //          [TimeSpan]
-                        //          $network,
-                        //
-                        //          [Parameter(ParameterSetName="computer", ValueFromPipelineByPropertyName=$true)]
-                        //          [string[]]
-                        //          $ComputerName,
-                        //
-                        //          [Parameter(ParameterSetName="computer", Mandatory=$true)]
-                        //          [switch]
-                        //          $DisableComputer,
-                        //
-                        //          [Parameter(ParameterSetName="session")]
-                        //          [Parameter(ParameterSetName="server")]
-                        //          [string]
-                        //          $Param,
-                        //
-                        //          [Parameter(ValueFromPipeline=$true)]
-                        //          [DateTime]
-                        //          $Date
-                        //       )
-
-                        //      Process
-                        //      {
-                        //         Write-Output $PsCmdlet.ParameterSetName
-                        //      }
-                        // }
-                        //
-                        // PS:\> Get-Date | Get-Cmdlet
-                        // PS:\> server
-                        //
-
-                        uint setThatTakesPipelineInputByValue = 0;
-                        uint setThatTakesPipelineInputByPropertyName = 0;
-
-                        // Find the single set that takes pipeline input by value
-                        bool foundSetThatTakesPipelineInputByValue = false;
-                        bool foundMultipleSetsThatTakesPipelineInputByValue = false;
-                        foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
-                        {
-                            if ((promptingSetData.ParameterSet & commandMandatorySets) != 0 &&
-                                !promptingSetData.IsAllSet)
-                            {
-                                if (promptingSetData.PipelineableMandatoryByValueParameters.Count > 0)
-                                {
-                                    if (foundSetThatTakesPipelineInputByValue)
-                                    {
-                                        foundMultipleSetsThatTakesPipelineInputByValue = true;
-                                        setThatTakesPipelineInputByValue = 0;
-                                        break;
-                                    }
-
-                                    setThatTakesPipelineInputByValue = promptingSetData.ParameterSet;
-                                    foundSetThatTakesPipelineInputByValue = true;
-                                }
-                            }
-                        }
-
-                        // Find the single set that takes pipeline input by property name
-                        bool foundSetThatTakesPipelineInputByPropertyName = false;
-                        bool foundMultipleSetsThatTakesPipelineInputByPropertyName = false;
-                        foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
-                        {
-                            if ((promptingSetData.ParameterSet & commandMandatorySets) != 0 &&
-                                    !promptingSetData.IsAllSet)
-                            {
-                                if (promptingSetData.PipelineableMandatoryByPropertyNameParameters.Count > 0)
-                                {
-                                    if (foundSetThatTakesPipelineInputByPropertyName)
-                                    {
-                                        foundMultipleSetsThatTakesPipelineInputByPropertyName = true;
-                                        setThatTakesPipelineInputByPropertyName = 0;
-                                        break;
-                                    }
-
-                                    setThatTakesPipelineInputByPropertyName = promptingSetData.ParameterSet;
-                                    foundSetThatTakesPipelineInputByPropertyName = true;
-                                }
-                            }
-                        }
-
-                        // If we have one or the other, we can latch onto that set without difficulty
-                        uint uniqueSetThatTakesPipelineInput = 0;
-                        if (foundSetThatTakesPipelineInputByValue && foundSetThatTakesPipelineInputByPropertyName &&
-                            (setThatTakesPipelineInputByValue == setThatTakesPipelineInputByPropertyName))
-                        {
-                            uniqueSetThatTakesPipelineInput = setThatTakesPipelineInputByValue;
-                        }
-
-                        if (foundSetThatTakesPipelineInputByValue ^ foundSetThatTakesPipelineInputByPropertyName)
-                        {
-                            uniqueSetThatTakesPipelineInput = foundSetThatTakesPipelineInputByValue ?
-                                setThatTakesPipelineInputByValue : setThatTakesPipelineInputByPropertyName;
-                        }
-
-                        if (uniqueSetThatTakesPipelineInput != 0)
-                        {
-                            // latch on to the set that takes pipeline input
-                            commandMandatorySets = uniqueSetThatTakesPipelineInput;
-                            uint otherMandatorySetsToBeIgnored = 0;
-                            bool chosenMandatorySetContainsNonpipelineableMandatoryParameters = false;
-
-                            // Add all missing mandatory parameters that don't take pipeline input
-                            foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
-                            {
-                                if ((promptingSetData.ParameterSet & commandMandatorySets) != 0 ||
-                                    promptingSetData.IsAllSet)
-                                {
-                                    if (!promptingSetData.IsAllSet)
-                                    {
-                                        chosenMandatorySetContainsNonpipelineableMandatoryParameters =
-                                            promptingSetData.NonpipelineableMandatoryParameters.Count > 0;
-                                    }
-
-                                    foreach (MergedCompiledCommandParameter mandatoryParameter in promptingSetData.NonpipelineableMandatoryParameters.Keys)
-                                    {
-                                        result.Add(mandatoryParameter);
-                                    }
-                                }
-                                else
-                                {
-                                    otherMandatorySetsToBeIgnored |= promptingSetData.ParameterSet;
-                                }
-                            }
-
-                            // Preserve potential parameter sets as much as possible
-                            PreservePotentialParameterSets(uniqueSetThatTakesPipelineInput,
-                                                           otherMandatorySetsToBeIgnored,
-                                                           chosenMandatorySetContainsNonpipelineableMandatoryParameters);
-                        }
-                        else
-                        {
-                            // Now if any valid parameter sets have nonpipelineable mandatory parameters we have
-                            // an error
-                            bool foundMissingParameters = false;
-                            uint setsThatContainNonpipelineableMandatoryParameter = 0;
-                            foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
-                            {
-                                if ((promptingSetData.ParameterSet & commandMandatorySets) != 0 ||
-                                     promptingSetData.IsAllSet)
-                                {
-                                    if (promptingSetData.NonpipelineableMandatoryParameters.Count > 0)
-                                    {
-                                        foundMissingParameters = true;
-                                        if (!promptingSetData.IsAllSet)
-                                        {
-                                            setsThatContainNonpipelineableMandatoryParameter |= promptingSetData.ParameterSet;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (foundMissingParameters)
-                            {
-                                // As a last-ditch effort, bind to the set that takes pipeline input by value
-                                if (setThatTakesPipelineInputByValue != 0)
-                                {
-                                    // latch on to the set that takes pipeline input
-                                    commandMandatorySets = setThatTakesPipelineInputByValue;
-                                    uint otherMandatorySetsToBeIgnored = 0;
-                                    bool chosenMandatorySetContainsNonpipelineableMandatoryParameters = false;
-
-                                    // Add all missing mandatory parameters that don't take pipeline input
-                                    foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
-                                    {
-                                        if ((promptingSetData.ParameterSet & commandMandatorySets) != 0 ||
-                                            promptingSetData.IsAllSet)
-                                        {
-                                            if (!promptingSetData.IsAllSet)
-                                            {
-                                                chosenMandatorySetContainsNonpipelineableMandatoryParameters =
-                                                    promptingSetData.NonpipelineableMandatoryParameters.Count > 0;
-                                            }
-
-                                            foreach (MergedCompiledCommandParameter mandatoryParameter in promptingSetData.NonpipelineableMandatoryParameters.Keys)
-                                            {
-                                                result.Add(mandatoryParameter);
-                                            }
-                                        }
-                                        else
-                                        {
-                                            otherMandatorySetsToBeIgnored |= promptingSetData.ParameterSet;
-                                        }
-                                    }
-
-                                    // Preserve potential parameter sets as much as possible
-                                    PreservePotentialParameterSets(setThatTakesPipelineInputByValue,
-                                                                   otherMandatorySetsToBeIgnored,
-                                                                   chosenMandatorySetContainsNonpipelineableMandatoryParameters);
-                                }
-                                else
-                                {
-                                    if ((!foundMultipleSetsThatTakesPipelineInputByValue) &&
-                                       (!foundMultipleSetsThatTakesPipelineInputByPropertyName))
-                                    {
-                                        ThrowAmbiguousParameterSetException(_currentParameterSetFlag, BindableParameters);
-                                    }
-
-                                    // Remove the data set that contains non-pipelineable mandatory parameters, since we are not
-                                    // prompting for them and they will not be bound later.
-                                    // If no data set left, throw ambiguous parameter set exception
-                                    if (setsThatContainNonpipelineableMandatoryParameter != 0)
-                                    {
-                                        IgnoreOtherMandatoryParameterSets(setsThatContainNonpipelineableMandatoryParameter);
-                                        if (_currentParameterSetFlag == 0)
-                                        {
-                                            ThrowAmbiguousParameterSetException(_currentParameterSetFlag, BindableParameters);
-                                        }
-
-                                        if (ValidParameterSetCount(_currentParameterSetFlag) == 1)
-                                        {
-                                            Command.SetParameterSetName(CurrentParameterSetName);
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        TryLatchToUniquePipelineSet(promptingData, commandMandatorySets, result);
                     }
                 }
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Builds prompting data for unbound mandatory parameters.
+        /// </summary>
+        private Dictionary<uint, ParameterSetPromptingData> CollectMandatoryPromptingData(
+            uint defaultParameterSet,
+            bool isPipelineInputExpected,
+            Collection<MergedCompiledCommandParameter> result,
+            ref uint commandMandatorySets,
+            out bool missingAMandatoryParameter,
+            out bool missingAMandatoryParameterInAllSet)
+        {
+            Dictionary<uint, ParameterSetPromptingData> promptingData = new Dictionary<uint, ParameterSetPromptingData>();
+
+            missingAMandatoryParameter = false;
+            missingAMandatoryParameterInAllSet = false;
+
+            // See if any of the unbound parameters are mandatory.
+            foreach (MergedCompiledCommandParameter parameter in UnboundParameters)
+            {
+                // If a parameter is never mandatory, we can skip lots of work here.
+                if (!parameter.Parameter.IsMandatoryInSomeParameterSet)
+                {
+                    continue;
+                }
+
+                var matchingParameterSetMetadata = parameter.Parameter.GetMatchingParameterSetData(_currentParameterSetFlag);
+
+                uint parameterMandatorySets = 0;
+                bool thisParameterMissing = false;
+
+                foreach (ParameterSetSpecificMetadata parameterSetMetadata in matchingParameterSetMetadata)
+                {
+                    uint newMandatoryParameterSetFlag = NewParameterSetPromptingData(promptingData, parameter, parameterSetMetadata, defaultParameterSet, isPipelineInputExpected);
+
+                    if (newMandatoryParameterSetFlag == 0)
+                    {
+                        continue;
+                    }
+
+                    missingAMandatoryParameter = true;
+                    thisParameterMissing = true;
+
+                    if (newMandatoryParameterSetFlag != uint.MaxValue)
+                    {
+                        parameterMandatorySets |= (_currentParameterSetFlag & newMandatoryParameterSetFlag);
+                        commandMandatorySets |= (_currentParameterSetFlag & parameterMandatorySets);
+                    }
+                    else
+                    {
+                        missingAMandatoryParameterInAllSet = true;
+                    }
+                }
+
+                // We are not expecting pipeline input.
+                if (!isPipelineInputExpected && thisParameterMissing)
+                {
+                    result.Add(parameter);
+                }
+            }
+
+            return promptingData;
+        }
+
+        /// <summary>
+        /// Collects non-pipelineable mandatory parameters for the mandatory sets.
+        /// </summary>
+        private static void CollectNonpipelineableMandatoryParameters(
+            Dictionary<uint, ParameterSetPromptingData> promptingData,
+            uint mandatorySets,
+            Collection<MergedCompiledCommandParameter> result)
+        {
+            foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
+            {
+                if ((promptingSetData.ParameterSet & mandatorySets) == 0 && !promptingSetData.IsAllSet)
+                {
+                    continue;
+                }
+
+                foreach (MergedCompiledCommandParameter mandatoryParameter in promptingSetData.NonpipelineableMandatoryParameters.Keys)
+                {
+                    result.Add(mandatoryParameter);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Attempts to latch parameter set resolution to the default parameter set.
+        /// </summary>
+        private bool TryLatchToDefaultParameterSet(
+            Dictionary<uint, ParameterSetPromptingData> promptingData,
+            uint commandMandatorySets,
+            uint defaultParameterSet,
+            Collection<MergedCompiledCommandParameter> result)
+        {
+            if (defaultParameterSet == 0 || (commandMandatorySets & defaultParameterSet) == 0)
+            {
+                return false;
+            }
+
+            // Determine if another set could be satisfied by pipeline input - that is, it
+            // has mandatory pipeline input parameters but no mandatory command-line only parameters.
+            bool anotherSetTakesPipelineInput = false;
+            foreach (ParameterSetPromptingData paramPromptingData in promptingData.Values)
+            {
+                if (!paramPromptingData.IsAllSet &&
+                    !paramPromptingData.IsDefaultSet &&
+                    paramPromptingData.PipelineableMandatoryParameters.Count > 0 &&
+                    paramPromptingData.NonpipelineableMandatoryParameters.Count == 0)
+                {
+                    anotherSetTakesPipelineInput = true;
+                    break;
+                }
+            }
+
+            // Determine if another set takes pipeline input by property name.
+            bool anotherSetTakesPipelineInputByPropertyName = false;
+            foreach (ParameterSetPromptingData paramPromptingData in promptingData.Values)
+            {
+                if (!paramPromptingData.IsAllSet &&
+                    !paramPromptingData.IsDefaultSet &&
+                    paramPromptingData.PipelineableMandatoryByPropertyNameParameters.Count > 0)
+                {
+                    anotherSetTakesPipelineInputByPropertyName = true;
+                    break;
+                }
+            }
+
+            // See if we should pick the default set if it can bind strongly to the incoming objects.
+            bool latchOnToDefault = false;
+            if (promptingData.TryGetValue(defaultParameterSet, out ParameterSetPromptingData defaultSetPromptingData))
+            {
+                bool defaultSetTakesPipelineInput = defaultSetPromptingData.PipelineableMandatoryParameters.Count > 0;
+                bool defaultSetTakesPipelineInputByPropertyName = defaultSetPromptingData.PipelineableMandatoryByPropertyNameParameters.Count > 0;
+
+                if (defaultSetTakesPipelineInputByPropertyName && !anotherSetTakesPipelineInputByPropertyName)
+                {
+                    latchOnToDefault = true;
+                }
+                else if (defaultSetTakesPipelineInput && !anotherSetTakesPipelineInput)
+                {
+                    latchOnToDefault = true;
+                }
+            }
+
+            // If only the all set takes pipeline input then latch on to the default set.
+            if (!latchOnToDefault && !anotherSetTakesPipelineInput)
+            {
+                latchOnToDefault = true;
+            }
+
+            if (!latchOnToDefault && promptingData.TryGetValue(uint.MaxValue, out ParameterSetPromptingData allSetPromptingData))
+            {
+                latchOnToDefault = allSetPromptingData.NonpipelineableMandatoryParameters.Count > 0;
+            }
+
+            if (!latchOnToDefault)
+            {
+                return false;
+            }
+
+            // Latch on to the default parameter set.
+            _currentParameterSetFlag = defaultParameterSet;
+            Command.SetParameterSetName(CurrentParameterSetName);
+
+            CollectNonpipelineableMandatoryParameters(promptingData, defaultParameterSet, result);
+            return true;
+        }
+
+        /// <summary>
+        /// Attempts to latch parameter set resolution to a unique pipeline-input parameter set.
+        /// </summary>
+        private bool TryLatchToUniquePipelineSet(
+            Dictionary<uint, ParameterSetPromptingData> promptingData,
+            uint commandMandatorySets,
+            Collection<MergedCompiledCommandParameter> result)
+        {
+            // Scenario 1-4: preserve viable parameter sets for subsequent pipeline binding;
+            // see this method's <remarks> for detailed scenario descriptions.
+
+            uint setThatTakesPipelineInputByValue = 0;
+            uint setThatTakesPipelineInputByPropertyName = 0;
+
+            // Find the single set that takes pipeline input by value.
+            bool foundSetThatTakesPipelineInputByValue = false;
+            bool foundMultipleSetsThatTakesPipelineInputByValue = false;
+            foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
+            {
+                if ((promptingSetData.ParameterSet & commandMandatorySets) != 0 &&
+                    !promptingSetData.IsAllSet)
+                {
+                    if (promptingSetData.PipelineableMandatoryByValueParameters.Count > 0)
+                    {
+                        if (foundSetThatTakesPipelineInputByValue)
+                        {
+                            foundMultipleSetsThatTakesPipelineInputByValue = true;
+                            setThatTakesPipelineInputByValue = 0;
+                            break;
+                        }
+
+                        setThatTakesPipelineInputByValue = promptingSetData.ParameterSet;
+                        foundSetThatTakesPipelineInputByValue = true;
+                    }
+                }
+            }
+
+            // Find the single set that takes pipeline input by property name.
+            bool foundSetThatTakesPipelineInputByPropertyName = false;
+            bool foundMultipleSetsThatTakesPipelineInputByPropertyName = false;
+            foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
+            {
+                if ((promptingSetData.ParameterSet & commandMandatorySets) != 0 &&
+                        !promptingSetData.IsAllSet)
+                {
+                    if (promptingSetData.PipelineableMandatoryByPropertyNameParameters.Count > 0)
+                    {
+                        if (foundSetThatTakesPipelineInputByPropertyName)
+                        {
+                            foundMultipleSetsThatTakesPipelineInputByPropertyName = true;
+                            setThatTakesPipelineInputByPropertyName = 0;
+                            break;
+                        }
+
+                        setThatTakesPipelineInputByPropertyName = promptingSetData.ParameterSet;
+                        foundSetThatTakesPipelineInputByPropertyName = true;
+                    }
+                }
+            }
+
+            // If we have one or the other, we can latch onto that set without difficulty.
+            uint uniqueSetThatTakesPipelineInput = 0;
+            if (foundSetThatTakesPipelineInputByValue && foundSetThatTakesPipelineInputByPropertyName &&
+                (setThatTakesPipelineInputByValue == setThatTakesPipelineInputByPropertyName))
+            {
+                uniqueSetThatTakesPipelineInput = setThatTakesPipelineInputByValue;
+            }
+
+            if (foundSetThatTakesPipelineInputByValue ^ foundSetThatTakesPipelineInputByPropertyName)
+            {
+                uniqueSetThatTakesPipelineInput = foundSetThatTakesPipelineInputByValue ?
+                    setThatTakesPipelineInputByValue : setThatTakesPipelineInputByPropertyName;
+            }
+
+            if (uniqueSetThatTakesPipelineInput != 0)
+            {
+                uint otherMandatorySetsToBeIgnored = 0;
+                bool chosenMandatorySetContainsNonpipelineableMandatoryParameters = false;
+
+                // Add all missing mandatory parameters that don't take pipeline input.
+                foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
+                {
+                    if ((promptingSetData.ParameterSet & uniqueSetThatTakesPipelineInput) != 0 ||
+                        promptingSetData.IsAllSet)
+                    {
+                        if (!promptingSetData.IsAllSet)
+                        {
+                            chosenMandatorySetContainsNonpipelineableMandatoryParameters =
+                                promptingSetData.NonpipelineableMandatoryParameters.Count > 0;
+                        }
+                    }
+                    else
+                    {
+                        otherMandatorySetsToBeIgnored |= promptingSetData.ParameterSet;
+                    }
+                }
+
+                CollectNonpipelineableMandatoryParameters(promptingData, uniqueSetThatTakesPipelineInput, result);
+
+                // Preserve potential parameter sets as much as possible.
+                PreservePotentialParameterSets(uniqueSetThatTakesPipelineInput,
+                                               otherMandatorySetsToBeIgnored,
+                                               chosenMandatorySetContainsNonpipelineableMandatoryParameters);
+
+                return true;
+            }
+
+            // Now if any valid parameter sets have nonpipelineable mandatory parameters we have
+            // an error.
+            bool foundMissingParameters = false;
+            uint setsThatContainNonpipelineableMandatoryParameter = 0;
+            foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
+            {
+                if ((promptingSetData.ParameterSet & commandMandatorySets) != 0 ||
+                     promptingSetData.IsAllSet)
+                {
+                    if (promptingSetData.NonpipelineableMandatoryParameters.Count > 0)
+                    {
+                        foundMissingParameters = true;
+                        if (!promptingSetData.IsAllSet)
+                        {
+                            setsThatContainNonpipelineableMandatoryParameter |= promptingSetData.ParameterSet;
+                        }
+                    }
+                }
+            }
+
+            if (!foundMissingParameters)
+            {
+                return false;
+            }
+
+            // As a last-ditch effort, bind to the set that takes pipeline input by value.
+            if (setThatTakesPipelineInputByValue != 0)
+            {
+                uint otherMandatorySetsToBeIgnored = 0;
+                bool chosenMandatorySetContainsNonpipelineableMandatoryParameters = false;
+
+                // Add all missing mandatory parameters that don't take pipeline input.
+                foreach (ParameterSetPromptingData promptingSetData in promptingData.Values)
+                {
+                    if ((promptingSetData.ParameterSet & setThatTakesPipelineInputByValue) != 0 ||
+                        promptingSetData.IsAllSet)
+                    {
+                        if (!promptingSetData.IsAllSet)
+                        {
+                            chosenMandatorySetContainsNonpipelineableMandatoryParameters =
+                                promptingSetData.NonpipelineableMandatoryParameters.Count > 0;
+                        }
+                    }
+                    else
+                    {
+                        otherMandatorySetsToBeIgnored |= promptingSetData.ParameterSet;
+                    }
+                }
+
+                CollectNonpipelineableMandatoryParameters(promptingData, setThatTakesPipelineInputByValue, result);
+
+                // Preserve potential parameter sets as much as possible.
+                PreservePotentialParameterSets(setThatTakesPipelineInputByValue,
+                                               otherMandatorySetsToBeIgnored,
+                                               chosenMandatorySetContainsNonpipelineableMandatoryParameters);
+                return false;
+            }
+
+            if ((!foundMultipleSetsThatTakesPipelineInputByValue) &&
+               (!foundMultipleSetsThatTakesPipelineInputByPropertyName))
+            {
+                ThrowAmbiguousParameterSetException(_currentParameterSetFlag, BindableParameters);
+            }
+
+            // Remove the data set that contains non-pipelineable mandatory parameters, since we are not
+            // prompting for them and they will not be bound later.
+            // If no data set left, throw ambiguous parameter set exception.
+            if (setsThatContainNonpipelineableMandatoryParameter != 0)
+            {
+                IgnoreOtherMandatoryParameterSets(setsThatContainNonpipelineableMandatoryParameter);
+                if (_currentParameterSetFlag == 0)
+                {
+                    ThrowAmbiguousParameterSetException(_currentParameterSetFlag, BindableParameters);
+                }
+
+                if (ValidParameterSetCount(_currentParameterSetFlag) == 1)
+                {
+                    Command.SetParameterSetName(CurrentParameterSetName);
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -2522,6 +2485,19 @@ namespace System.Management.Automation
         /// If false, the count of valid parameter sets will be returned but no error
         /// will occur and the default parameter set will not be used.
         /// </param>
+        /// <remarks>
+        /// <para><c>_currentParameterSetFlag</c> acts as a compact state machine:</para>
+        /// <list type="bullet">
+        /// <item><description><c>uint.MaxValue</c> means all parameter sets are still valid.</description></item>
+        /// <item><description>A single-bit value means exactly one parameter set is selected.</description></item>
+        /// <item><description>A multi-bit value means multiple parameter sets are still valid.</description></item>
+        /// </list>
+        /// <para>
+        /// <paramref name="prePipelineInput"/> allows temporary ambiguity to remain when pipeline
+        /// input can still disambiguate among valid sets. <paramref name="setDefault"/> controls
+        /// whether this method commits to the default parameter set when it is among the valid sets.
+        /// </para>
+        /// </remarks>
         /// <returns>
         /// The number of valid parameter sets.
         /// </returns>
@@ -2536,10 +2512,12 @@ namespace System.Management.Automation
 
             if (validParameterSetCount == 0 && _currentParameterSetFlag != uint.MaxValue)
             {
+                // No valid parameter sets remain — binding has contradicted all sets.
                 ThrowAmbiguousParameterSetException(_currentParameterSetFlag, BindableParameters);
             }
             else if (validParameterSetCount > 1)
             {
+                // Multiple sets still valid — try default-set resolution or defer to pipeline input.
                 uint defaultParameterSetFlag = _commandMetadata.DefaultParameterSetFlag;
                 bool hasDefaultSetDefined = defaultParameterSetFlag != 0;
 
@@ -2593,10 +2571,11 @@ namespace System.Management.Automation
             }
             else // validParameterSetCount == 1
             {
+                // Exactly one set is effectively valid — either an explicit single set or the all-set sentinel.
                 // If the valid parameter set is the "all" set, and a default set was defined,
                 // then set the current parameter set to the default set.
 
-                if (_currentParameterSetFlag == uint.MaxValue)
+                if (!HasSingleParameterSetSelected)
                 {
                     // Since this is the "all" set, default the parameter set count to the
                     // number of parameter sets that were defined for the cmdlet or 1 if
@@ -3769,6 +3748,29 @@ namespace System.Management.Automation
         }
 
         /// <summary>
+        /// Returns the binder instance responsible for the given parameter.
+        /// </summary>
+        /// <param name="parameter">
+        /// The parameter metadata.
+        /// </param>
+        /// <returns>
+        /// The binder that should bind this parameter, or null if no binder applies.
+        /// </returns>
+        private ParameterBinderBase GetBinderForParameter(MergedCompiledCommandParameter parameter)
+        {
+            return parameter.BinderAssociation switch
+            {
+                ParameterBinderAssociation.DeclaredFormalParameters => DefaultParameterBinder,
+                ParameterBinderAssociation.CommonParameters => CommonParametersBinder,
+                ParameterBinderAssociation.ShouldProcessParameters => ShouldProcessParametersBinder,
+                ParameterBinderAssociation.PagingParameters => PagingParametersBinder,
+                ParameterBinderAssociation.TransactionParameters => TransactionParametersBinder,
+                ParameterBinderAssociation.DynamicParameters => _dynamicParameterBinder,
+                _ => null,
+            };
+        }
+
+        /// <summary>
         /// Determines the number of valid parameter sets based on the valid parameter
         /// set flags.
         /// </summary>
@@ -3780,22 +3782,13 @@ namespace System.Management.Automation
         /// </returns>
         private static int ValidParameterSetCount(uint parameterSetFlags)
         {
-            int result = 0;
-
+            // uint.MaxValue means "all parameter sets" and is treated as one valid set.
             if (parameterSetFlags == uint.MaxValue)
             {
-                result = 1;
-            }
-            else
-            {
-                while (parameterSetFlags != 0)
-                {
-                    result += (int)(parameterSetFlags & 0x1);
-                    parameterSetFlags >>= 1;
-                }
+                return 1;
             }
 
-            return result;
+            return BitOperations.PopCount(parameterSetFlags);
         }
 
         #endregion helper_methods
@@ -3829,28 +3822,7 @@ namespace System.Management.Automation
 
             try
             {
-                switch (matchingParameter.BinderAssociation)
-                {
-                    case ParameterBinderAssociation.DeclaredFormalParameters:
-                        result = DefaultParameterBinder.GetDefaultParameterValue(name);
-                        break;
-
-                    case ParameterBinderAssociation.CommonParameters:
-                        result = CommonParametersBinder.GetDefaultParameterValue(name);
-                        break;
-
-                    case ParameterBinderAssociation.ShouldProcessParameters:
-                        result = ShouldProcessParametersBinder.GetDefaultParameterValue(name);
-                        break;
-
-                    case ParameterBinderAssociation.DynamicParameters:
-                        if (_dynamicParameterBinder != null)
-                        {
-                            result = _dynamicParameterBinder.GetDefaultParameterValue(name);
-                        }
-
-                        break;
-                }
+                result = GetBinderForParameter(matchingParameter)?.GetDefaultParameterValue(name);
             }
             catch (GetValueException getValueException)
             {
@@ -3901,6 +3873,11 @@ namespace System.Management.Automation
         private bool _useDefaultParameterBinding = true;
 
         #endregion DefaultParameterBindingStructures
+
+        private bool HasSingleParameterSetSelected =>
+            _currentParameterSetFlag != 0 &&
+            _currentParameterSetFlag != uint.MaxValue &&
+            (_currentParameterSetFlag & (_currentParameterSetFlag - 1)) == 0;
 
         private uint _parameterSetToBePrioritizedInPipelineBinding = 0;
 

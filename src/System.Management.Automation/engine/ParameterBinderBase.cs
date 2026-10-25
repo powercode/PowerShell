@@ -53,6 +53,10 @@ namespace System.Management.Automation
     /// Derived classes are used to provide specific binding behavior for different object types,
     /// like Cmdlet, PsuedoParameterCollection, and dynamic parameter objects.
     /// </summary>
+    /// <remarks>
+    /// Use <see cref="InvocationInfo"/> directly for errors attributable to the command invocation
+    /// itself rather than a specific parameter token.
+    /// </remarks>
     [DebuggerDisplay("Command = {command}")]
     internal abstract class ParameterBinderBase
     {
@@ -331,10 +335,6 @@ namespace System.Management.Automation
             CompiledCommandParameter parameterMetadata,
             ParameterBindingFlags flags)
         {
-            bool result = false;
-            bool coerceTypeIfNeeded = (flags & ParameterBindingFlags.ShouldCoerceType) != 0;
-            bool isDefaultValue = (flags & ParameterBindingFlags.IsDefaultValue) != 0;
-
             if (parameter == null)
             {
                 throw PSTraceSource.NewArgumentNullException(nameof(parameter));
@@ -356,313 +356,332 @@ namespace System.Management.Automation
 
                 object parameterValue = parameter.ArgumentValue;
 
-                do // false loop
+                parameterValue = ApplyArgumentTransformations(parameter, parameterMetadata, parameterValue, flags);
+
+                bool shouldContinueBinding;
+                parameterValue = ApplyTypeCoercion(parameter, parameterMetadata, parameterValue, flags, out shouldContinueBinding);
+                if (!shouldContinueBinding)
                 {
-                    // Now call any argument transformation attributes that might be present on the parameter
-                    ScriptParameterBinder spb = this as ScriptParameterBinder;
-                    bool usesCmdletBinding = false;
-                    if (spb != null)
-                    {
-                        usesCmdletBinding = spb.Script.UsesCmdletBinding;
-                    }
+                    RecordBindingResult(parameter, parameterValue, result: false);
+                    return false;
+                }
 
-                    // Now do the argument transformation. No transformation is done for the default values in script that meet the following 2 conditions:
-                    //  1. the default value is not specified by the user, but is the powershell default value.
-                    //     e.g. the powershell default value for a class type is null, for the string type is string.empty.
-                    //  2. the powershell default value is null.
-                    // This is to prevent ArgumentTransformationAttributes from making a non-mandatory parameter behave like a mandatory one.
-                    // Example:
-                    //   ## without the fix, 'CredentialAttribute' would make $Credential like a mandatory parameter
-                    //   ## 'PS> test-credential' would prompt for credential input
-                    //   function test-credential {
-                    //       param(
-                    //           [System.Management.Automation.CredentialAttribute()]
-                    //           $Credential
-                    //       )
-                    //       $Credential
-                    //   }
-                    //
-                    foreach (ArgumentTransformationAttribute dma in parameterMetadata.ArgumentTransformationAttributes)
-                    {
-                        using (bindingTracer.TraceScope(
-                            "Executing DATA GENERATION metadata: [{0}]",
-                            dma.GetType()))
-                        {
-                            try
-                            {
-                                ArgumentTypeConverterAttribute argumentTypeConverter = dma as ArgumentTypeConverterAttribute;
+                RunValidationPipeline(parameter, parameterMetadata, parameterValue, flags);
+                WarnIfObsolete(parameterMetadata, flags);
 
-                                if (argumentTypeConverter != null)
-                                {
-                                    if (coerceTypeIfNeeded)
-                                    {
-                                        parameterValue = argumentTypeConverter.Transform(_engine, parameterValue, true, usesCmdletBinding);
-                                    }
-                                }
-                                else
-                                {
-                                    // Only apply argument transformation when the argument is not null, is mandatory, or disallows null as a value.
-                                    //
-                                    // If we are binding default value for an unbound script parameter, this parameter is guaranteed not mandatory
-                                    // in the chosen parameter set. This is because:
-                                    //  1. If we use cmdlet binding for this script (CmdletParameterBinderController is used), then binding
-                                    //     default value to unbound parameters won't happen until after all mandatory parameters from the
-                                    //     chosen parameter set are handled. Therefore, the unbound parameter we are dealing with here won't
-                                    //     be mandatory in the chosen parameter set.
-                                    //  2. If we use script binding (ScriptParameterBinderController is used), then parameters won't have the
-                                    //     ParameterAttribute declared for them, and thus are definitely not mandatory.
-                                    // So we check 'IsParameterMandatory' only if we are not binding default values.
-                                    if ((parameterValue != null) ||
-                                        (!isDefaultValue && (parameterMetadata.IsMandatoryInSomeParameterSet ||
-                                                             parameterMetadata.CannotBeNull ||
-                                                             dma.TransformNullOptionalParameters)))
-                                    {
-                                        parameterValue = dma.TransformInternal(_engine, parameterValue);
-                                    }
-                                }
+                bool result = DispatchBind(parameter, parameterMetadata, parameterValue);
+                RecordBindingResult(parameter, parameterValue, result);
+                return result;
+            }
+        }
 
-                                bindingTracer.WriteLine(
-                                    "result returned from DATA GENERATION: {0}",
-                                    parameterValue);
-                            }
-                            catch (Exception e) // Catch-all OK, 3rd party callout
-                            {
-                                bindingTracer.WriteLine(
-                                    "ERROR: DATA GENERATION: {0}",
-                                    e.Message);
+        /// <summary>
+        /// Apply argument transformation attributes and return the transformed value.
+        /// </summary>
+        private object ApplyArgumentTransformations(
+            CommandParameterInternal parameter,
+            CompiledCommandParameter parameterMetadata,
+            object parameterValue,
+            ParameterBindingFlags flags)
+        {
+            bool coerceTypeIfNeeded = (flags & ParameterBindingFlags.ShouldCoerceType) != 0;
+            bool isDefaultValue = (flags & ParameterBindingFlags.IsDefaultValue) != 0;
 
-                                ParameterBindingException bindingException =
-                                        new ParameterBindingArgumentTransformationException(
-                                            e,
-                                            ErrorCategory.InvalidData,
-                                            this.InvocationInfo,
-                                            GetErrorExtent(parameter),
-                                            parameterMetadata.Name,
-                                            parameterMetadata.Type,
-                                            parameterValue?.GetType(),
-                                            ParameterBinderStrings.ParameterArgumentTransformationError,
-                                            "ParameterArgumentTransformationError",
-                                            e.Message);
-                                throw bindingException;
-                            }
-                        }
-                    }
+            ScriptParameterBinder spb = this as ScriptParameterBinder;
+            bool usesCmdletBinding = spb != null && spb.Script.UsesCmdletBinding;
 
-                    // Only try to coerce the type if asked. If not asked,
-                    // see if the value type matches or is a subclass of
-                    // the parameter type.
-
-                    if (coerceTypeIfNeeded)
-                    {
-                        // Now do the type coercion
-
-                        parameterValue =
-                            CoerceTypeAsNeeded(
-                                parameter,
-                                parameterMetadata.Name,
-                                parameterMetadata.Type,
-                                parameterMetadata.CollectionTypeInformation,
-                                parameterValue);
-                    }
-                    else
-                    {
-                        if (!ShouldContinueUncoercedBind(parameter, parameterMetadata, flags, ref parameterValue))
-                        {
-                            // Don't attempt the bind because the value
-                            // is not of the correct
-                            // type for the parameter.
-                            break;
-                        }
-                    }
-
-                    if ((parameterMetadata.PSTypeName != null) && (parameterValue != null))
-                    {
-                        IEnumerable parameterValueAsEnumerable = LanguagePrimitives.GetEnumerable(parameterValue);
-                        if (parameterValueAsEnumerable != null)
-                        {
-                            foreach (object o in parameterValueAsEnumerable)
-                            {
-                                this.ValidatePSTypeName(parameter, parameterMetadata, !coerceTypeIfNeeded, o);
-                            }
-                        }
-                        else
-                        {
-                            this.ValidatePSTypeName(parameter, parameterMetadata, !coerceTypeIfNeeded, parameterValue);
-                        }
-                    }
-
-                    // Now do the data validation.  No validation is done for default values in script as that is
-                    // one way for people to have a known "bad" value to detect unspecified parameters.
-
-                    if (!isDefaultValue)
-                    {
-                        for (int i = 0; i < parameterMetadata.ValidationAttributes.Length; i++)
-                        {
-                            var validationAttribute = parameterMetadata.ValidationAttributes[i];
-
-                            using (bindingTracer.TraceScope(
-                                "Executing VALIDATION metadata: [{0}]",
-                                validationAttribute.GetType()))
-                            {
-                                try
-                                {
-                                    validationAttribute.InternalValidate(parameterValue, _engine);
-                                }
-                                catch (Exception e) // Catch-all OK, 3rd party callout
-                                {
-                                    bindingTracer.WriteLine(
-                                        "ERROR: VALIDATION FAILED: {0}",
-                                        e.Message);
-
-                                    ParameterBindingValidationException bindingException =
-                                        new ParameterBindingValidationException(
-                                            e,
-                                            ErrorCategory.InvalidData,
-                                            this.InvocationInfo,
-                                            GetErrorExtent(parameter),
-                                            parameterMetadata.Name,
-                                            parameterMetadata.Type,
-                                            parameterValue?.GetType(),
-                                            ParameterBinderStrings.ParameterArgumentValidationError,
-                                            "ParameterArgumentValidationError",
-                                            e.Message);
-                                    throw bindingException;
-                                }
-
-                                s_tracer.WriteLine("Validation attribute on {0} returned {1}.", parameterMetadata.Name, result);
-                            }
-                        }
-
-                        // If the is null, an empty string, or an empty collection,
-                        // check the parameter metadata to ensure that binding can continue
-                        // This method throws an appropriate ParameterBindingException
-                        // if binding cannot continue. If it returns then binding can
-                        // proceed.
-                        if (parameterMetadata.IsMandatoryInSomeParameterSet)
-                        {
-                            ValidateNullOrEmptyArgument(parameter, parameterMetadata, parameterMetadata.Type, parameterValue, true);
-                        }
-                    }
-
-                    // Write out obsolete parameter warning only if
-                    //  1. We are binding parameters for a simple function/script
-                    //  2. We are not binding a default parameter value
-
-                    if (parameterMetadata.ObsoleteAttribute != null &&
-                        (!isDefaultValue) &&
-                        spb != null && !usesCmdletBinding)
-                    {
-                        string obsoleteWarning = string.Format(
-                            CultureInfo.InvariantCulture,
-                            ParameterBinderStrings.UseOfDeprecatedParameterWarning,
-                            parameterMetadata.Name,
-                            parameterMetadata.ObsoleteAttribute.Message);
-
-                        var mshCommandRuntime = this.Command.commandRuntime as MshCommandRuntime;
-
-                        // Write out warning only if we are in the context of MshCommandRuntime.
-                        // This is because
-                        //  1. The overload method WriteWarning(WarningRecord) is only available in MshCommandRuntime;
-                        //  2. We write out warnings for obsolete commands and obsolete cmdlet parameters only when in
-                        //     the context of MshCommandRuntime. So we do it here to keep consistency.
-                        mshCommandRuntime?.WriteWarning(new WarningRecord(FQIDParameterObsolete, obsoleteWarning));
-                    }
-
-                    // Finally bind the argument to the parameter
-
-                    Exception bindError = null;
-
+            // No transformation is done for default values in script when the value is null and optional.
+            foreach (ArgumentTransformationAttribute dma in parameterMetadata.ArgumentTransformationAttributes)
+            {
+                using (bindingTracer.TraceScope(
+                    "Executing DATA GENERATION metadata: [{0}]",
+                    dma.GetType()))
+                {
                     try
                     {
-                        BindParameter(parameter.ParameterName, parameterValue, parameterMetadata);
-                        result = true;
-                    }
-                    catch (SetValueException setValueException)
-                    {
-                        bindError = setValueException;
-                    }
+                        ArgumentTypeConverterAttribute argumentTypeConverter = dma as ArgumentTypeConverterAttribute;
 
-                    if (bindError != null)
+                        if (argumentTypeConverter != null)
+                        {
+                            if (coerceTypeIfNeeded)
+                            {
+                                parameterValue = argumentTypeConverter.Transform(_engine, parameterValue, true, usesCmdletBinding);
+                            }
+                        }
+                        else if ((parameterValue != null) ||
+                                 (!isDefaultValue && (parameterMetadata.IsMandatoryInSomeParameterSet ||
+                                                      parameterMetadata.CannotBeNull ||
+                                                      dma.TransformNullOptionalParameters)))
+                        {
+                            parameterValue = dma.TransformInternal(_engine, parameterValue);
+                        }
+
+                        bindingTracer.WriteLine(
+                            "result returned from DATA GENERATION: {0}",
+                            parameterValue);
+                    }
+                    catch (Exception e) // Catch-all OK, 3rd party callout
                     {
-                        Type specifiedType = parameterValue?.GetType();
+                        bindingTracer.WriteLine(
+                            "ERROR: DATA GENERATION: {0}",
+                            e.Message);
+
                         ParameterBindingException bindingException =
-                            new ParameterBindingException(
-                                bindError,
-                                ErrorCategory.WriteError,
+                            new ParameterBindingArgumentTransformationException(
+                                e,
+                                ErrorCategory.InvalidData,
                                 this.InvocationInfo,
                                 GetErrorExtent(parameter),
                                 parameterMetadata.Name,
                                 parameterMetadata.Type,
-                                specifiedType,
-                                ParameterBinderStrings.ParameterBindingFailed,
-                                "ParameterBindingFailed",
-                                bindError.Message);
-
+                                parameterValue?.GetType(),
+                                ParameterBinderStrings.ParameterArgumentTransformationError,
+                                "ParameterArgumentTransformationError",
+                                e.Message);
                         throw bindingException;
                     }
                 }
-                while (false);
+            }
 
-                bindingTracer.WriteLine(
-                    "BIND arg [{0}] to param [{1}] {2}",
-                    parameterValue,
-                    parameter.ParameterName,
-                    (result) ? "SUCCESSFUL" : "SKIPPED");
+            return parameterValue;
+        }
 
-                if (result)
+        /// <summary>
+        /// Apply type coercion (or compatibility checks for uncoerced binding) and return the value.
+        /// </summary>
+        private object ApplyTypeCoercion(
+            CommandParameterInternal parameter,
+            CompiledCommandParameter parameterMetadata,
+            object parameterValue,
+            ParameterBindingFlags flags,
+            out bool shouldContinueBinding)
+        {
+            bool coerceTypeIfNeeded = (flags & ParameterBindingFlags.ShouldCoerceType) != 0;
+            if (coerceTypeIfNeeded)
+            {
+                shouldContinueBinding = true;
+                return CoerceTypeAsNeeded(
+                    parameter,
+                    parameterMetadata.Name,
+                    parameterMetadata.Type,
+                    parameterMetadata.CollectionTypeInformation,
+                    parameterValue);
+            }
+
+            shouldContinueBinding = ShouldContinueUncoercedBind(parameter, parameterMetadata, flags, ref parameterValue);
+            return parameterValue;
+        }
+
+        /// <summary>
+        /// Run type-name and validation-attribute checks, including mandatory null-or-empty validation.
+        /// </summary>
+        private void RunValidationPipeline(
+            CommandParameterInternal parameter,
+            CompiledCommandParameter parameterMetadata,
+            object parameterValue,
+            ParameterBindingFlags flags)
+        {
+            bool coerceTypeIfNeeded = (flags & ParameterBindingFlags.ShouldCoerceType) != 0;
+            bool isDefaultValue = (flags & ParameterBindingFlags.IsDefaultValue) != 0;
+
+            if ((parameterMetadata.PSTypeName != null) && (parameterValue != null))
+            {
+                IEnumerable parameterValueAsEnumerable = LanguagePrimitives.GetEnumerable(parameterValue);
+                if (parameterValueAsEnumerable != null)
                 {
-                    // Add this name to the set of bound parameters...
-                    if (RecordBoundParameters)
+                    foreach (object o in parameterValueAsEnumerable)
                     {
-                        this.CommandLineParameters.Add(parameter.ParameterName, parameterValue);
-                    }
-
-                    MshCommandRuntime cmdRuntime = this.Command.commandRuntime as MshCommandRuntime;
-                    if ((cmdRuntime != null) &&
-                        (cmdRuntime.LogPipelineExecutionDetail || _isTranscribing) &&
-                        (cmdRuntime.PipelineProcessor != null))
-                    {
-                        string stringToPrint = null;
-                        try
-                        {
-                            // Unroll parameter value
-                            IEnumerable values = LanguagePrimitives.GetEnumerable(parameterValue);
-                            if (values != null)
-                            {
-                                var sb = new Text.StringBuilder(256);
-                                var sep = string.Empty;
-                                foreach (var value in values)
-                                {
-                                    sb.Append(sep);
-                                    sep = ", ";
-                                    sb.Append(value);
-                                    // For better performance, avoid logging too much
-                                    if (sb.Length > 256)
-                                    {
-                                        sb.Append(", ...");
-                                        break;
-                                    }
-                                }
-
-                                stringToPrint = sb.ToString();
-                            }
-                            else if (parameterValue != null)
-                            {
-                                stringToPrint = parameterValue.ToString();
-                            }
-                        }
-                        catch (Exception) // Catch-all OK, 3rd party callout
-                        {
-                        }
-
-                        if (stringToPrint != null)
-                        {
-                            cmdRuntime.PipelineProcessor.LogExecutionParameterBinding(this.InvocationInfo, parameter.ParameterName, stringToPrint);
-                        }
+                        this.ValidatePSTypeName(parameter, parameterMetadata, !coerceTypeIfNeeded, o);
                     }
                 }
+                else
+                {
+                    this.ValidatePSTypeName(parameter, parameterMetadata, !coerceTypeIfNeeded, parameterValue);
+                }
+            }
 
-                return result;
+            // No validation is done for default values in script.
+            if (isDefaultValue)
+            {
+                return;
+            }
+
+            for (int i = 0; i < parameterMetadata.ValidationAttributes.Length; i++)
+            {
+                var validationAttribute = parameterMetadata.ValidationAttributes[i];
+
+                using (bindingTracer.TraceScope(
+                    "Executing VALIDATION metadata: [{0}]",
+                    validationAttribute.GetType()))
+                {
+                    try
+                    {
+                        validationAttribute.InternalValidate(parameterValue, _engine);
+                    }
+                    catch (Exception e) // Catch-all OK, 3rd party callout
+                    {
+                        bindingTracer.WriteLine(
+                            "ERROR: VALIDATION FAILED: {0}",
+                            e.Message);
+
+                        ParameterBindingValidationException bindingException =
+                            new ParameterBindingValidationException(
+                                e,
+                                ErrorCategory.InvalidData,
+                                this.InvocationInfo,
+                                GetErrorExtent(parameter),
+                                parameterMetadata.Name,
+                                parameterMetadata.Type,
+                                parameterValue?.GetType(),
+                                ParameterBinderStrings.ParameterArgumentValidationError,
+                                "ParameterArgumentValidationError",
+                                e.Message);
+                        throw bindingException;
+                    }
+
+                    s_tracer.WriteLine("Validation attribute on {0} returned {1}.", parameterMetadata.Name, false);
+                }
+            }
+
+            // If the value is null, empty string, or empty collection, ensure binding can continue.
+            if (parameterMetadata.IsMandatoryInSomeParameterSet)
+            {
+                ValidateNullOrEmptyArgument(parameter, parameterMetadata, parameterMetadata.Type, parameterValue, true);
+            }
+        }
+
+        /// <summary>
+        /// Emit warning for obsolete parameters when binding simple scripts/functions.
+        /// </summary>
+        private void WarnIfObsolete(
+            CompiledCommandParameter parameterMetadata,
+            ParameterBindingFlags flags)
+        {
+            bool isDefaultValue = (flags & ParameterBindingFlags.IsDefaultValue) != 0;
+            ScriptParameterBinder spb = this as ScriptParameterBinder;
+            bool usesCmdletBinding = spb != null && spb.Script.UsesCmdletBinding;
+
+            if (parameterMetadata.ObsoleteAttribute == null || isDefaultValue || spb == null || usesCmdletBinding)
+            {
+                return;
+            }
+
+            string obsoleteWarning = string.Format(
+                CultureInfo.InvariantCulture,
+                ParameterBinderStrings.UseOfDeprecatedParameterWarning,
+                parameterMetadata.Name,
+                parameterMetadata.ObsoleteAttribute.Message);
+
+            var mshCommandRuntime = this.Command.commandRuntime as MshCommandRuntime;
+
+            // Keep warning behavior aligned with obsolete command/cmdlet parameter warnings.
+            mshCommandRuntime?.WriteWarning(new WarningRecord(FQIDParameterObsolete, obsoleteWarning));
+        }
+
+        /// <summary>
+        /// Bind the transformed value and surface any binding failure as <see cref="ParameterBindingException"/>.
+        /// </summary>
+        private bool DispatchBind(
+            CommandParameterInternal parameter,
+            CompiledCommandParameter parameterMetadata,
+            object parameterValue)
+        {
+            Exception bindError = null;
+
+            try
+            {
+                BindParameter(parameter.ParameterName, parameterValue, parameterMetadata);
+            }
+            catch (SetValueException setValueException)
+            {
+                bindError = setValueException;
+            }
+
+            if (bindError != null)
+            {
+                Type specifiedType = parameterValue?.GetType();
+                ParameterBindingException bindingException =
+                    new ParameterBindingException(
+                        bindError,
+                        ErrorCategory.WriteError,
+                        this.InvocationInfo,
+                        GetErrorExtent(parameter),
+                        parameterMetadata.Name,
+                        parameterMetadata.Type,
+                        specifiedType,
+                        ParameterBinderStrings.ParameterBindingFailed,
+                        "ParameterBindingFailed",
+                        bindError.Message);
+
+                throw bindingException;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Record tracing and runtime logging information for the bind result.
+        /// </summary>
+        private void RecordBindingResult(CommandParameterInternal parameter, object parameterValue, bool result)
+        {
+            bindingTracer.WriteLine(
+                "BIND arg [{0}] to param [{1}] {2}",
+                parameterValue,
+                parameter.ParameterName,
+                result ? "SUCCESSFUL" : "SKIPPED");
+
+            if (!result)
+            {
+                return;
+            }
+
+            if (RecordBoundParameters)
+            {
+                this.CommandLineParameters.Add(parameter.ParameterName, parameterValue);
+            }
+
+            MshCommandRuntime cmdRuntime = this.Command.commandRuntime as MshCommandRuntime;
+            if ((cmdRuntime == null) ||
+                (!cmdRuntime.LogPipelineExecutionDetail && !_isTranscribing) ||
+                (cmdRuntime.PipelineProcessor == null))
+            {
+                return;
+            }
+
+            string stringToPrint = null;
+            try
+            {
+                IEnumerable values = LanguagePrimitives.GetEnumerable(parameterValue);
+                if (values != null)
+                {
+                    var sb = new Text.StringBuilder(256);
+                    var sep = string.Empty;
+                    foreach (var value in values)
+                    {
+                        sb.Append(sep);
+                        sep = ", ";
+                        sb.Append(value);
+                        if (sb.Length > 256)
+                        {
+                            sb.Append(", ...");
+                            break;
+                        }
+                    }
+
+                    stringToPrint = sb.ToString();
+                }
+                else if (parameterValue != null)
+                {
+                    stringToPrint = parameterValue.ToString();
+                }
+            }
+            catch (Exception) // Catch-all OK, 3rd party callout
+            {
+            }
+
+            if (stringToPrint != null)
+            {
+                cmdRuntime.PipelineProcessor.LogExecutionParameterBinding(this.InvocationInfo, parameter.ParameterName, stringToPrint);
             }
         }
 
@@ -1008,271 +1027,157 @@ namespace System.Management.Automation
             using (bindingTracer.TraceScope(
                 "COERCE arg to [{0}]", toType))
             {
+                object FinalizeResult(object value)
+                {
+                    if (value != null)
+                    {
+                        // Set the converted result object untrusted if necessary
+                        ExecutionContext.PropagateInputSource(originalValue, value, Context.LanguageMode);
+                    }
+
+                    return value;
+                }
+
                 Type argumentType = null;
                 try
                 {
-                    do // false loop
+                    if (IsNullParameterValue(currentValue))
                     {
-                        if (IsNullParameterValue(currentValue))
+                        result = HandleNullParameterForSpecialTypes(argument, parameterName, toType, currentValue);
+                        return FinalizeResult(result);
+                    }
+
+                    // Do the coercion
+                    argumentType = currentValue.GetType();
+
+                    // If the types are identical (or can be cast directly,) then no coercion
+                    // needs to be done
+                    if (toType.IsAssignableFrom(argumentType))
+                    {
+                        bindingTracer.WriteLine(
+                            "Parameter and arg types the same, no coercion is needed.");
+
+                        result = currentValue;
+                        return FinalizeResult(result);
+                    }
+
+                    bindingTracer.WriteLine("Trying to convert argument value from {0} to {1}", argumentType, toType);
+
+                    // Likewise shortcircuit the case were the user has asked for a shell object.
+                    // He always gets a shell object regardless of the actual type of the object.
+                    if (toType == typeof(PSObject))
+                    {
+                        // It may be the case that we're binding the current pipeline object
+                        // as is to a PSObject parameter in which case, we want to make
+                        // sure that we're using the same shell object instead of creating an
+                        // alias object.
+                        if (_command != null &&
+                            currentValue == _command.CurrentPipelineObject.BaseObject)
                         {
-                            result = HandleNullParameterForSpecialTypes(argument, parameterName, toType, currentValue);
-                            break;
-                        }
-
-                        // Do the coercion
-                        argumentType = currentValue.GetType();
-
-                        // If the types are identical (or can be cast directly,) then no coercion
-                        // needs to be done
-                        if (toType.IsAssignableFrom(argumentType))
-                        {
-                            bindingTracer.WriteLine(
-                                "Parameter and arg types the same, no coercion is needed.");
-
-                            result = currentValue;
-                            break;
-                        }
-
-                        bindingTracer.WriteLine("Trying to convert argument value from {0} to {1}", argumentType, toType);
-
-                        // Likewise shortcircuit the case were the user has asked for a shell object.
-                        // He always gets a shell object regardless of the actual type of the object.
-                        if (toType == typeof(PSObject))
-                        {
-                            // It may be the case that we're binding the current pipeline object
-                            // as is to a PSObject parameter in which case, we want to make
-                            // sure that we're using the same shell object instead of creating an
-                            // alias object.
-                            if (_command != null &&
-                                currentValue == _command.CurrentPipelineObject.BaseObject)
-                            {
-                                currentValue = _command.CurrentPipelineObject;
-                            }
-
-                            bindingTracer.WriteLine(
-                                "The parameter is of type [{0}] and the argument is an PSObject, so the parameter value is the argument value wrapped into an PSObject.",
-                                toType);
-                            result = LanguagePrimitives.AsPSObjectOrNull(currentValue);
-                            break;
-                        }
-
-                        // NTRAID#Windows OS Bugs-1064175-2004/02/28-JeffJon
-                        // If we have an PSObject with null base and we are trying to
-                        // convert to a string, then we need to use null instead of
-                        // calling LanguagePrimitives.ConvertTo as that will return
-                        // string.Empty.
-
-                        if (toType == typeof(string) &&
-                            argumentType == typeof(PSObject))
-                        {
-                            PSObject currentValueAsPSObject = (PSObject)currentValue;
-
-                            if (currentValueAsPSObject == AutomationNull.Value)
-                            {
-                                bindingTracer.WriteLine(
-                                    "CONVERT a null PSObject to a null string.");
-                                result = null;
-                                break;
-                            }
-                        }
-
-                        // NTRAID#Windows OS Bugs -<bug id here> - Nana
-                        // If we have a boolean, we have to ensure that it can
-                        // only take parameters of type boolean or numbers with
-                        // 0 indicating false and everything else indicating true
-                        // Anything else passed should be reported as an error
-
-                        if (toType == typeof(bool) || toType == typeof(SwitchParameter) ||
-                            toType == typeof(bool?))
-                        {
-                            Type boType = null;
-                            if (argumentType == typeof(PSObject))
-                            {
-                                // Unwrap the PSObject at this point...
-                                PSObject currentValueAsPSObject = (PSObject)currentValue;
-                                currentValue = currentValueAsPSObject.BaseObject;
-
-                                if (currentValue is SwitchParameter)
-                                {
-                                    currentValue = ((SwitchParameter)currentValue).IsPresent;
-                                }
-
-                                boType = currentValue.GetType();
-                            }
-                            else
-                            {
-                                boType = argumentType;
-                            }
-
-                            if (boType == typeof(bool))
-                            {
-                                if (LanguagePrimitives.IsBooleanType(toType))
-                                    result = ParserOps.BoolToObject((bool)currentValue);
-                                else
-                                    result = new SwitchParameter((bool)currentValue);
-                            }
-                            else if (boType == typeof(int))
-                            {
-                                if ((int)LanguagePrimitives.ConvertTo(currentValue,
-                                            typeof(int), CultureInfo.InvariantCulture) != 0)
-                                {
-                                    if (LanguagePrimitives.IsBooleanType(toType))
-                                        result = ParserOps.BoolToObject(true);
-                                    else
-                                        result = new SwitchParameter(true);
-                                }
-                                else
-                                {
-                                    if (LanguagePrimitives.IsBooleanType(toType))
-                                        result = ParserOps.BoolToObject(false);
-                                    else
-                                        result = new SwitchParameter(false);
-                                }
-                            }
-                            else if (LanguagePrimitives.IsNumeric(boType.GetTypeCode()))
-                            {
-                                double currentValueAsDouble = (double)LanguagePrimitives.ConvertTo(
-                                                                        currentValue, typeof(double), CultureInfo.InvariantCulture);
-
-                                if (currentValueAsDouble != 0)
-                                {
-                                    if (LanguagePrimitives.IsBooleanType(toType))
-                                        result = ParserOps.BoolToObject(true);
-                                    else
-                                        result = new SwitchParameter(true);
-                                }
-                                else
-                                {
-                                    if (LanguagePrimitives.IsBooleanType(toType))
-                                        result = ParserOps.BoolToObject(false);
-                                    else
-                                        result = new SwitchParameter(false);
-                                }
-                            }
-                            else
-                            {
-                                // Invalid types which cannot be associated with a bool
-                                // Since there is a catch block which appropriately
-                                // handles this situation we just throw an exception here
-                                // throw new PSInvalidCastException();
-                                ParameterBindingException pbe =
-                                    new ParameterBindingException(
-                                        ErrorCategory.InvalidArgument,
-                                        this.InvocationInfo,
-                                        GetErrorExtent(argument),
-                                        parameterName,
-                                        toType,
-                                        argumentType,
-                                        ParameterBinderStrings.CannotConvertArgument,
-                                        "CannotConvertArgument",
-                                        boType,
-                                        string.Empty);
-
-                                throw pbe;
-                            }
-
-                            break;
-                        }
-
-                        // NTRAID#Windows OS Bugs-1009284-2004/05/05-JeffJon
-                        // Need to handle other collection types here as well
-
-                        // Before attempting to encode a collection, we check if we can convert the argument directly via
-                        // a restricted set of conversions (as the general conversion mechanism is far too general, it may
-                        // succeed where it shouldn't.  We don't bother checking arrays parameters because they won't have
-                        // conversions we're allowing.
-                        if (collectionTypeInfo.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric
-                            || collectionTypeInfo.ParameterCollectionType == ParameterCollectionType.IList)
-                        {
-                            object currentValueToConvert = PSObject.Base(currentValue);
-                            if (currentValueToConvert != null)
-                            {
-                                ConversionRank rank = LanguagePrimitives.GetConversionRank(currentValueToConvert.GetType(), toType);
-                                if (rank == ConversionRank.Constructor || rank == ConversionRank.ImplicitCast || rank == ConversionRank.ExplicitCast)
-                                {
-                                    // This conversion will fail in the common case, and when it does, we'll use EncodeCollection below.
-                                    if (LanguagePrimitives.TryConvertTo(currentValue, toType, CultureInfo.CurrentCulture, out result))
-                                    {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (collectionTypeInfo.ParameterCollectionType != ParameterCollectionType.NotCollection)
-                        {
-                            bindingTracer.WriteLine(
-                                "ENCODING arg into collection");
-
-                            bool ignored = false;
-                            result =
-                                EncodeCollection(
-                                    argument,
-                                    parameterName,
-                                    collectionTypeInfo,
-                                    toType,
-                                    currentValue,
-                                    (collectionTypeInfo.ElementType != null),
-                                    out ignored);
-
-                            break;
-                        }
-                        else
-                        {
-                            // Check to see if the current value is a collection. If so, fail because
-                            // we don't want to attempt to bind a collection to a scalar unless
-                            // the parameter type is Object or PSObject or enum.
-
-                            if (GetIList(currentValue) != null &&
-                                toType != typeof(object) &&
-                                toType != typeof(PSObject) &&
-                                toType != typeof(PSListModifier) &&
-                                (!toType.IsGenericType || toType.GetGenericTypeDefinition() != typeof(PSListModifier<>)) &&
-                                (!toType.IsGenericType || toType.GetGenericTypeDefinition() != typeof(FlagsExpression<>)) &&
-                                !toType.IsEnum)
-                            {
-                                throw new NotSupportedException();
-                            }
+                            currentValue = _command.CurrentPipelineObject;
                         }
 
                         bindingTracer.WriteLine(
-                            "CONVERT arg type to param type using LanguagePrimitives.ConvertTo");
+                            "The parameter is of type [{0}] and the argument is an PSObject, so the parameter value is the argument value wrapped into an PSObject.",
+                            toType);
+                        result = LanguagePrimitives.AsPSObjectOrNull(currentValue);
+                        return FinalizeResult(result);
+                    }
 
-                        // If we are in constrained language mode and the target command is trusted, which is often
-                        // the case for C# cmdlets, then we allow type conversion to the target parameter type.
-                        //
-                        // However, we don't allow Hashtable-to-Object conversion (PSObject and IDictionary) because
-                        // those can lead to property setters that probably aren't expected. This is enforced by
-                        // setting 'Context.LanguageModeTransitionInParameterBinding' to true before the conversion.
-                        var currentLanguageMode = Context.LanguageMode;
-                        bool changeLanguageModeForTrustedCommand =
-                            currentLanguageMode == PSLanguageMode.ConstrainedLanguage &&
-                            this.Command.CommandInfo.DefiningLanguageMode == PSLanguageMode.FullLanguage;
-                        bool oldLangModeTransitionStatus = Context.LanguageModeTransitionInParameterBinding;
+                    // NTRAID#Windows OS Bugs-1064175-2004/02/28-JeffJon
+                    // If we have an PSObject with null base and we are trying to
+                    // convert to a string, then we need to use null instead of
+                    // calling LanguagePrimitives.ConvertTo as that will return
+                    // string.Empty.
 
-                        try
+                    if (toType == typeof(string) &&
+                        argumentType == typeof(PSObject))
+                    {
+                        PSObject currentValueAsPSObject = (PSObject)currentValue;
+
+                        if (currentValueAsPSObject == AutomationNull.Value)
                         {
-                            if (changeLanguageModeForTrustedCommand)
-                            {
-                                Context.LanguageMode = PSLanguageMode.FullLanguage;
-                                Context.LanguageModeTransitionInParameterBinding = true;
-                            }
-
-                            result = LanguagePrimitives.ConvertTo(currentValue, toType, CultureInfo.CurrentCulture);
+                            bindingTracer.WriteLine(
+                                "CONVERT a null PSObject to a null string.");
+                            result = null;
+                            return FinalizeResult(result);
                         }
-                        finally
+                    }
+
+                    // NTRAID#Windows OS Bugs -<bug id here> - Nana
+                    // If we have a boolean, we have to ensure that it can
+                    // only take parameters of type boolean or numbers with
+                    // 0 indicating false and everything else indicating true
+                    // Anything else passed should be reported as an error
+                    if (toType == typeof(bool) || toType == typeof(SwitchParameter) ||
+                        toType == typeof(bool?))
+                    {
+                        result = CoerceToBooleanOrSwitch(currentValue, argumentType, toType, argument, parameterName);
+                        return FinalizeResult(result);
+                    }
+
+                    // NTRAID#Windows OS Bugs-1009284-2004/05/05-JeffJon
+                    // Need to handle other collection types here as well
+
+                    // Before attempting to encode a collection, we check if we can convert the argument directly via
+                    // a restricted set of conversions (as the general conversion mechanism is far too general, it may
+                    // succeed where it shouldn't.  We don't bother checking arrays parameters because they won't have
+                    // conversions we're allowing.
+                    if (collectionTypeInfo.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric
+                        || collectionTypeInfo.ParameterCollectionType == ParameterCollectionType.IList)
+                    {
+                        object currentValueToConvert = PSObject.Base(currentValue);
+                        if (currentValueToConvert != null)
                         {
-                            if (changeLanguageModeForTrustedCommand)
+                            ConversionRank rank = LanguagePrimitives.GetConversionRank(currentValueToConvert.GetType(), toType);
+                            if (rank == ConversionRank.Constructor || rank == ConversionRank.ImplicitCast || rank == ConversionRank.ExplicitCast)
                             {
-                                Context.LanguageMode = currentLanguageMode;
-                                Context.LanguageModeTransitionInParameterBinding = oldLangModeTransitionStatus;
+                                // This conversion will fail in the common case, and when it does, we'll use EncodeCollection below.
+                                if (LanguagePrimitives.TryConvertTo(currentValue, toType, CultureInfo.CurrentCulture, out result))
+                                {
+                                    return FinalizeResult(result);
+                                }
                             }
                         }
+                    }
 
+                    if (collectionTypeInfo.ParameterCollectionType != ParameterCollectionType.NotCollection)
+                    {
                         bindingTracer.WriteLine(
-                            "CONVERT SUCCESSFUL using LanguagePrimitives.ConvertTo: [{0}]",
-                            (result == null) ? "null" : result.ToString());
-                    } while (false);
+                            "ENCODING arg into collection");
+
+                        bool ignored = false;
+                        result =
+                            EncodeCollection(
+                                argument,
+                                parameterName,
+                                collectionTypeInfo,
+                                toType,
+                                currentValue,
+                                (collectionTypeInfo.ElementType != null),
+                                out ignored);
+
+                        return FinalizeResult(result);
+                    }
+
+                    // Check to see if the current value is a collection. If so, fail because
+                    // we don't want to attempt to bind a collection to a scalar unless
+                    // the parameter type is Object or PSObject or enum.
+
+                    if (GetIList(currentValue) != null &&
+                        toType != typeof(object) &&
+                        toType != typeof(PSObject) &&
+                        toType != typeof(PSListModifier) &&
+                        (!toType.IsGenericType || toType.GetGenericTypeDefinition() != typeof(PSListModifier<>)) &&
+                        (!toType.IsGenericType || toType.GetGenericTypeDefinition() != typeof(FlagsExpression<>)) &&
+                        !toType.IsEnum)
+                    {
+                        throw new NotSupportedException();
+                    }
+
+                    result = CoerceWithLanguagePrimitives(currentValue, toType, argument, parameterName, argumentType);
+
+                    return FinalizeResult(result);
                 }
                 catch (NotSupportedException notSupported)
                 {
@@ -1321,13 +1226,6 @@ namespace System.Management.Automation
                 }
             }
 
-            if (result != null)
-            {
-                // Set the converted result object untrusted if necessary
-                ExecutionContext.PropagateInputSource(originalValue, result, Context.LanguageMode);
-            }
-
-            return result;
         }
 
         private static bool IsNullParameterValue(object currentValue)
@@ -1410,6 +1308,134 @@ namespace System.Management.Automation
         }
 
         /// <summary>
+        /// Coerces a value to bool or SwitchParameter when the target type requires it.
+        /// </summary>
+        private object CoerceToBooleanOrSwitch(
+            object currentValue,
+            Type argumentType,
+            Type toType,
+            CommandParameterInternal argument,
+            string parameterName)
+        {
+            Type boType;
+            if (argumentType == typeof(PSObject))
+            {
+                // Unwrap the PSObject at this point.
+                PSObject currentValueAsPSObject = (PSObject)currentValue;
+                currentValue = currentValueAsPSObject.BaseObject;
+
+                if (currentValue is SwitchParameter)
+                {
+                    currentValue = ((SwitchParameter)currentValue).IsPresent;
+                }
+
+                boType = currentValue.GetType();
+            }
+            else
+            {
+                boType = argumentType;
+            }
+
+            if (boType == typeof(bool))
+            {
+                return LanguagePrimitives.IsBooleanType(toType)
+                    ? ParserOps.BoolToObject((bool)currentValue)
+                    : new SwitchParameter((bool)currentValue);
+            }
+
+            if (boType == typeof(int))
+            {
+                bool isTrue = (int)LanguagePrimitives.ConvertTo(currentValue, typeof(int), CultureInfo.InvariantCulture) != 0;
+                return LanguagePrimitives.IsBooleanType(toType)
+                    ? ParserOps.BoolToObject(isTrue)
+                    : new SwitchParameter(isTrue);
+            }
+
+            if (LanguagePrimitives.IsNumeric(boType.GetTypeCode()))
+            {
+                double currentValueAsDouble = (double)LanguagePrimitives.ConvertTo(
+                    currentValue, typeof(double), CultureInfo.InvariantCulture);
+                bool isTrue = currentValueAsDouble != 0;
+                return LanguagePrimitives.IsBooleanType(toType)
+                    ? ParserOps.BoolToObject(isTrue)
+                    : new SwitchParameter(isTrue);
+            }
+
+            // Invalid types which cannot be associated with a bool.
+            ParameterBindingException pbe =
+                new ParameterBindingException(
+                    ErrorCategory.InvalidArgument,
+                    this.InvocationInfo,
+                    GetErrorExtent(argument),
+                    parameterName,
+                    toType,
+                    argumentType,
+                    ParameterBinderStrings.CannotConvertArgument,
+                    "CannotConvertArgument",
+                    boType,
+                    string.Empty);
+
+            throw pbe;
+        }
+
+        /// <summary>
+        /// Converts a value using LanguagePrimitives.ConvertTo, handling language mode
+        /// switching for parameters that allow it.
+        /// </summary>
+        private object CoerceWithLanguagePrimitives(
+            object currentValue,
+            Type toType,
+            CommandParameterInternal argument,
+            string parameterName,
+            Type argumentType)
+        {
+            _ = argument;
+            _ = parameterName;
+            _ = argumentType;
+
+            bindingTracer.WriteLine(
+                "CONVERT arg type to param type using LanguagePrimitives.ConvertTo");
+
+            // If we are in constrained language mode and the target command is trusted, which is often
+            // the case for C# cmdlets, then we allow type conversion to the target parameter type.
+            //
+            // However, we don't allow Hashtable-to-Object conversion (PSObject and IDictionary) because
+            // those can lead to property setters that probably aren't expected. This is enforced by
+            // setting 'Context.LanguageModeTransitionInParameterBinding' to true before the conversion.
+            var currentLanguageMode = Context.LanguageMode;
+            bool changeLanguageModeForTrustedCommand =
+                currentLanguageMode == PSLanguageMode.ConstrainedLanguage &&
+                this.Command.CommandInfo.DefiningLanguageMode == PSLanguageMode.FullLanguage;
+            bool oldLangModeTransitionStatus = Context.LanguageModeTransitionInParameterBinding;
+
+            object result;
+            try
+            {
+                if (changeLanguageModeForTrustedCommand)
+                {
+                    Context.LanguageMode = PSLanguageMode.FullLanguage;
+                    Context.LanguageModeTransitionInParameterBinding = true;
+                }
+
+                result = LanguagePrimitives.ConvertTo(currentValue, toType, CultureInfo.CurrentCulture);
+            }
+            finally
+            {
+                if (changeLanguageModeForTrustedCommand)
+                {
+                    Context.LanguageMode = currentLanguageMode;
+                    Context.LanguageModeTransitionInParameterBinding = oldLangModeTransitionStatus;
+                }
+            }
+
+            bindingTracer.WriteLine(
+                "CONVERT SUCCESSFUL using LanguagePrimitives.ConvertTo: [{0}]",
+                result is null ? "null" : result.ToString());
+
+            return result;
+        }
+
+        /// <summary>
         /// Takes the current value specified and converts or adds it to
         /// a collection of the appropriate type.
         /// </summary>
@@ -1465,437 +1491,491 @@ namespace System.Management.Automation
             object result = null;
             coercionRequired = false;
 
-            do // false loop
+            bindingTracer.WriteLine(
+                "Binding collection parameter {0}: argument type [{1}], parameter type [{2}], collection type {3}, element type [{4}], {5}",
+                parameterName,
+                (currentValue == null) ? "null" : currentValue.GetType().Name,
+                toType,
+                collectionTypeInformation.ParameterCollectionType,
+                collectionTypeInformation.ElementType,
+                coerceElementTypeIfNeeded ? "coerceElementType" : "no coerceElementType");
+
+            if (currentValue == null)
             {
+                return result;
+            }
+
+            int numberOfElements = 1;
+            Type collectionElementType = collectionTypeInformation.ElementType;
+
+            // If the current value is an IList, get the count of the elements
+            // Or if it is an PSObject which wraps an IList
+
+            IList currentValueAsIList = GetIList(currentValue);
+
+            if (currentValueAsIList != null)
+            {
+                numberOfElements = currentValueAsIList.Count;
+
+                s_tracer.WriteLine("current value is an IList with {0} elements", numberOfElements);
                 bindingTracer.WriteLine(
-                    "Binding collection parameter {0}: argument type [{1}], parameter type [{2}], collection type {3}, element type [{4}], {5}",
-                    parameterName,
-                    (currentValue == null) ? "null" : currentValue.GetType().Name,
-                    toType,
-                    collectionTypeInformation.ParameterCollectionType,
-                    collectionTypeInformation.ElementType,
-                    coerceElementTypeIfNeeded ? "coerceElementType" : "no coerceElementType");
+                    "Arg is IList with {0} elements",
+                    numberOfElements);
+            }
 
-                if (currentValue == null)
+            var createdCollection = CreateTargetCollection(
+                argument,
+                parameterName,
+                collectionTypeInformation,
+                toType,
+                currentValue,
+                numberOfElements,
+                collectionElementType);
+
+            if (createdCollection.collection is null)
+            {
+                return result;
+            }
+
+            collectionElementType = createdCollection.elementType;
+
+            PopulateCollection(
+                argument,
+                parameterName,
+                collectionTypeInformation,
+                toType,
+                currentValue,
+                currentValueAsIList,
+                createdCollection.collection,
+                createdCollection.asIList,
+                createdCollection.addMethod,
+                collectionElementType,
+                coerceElementTypeIfNeeded,
+                createdCollection.isSystemDotArray,
+                ref coercionRequired);
+
+            if (coercionRequired)
+            {
+                return result;
+            }
+
+            if (!coercionRequired)
+            {
+                result = createdCollection.collection;
+
+                // Set the converted result object untrusted if necessary
+                ExecutionContext.PropagateInputSource(originalValue, result, Context.LanguageMode);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Creates a collection instance for the destination parameter type.
+        /// </summary>
+        private (object collection, IList asIList, MethodInfo addMethod, bool isSystemDotArray, Type elementType) CreateTargetCollection(
+            CommandParameterInternal argument,
+            string parameterName,
+            ParameterCollectionTypeInformation collectionTypeInformation,
+            Type toType,
+            object currentValue,
+            int numberOfElements,
+            Type collectionElementType)
+        {
+            object resultCollection = null;
+            IList resultAsIList = null;
+            MethodInfo addMethod = null;
+
+            // We must special case System.Array to be like an object array since it is an
+            // abstract base class and cannot be created in the IList path below.
+            bool isSystemDotArray = (toType == typeof(System.Array));
+
+            if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array ||
+                isSystemDotArray)
+            {
+                if (isSystemDotArray)
                 {
-                    break;
+                    // If System.Array is the type we are encoding to, then
+                    // the element type should be System.Object.
+
+                    collectionElementType = typeof(object);
                 }
 
-                int numberOfElements = 1;
-                Type collectionElementType = collectionTypeInformation.ElementType;
+                bindingTracer.WriteLine(
+                    "Creating array with element type [{0}] and {1} elements",
+                    collectionElementType,
+                    numberOfElements);
 
-                // If the current value is an IList, get the count of the elements
-                // Or if it is an PSObject which wraps an IList
+                // Since the destination is an array we will have to create an array
+                // of the element type with the correct length
 
-                IList currentValueAsIList = GetIList(currentValue);
-
-                if (currentValueAsIList != null)
-                {
-                    numberOfElements = currentValueAsIList.Count;
-
-                    s_tracer.WriteLine("current value is an IList with {0} elements", numberOfElements);
-                    bindingTracer.WriteLine(
-                        "Arg is IList with {0} elements",
-                        numberOfElements);
-                }
-
-                object resultCollection = null;
-                IList resultAsIList = null;
-                MethodInfo addMethod = null;
-
-                // We must special case System.Array to be like an object array since it is an
-                // abstract base class and cannot be created in the IList path below.
-                bool isSystemDotArray = (toType == typeof(System.Array));
-
-                if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array ||
-                    isSystemDotArray)
-                {
-                    if (isSystemDotArray)
-                    {
-                        // If System.Array is the type we are encoding to, then
-                        // the element type should be System.Object.
-
-                        collectionElementType = typeof(object);
-                    }
-
-                    bindingTracer.WriteLine(
-                        "Creating array with element type [{0}] and {1} elements",
+                resultCollection = resultAsIList =
+                    (IList)Array.CreateInstance(
                         collectionElementType,
                         numberOfElements);
+            }
+            else if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList ||
+                     collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric)
+            {
+                bindingTracer.WriteLine(
+                    "Creating collection [{0}]",
+                    toType);
 
-                    // Since the destination is an array we will have to create an array
-                    // of the element type with the correct length
+                // Create an instance of the parameter type
 
-                    resultCollection = resultAsIList =
-                        (IList)Array.CreateInstance(
-                            collectionElementType,
-                            numberOfElements);
-                }
-                else if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList ||
-                         collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric)
+                // NTRAID#Windows Out Of Band Releases-906820-2005/09/01
+                // This code previously used the ctor(int) ctor form.
+                // System.Collections.ObjectModel.Collection<T> does not
+                // support this ctor form.  More generally, there is no
+                // guarantee that the ctor parameter has the semantic
+                // meaning of "likely list size".  Blindly calling the
+                // parameterless ctor is also risky, but seems like a
+                // safer choice.
+
+                bool errorOccurred = false;
+                Exception error = null;
+                try
                 {
-                    bindingTracer.WriteLine(
-                        "Creating collection [{0}]",
-                        toType);
-
-                    // Create an instance of the parameter type
-
-                    // NTRAID#Windows Out Of Band Releases-906820-2005/09/01
-                    // This code previously used the ctor(int) ctor form.
-                    // System.Collections.ObjectModel.Collection<T> does not
-                    // support this ctor form.  More generally, there is no
-                    // guarantee that the ctor parameter has the semantic
-                    // meaning of "likely list size".  Blindly calling the
-                    // parameterless ctor is also risky, but seems like a
-                    // safer choice.
-
-                    bool errorOccurred = false;
-                    Exception error = null;
-                    try
+                    resultCollection =
+                        Activator.CreateInstance(
+                            toType,
+                            0,
+                            null,
+                            Array.Empty<object>(),
+                            System.Globalization.CultureInfo.InvariantCulture);
+                    if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList)
                     {
-                        resultCollection =
-                            Activator.CreateInstance(
-                                toType,
-                                0,
-                                null,
-                                Array.Empty<object>(),
-                                System.Globalization.CultureInfo.InvariantCulture);
-                        if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList)
-                            resultAsIList = (IList)resultCollection;
-                        else
-                        {
-                            Diagnostics.Assert(
-                                collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric,
-                                "invalid collection type"
-                                );
-                            // extract the ICollection<T>::Add(T) method
-                            const BindingFlags bindingFlags = BindingFlags.Public | BindingFlags.Instance;
-                            Type elementType = collectionTypeInformation.ElementType;
-                            Diagnostics.Assert(elementType != null, "null ElementType");
-                            Exception getMethodError = null;
-                            try
-                            {
-                                addMethod = toType.GetMethod("Add", bindingFlags, null, new Type[1] { elementType }, null);
-                            }
-                            catch (AmbiguousMatchException e)
-                            {
-                                bindingTracer.WriteLine("Ambiguous match to Add(T) for type {0}: {1}", toType.FullName, e.Message);
-                                getMethodError = e;
-                            }
-                            catch (ArgumentException e)
-                            {
-                                bindingTracer.WriteLine(
-                                    "ArgumentException matching Add(T) for type {0}: {1}", toType.FullName, e.Message);
-                                getMethodError = e;
-                            }
-
-                            if (addMethod == null)
-                            {
-                                ParameterBindingException bindingException =
-                                    new ParameterBindingException(
-                                        getMethodError,
-                                        ErrorCategory.InvalidArgument,
-                                        this.InvocationInfo,
-                                        GetErrorExtent(argument),
-                                        parameterName,
-                                        toType,
-                                        currentValue.GetType(),
-                                        ParameterBinderStrings.CannotExtractAddMethod,
-                                        "CannotExtractAddMethod",
-                                        (getMethodError == null) ? string.Empty : getMethodError.Message);
-                                throw bindingException;
-                            }
-                        }
+                        resultAsIList = (IList)resultCollection;
                     }
-                    catch (ArgumentException argException)
+                    else
                     {
-                        errorOccurred = true;
-                        error = argException;
-                    }
-                    catch (NotSupportedException notSupported)
-                    {
-                        errorOccurred = true;
-                        error = notSupported;
-                    }
-                    catch (TargetInvocationException targetInvocationException)
-                    {
-                        errorOccurred = true;
-                        error = targetInvocationException;
-                    }
-                    catch (MethodAccessException methodAccessException)
-                    {
-                        errorOccurred = true;
-                        error = methodAccessException;
-                    }
-                    catch (MemberAccessException memberAccessException)
-                    {
-                        errorOccurred = true;
-                        error = memberAccessException;
-                    }
-                    catch (System.Runtime.InteropServices.InvalidComObjectException invalidComObject)
-                    {
-                        errorOccurred = true;
-                        error = invalidComObject;
-                    }
-                    catch (System.Runtime.InteropServices.COMException comException)
-                    {
-                        errorOccurred = true;
-                        error = comException;
-                    }
-                    catch (TypeLoadException typeLoadException)
-                    {
-                        errorOccurred = true;
-                        error = typeLoadException;
-                    }
-
-                    if (errorOccurred)
-                    {
-                        // Throw a ParameterBindingException
-
-                        ParameterBindingException bindingException =
-                            new ParameterBindingException(
-                                error,
-                                ErrorCategory.InvalidArgument,
-                                this.InvocationInfo,
-                                GetErrorExtent(argument),
-                                parameterName,
-                                toType,
-                                currentValue.GetType(),
-                                ParameterBinderStrings.CannotConvertArgument,
-                                "CannotConvertArgument",
-                                "null",
-                                error.Message);
-                        throw bindingException;
-                    }
-                }
-                else
-                {
-                    Diagnostics.Assert(
-                        false,
-                        "This method should not be called for a parameter that is not a collection");
-                    break;
-                }
-
-                // NTRAID#Windows OS Bugs-966440-2004/05/05-JeffJon
-                // This coercion can only go to a collection type.  It cannot take a
-                // collection type and coerce it into a scalar type.
-
-                // Now that the new collection instance has been created, coerce each element type
-                // of the current value to the element type of the property value and add it
-
-                if (currentValueAsIList != null)
-                {
-                    // Since arrays don't support the Add method, we must use indexing
-                    // to set the value.
-                    int arrayIndex = 0;
-
-                    bindingTracer.WriteLine(
-                        "Argument type {0} is IList",
-                        currentValue.GetType());
-
-                    foreach (object valueElement in currentValueAsIList)
-                    {
-                        object currentValueElement = PSObject.Base(valueElement);
-
-                        if (coerceElementTypeIfNeeded)
-                        {
-                            bindingTracer.WriteLine(
-                                "COERCE collection element from type {0} to type {1}",
-                                (valueElement == null) ? "null" : valueElement.GetType().Name,
-                                collectionElementType);
-
-                            // Coerce the element to the appropriate type.
-                            // Note, this may be recursive if the element is a
-                            // collection itself.
-
-                            currentValueElement =
-                                CoerceTypeAsNeeded(
-                                        argument,
-                                        parameterName,
-                                        collectionElementType,
-                                        null,
-                                        valueElement);
-                        }
-                        else if (collectionElementType != null && currentValueElement != null)
-                        {
-                            Type currentValueElementType = currentValueElement.GetType();
-                            Type desiredElementType = collectionElementType;
-
-                            if (currentValueElementType != desiredElementType &&
-                                !currentValueElementType.IsSubclassOf(desiredElementType))
-                            {
-                                bindingTracer.WriteLine(
-                                    "COERCION REQUIRED: Did not attempt to coerce collection element from type {0} to type {1}",
-                                    (valueElement == null) ? "null" : valueElement.GetType().Name,
-                                    collectionElementType);
-
-                                coercionRequired = true;
-                                break;
-                            }
-                        }
-
-                        // Add() will fail with ArgumentException
-                        // for Collection<T> with the wrong type.
+                        Diagnostics.Assert(
+                            collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.ICollectionGeneric,
+                            "invalid collection type"
+                            );
+                        // extract the ICollection<T>::Add(T) method
+                        const BindingFlags bindingFlags = BindingFlags.Public | BindingFlags.Instance;
+                        Type elementType = collectionTypeInformation.ElementType;
+                        Diagnostics.Assert(elementType != null, "null ElementType");
+                        Exception getMethodError = null;
                         try
                         {
-                            if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array ||
-                                isSystemDotArray)
-                            {
-                                bindingTracer.WriteLine(
-                                    "Adding element of type {0} to array position {1}",
-                                    (currentValueElement == null) ? "null" : currentValueElement.GetType().Name,
-                                    arrayIndex);
-                                resultAsIList[arrayIndex++] = currentValueElement;
-                            }
-                            else if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList)
-                            {
-                                bindingTracer.WriteLine(
-                                    "Adding element of type {0} via IList.Add",
-                                    (currentValueElement == null) ? "null" : currentValueElement.GetType().Name);
-                                resultAsIList.Add(currentValueElement);
-                            }
-                            else
-                            {
-                                bindingTracer.WriteLine(
-                                    "Adding element of type {0} via ICollection<T>::Add()",
-                                    (currentValueElement == null) ? "null" : currentValueElement.GetType().Name);
-                                addMethod.Invoke(resultCollection, new object[1] { currentValueElement });
-                            }
+                            addMethod = toType.GetMethod("Add", bindingFlags, null, new Type[1] { elementType }, null);
                         }
-                        catch (Exception error) // OK, we catch all here by design
+                        catch (AmbiguousMatchException e)
                         {
-                            // The inner exception to TargetInvocationException
-                            // (if present) has a better Message
-                            if (error is TargetInvocationException &&
-                                error.InnerException != null)
-                            {
-                                error = error.InnerException;
-                            }
+                            bindingTracer.WriteLine("Ambiguous match to Add(T) for type {0}: {1}", toType.FullName, e.Message);
+                            getMethodError = e;
+                        }
+                        catch (ArgumentException e)
+                        {
+                            bindingTracer.WriteLine(
+                                "ArgumentException matching Add(T) for type {0}: {1}", toType.FullName, e.Message);
+                            getMethodError = e;
+                        }
 
+                        if (addMethod == null)
+                        {
                             ParameterBindingException bindingException =
                                 new ParameterBindingException(
-                                    error,
+                                    getMethodError,
                                     ErrorCategory.InvalidArgument,
                                     this.InvocationInfo,
                                     GetErrorExtent(argument),
                                     parameterName,
                                     toType,
-                                    currentValueElement?.GetType(),
-                                    ParameterBinderStrings.CannotConvertArgument,
-                                    "CannotConvertArgument",
-                                    currentValueElement ?? "null",
-                                    error.Message);
+                                    currentValue.GetType(),
+                                    ParameterBinderStrings.CannotExtractAddMethod,
+                                    "CannotExtractAddMethod",
+                                    (getMethodError == null) ? string.Empty : getMethodError.Message);
                             throw bindingException;
                         }
                     }
                 }
-                else // (currentValueAsIList == null)
+                catch (ArgumentException argException)
                 {
-                    bindingTracer.WriteLine(
-                        "Argument type {0} is not IList, treating this as scalar",
-                        currentValue.GetType().Name);
+                    errorOccurred = true;
+                    error = argException;
+                }
+                catch (NotSupportedException notSupported)
+                {
+                    errorOccurred = true;
+                    error = notSupported;
+                }
+                catch (TargetInvocationException targetInvocationException)
+                {
+                    errorOccurred = true;
+                    error = targetInvocationException;
+                }
+                catch (MethodAccessException methodAccessException)
+                {
+                    errorOccurred = true;
+                    error = methodAccessException;
+                }
+                catch (MemberAccessException memberAccessException)
+                {
+                    errorOccurred = true;
+                    error = memberAccessException;
+                }
+                catch (System.Runtime.InteropServices.InvalidComObjectException invalidComObject)
+                {
+                    errorOccurred = true;
+                    error = invalidComObject;
+                }
+                catch (System.Runtime.InteropServices.COMException comException)
+                {
+                    errorOccurred = true;
+                    error = comException;
+                }
+                catch (TypeLoadException typeLoadException)
+                {
+                    errorOccurred = true;
+                    error = typeLoadException;
+                }
 
-                    if (collectionElementType != null)
+                if (errorOccurred)
+                {
+                    // Throw a ParameterBindingException
+
+                    ParameterBindingException bindingException =
+                        new ParameterBindingException(
+                            error,
+                            ErrorCategory.InvalidArgument,
+                            this.InvocationInfo,
+                            GetErrorExtent(argument),
+                            parameterName,
+                            toType,
+                            currentValue.GetType(),
+                            ParameterBinderStrings.CannotConvertArgument,
+                            "CannotConvertArgument",
+                            "null",
+                            error.Message);
+                    throw bindingException;
+                }
+            }
+            else
+            {
+                Diagnostics.Assert(
+                    false,
+                    "This method should not be called for a parameter that is not a collection");
+            }
+
+            return (resultCollection, resultAsIList, addMethod, isSystemDotArray, collectionElementType);
+        }
+
+        /// <summary>
+        /// Populates the target collection with source values, coercing elements when needed.
+        /// </summary>
+        private void PopulateCollection(
+            CommandParameterInternal argument,
+            string parameterName,
+            ParameterCollectionTypeInformation collectionTypeInformation,
+            Type toType,
+            object currentValue,
+            IList currentValueAsIList,
+            object resultCollection,
+            IList resultAsIList,
+            MethodInfo addMethod,
+            Type collectionElementType,
+            bool coerceElementTypeIfNeeded,
+            bool isSystemDotArray,
+            ref bool coercionRequired)
+        {
+            // NTRAID#Windows OS Bugs-966440-2004/05/05-JeffJon
+            // This coercion can only go to a collection type.  It cannot take a
+            // collection type and coerce it into a scalar type.
+
+            // Now that the new collection instance has been created, coerce each element type
+            // of the current value to the element type of the property value and add it.
+            if (currentValueAsIList != null)
+            {
+                // Since arrays don't support the Add method, we must use indexing
+                // to set the value.
+                int arrayIndex = 0;
+
+                bindingTracer.WriteLine(
+                    "Argument type {0} is IList",
+                    currentValue.GetType());
+
+                foreach (object valueElement in currentValueAsIList)
+                {
+                    object currentValueElement = PSObject.Base(valueElement);
+
+                    if (coerceElementTypeIfNeeded)
                     {
-                        if (coerceElementTypeIfNeeded)
+                        bindingTracer.WriteLine(
+                            "COERCE collection element from type {0} to type {1}",
+                            (valueElement == null) ? "null" : valueElement.GetType().Name,
+                            collectionElementType);
+
+                        // Coerce the element to the appropriate type.
+                        // Note, this may be recursive if the element is a
+                        // collection itself.
+
+                        currentValueElement =
+                            CoerceTypeAsNeeded(
+                                argument,
+                                parameterName,
+                                collectionElementType,
+                                null,
+                                valueElement);
+                    }
+                    else if (collectionElementType != null && currentValueElement != null)
+                    {
+                        Type currentValueElementType = currentValueElement.GetType();
+                        Type desiredElementType = collectionElementType;
+
+                        if (currentValueElementType != desiredElementType &&
+                            !currentValueElementType.IsSubclassOf(desiredElementType))
                         {
                             bindingTracer.WriteLine(
-                                "Coercing scalar arg value to type {0}",
+                                "COERCION REQUIRED: Did not attempt to coerce collection element from type {0} to type {1}",
+                                (valueElement == null) ? "null" : valueElement.GetType().Name,
                                 collectionElementType);
 
-                            // Coerce the scalar type into the collection
-
-                            currentValue =
-                                CoerceTypeAsNeeded(
-                                    argument,
-                                    parameterName,
-                                    collectionElementType,
-                                    null,
-                                    currentValue);
-                        }
-                        else
-                        {
-                            Type currentValueElementType = currentValue.GetType();
-                            Type desiredElementType = collectionElementType;
-
-                            if (currentValueElementType != desiredElementType &&
-                                !currentValueElementType.IsSubclassOf(desiredElementType))
-                            {
-                                bindingTracer.WriteLine(
-                                    "COERCION REQUIRED: Did not coerce scalar arg value to type {1}",
-                                    collectionElementType);
-
-                                coercionRequired = true;
-                                break;
-                            }
+                            coercionRequired = true;
+                            return;
                         }
                     }
 
-                    // Add() will fail with ArgumentException
-                    // for Collection<T> with the wrong type.
-                    try
-                    {
-                        if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array ||
-                            isSystemDotArray)
-                        {
-                            bindingTracer.WriteLine(
-                                "Adding scalar element of type {0} to array position {1}",
-                                (currentValue == null) ? "null" : currentValue.GetType().Name,
-                                0);
-                            resultAsIList[0] = currentValue;
-                        }
-                        else if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList)
-                        {
-                            bindingTracer.WriteLine(
-                                "Adding scalar element of type {0} via IList.Add",
-                                (currentValue == null) ? "null" : currentValue.GetType().Name);
-                            resultAsIList.Add(currentValue);
-                        }
-                        else
-                        {
-                            bindingTracer.WriteLine(
-                                "Adding scalar element of type {0} via ICollection<T>::Add()",
-                                (currentValue == null) ? "null" : currentValue.GetType().Name);
-                            addMethod.Invoke(resultCollection, new object[1] { currentValue });
-                        }
-                    }
-                    catch (Exception error) // OK, we catch all here by design
-                    {
-                        // The inner exception to TargetInvocationException
-                        // (if present) has a better Message
-                        if (error is TargetInvocationException &&
-                            error.InnerException != null)
-                        {
-                            error = error.InnerException;
-                        }
+                    AddElementToCollection(
+                        argument,
+                        parameterName,
+                        collectionTypeInformation,
+                        toType,
+                        resultCollection,
+                        resultAsIList,
+                        addMethod,
+                        isSystemDotArray,
+                        currentValueElement,
+                        arrayIndex);
 
-                        ParameterBindingException bindingException =
-                            new ParameterBindingException(
-                                error,
-                                ErrorCategory.InvalidArgument,
-                                this.InvocationInfo,
-                                GetErrorExtent(argument),
-                                parameterName,
-                                toType,
-                                currentValue?.GetType(),
-                                ParameterBinderStrings.CannotConvertArgument,
-                                "CannotConvertArgument",
-                                currentValue ?? "null",
-                                error.Message);
-                        throw bindingException;
+                    if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array || isSystemDotArray)
+                    {
+                        arrayIndex++;
                     }
                 }
 
-                if (!coercionRequired)
+                return;
+            }
+
+            bindingTracer.WriteLine(
+                "Argument type {0} is not IList, treating this as scalar",
+                currentValue.GetType().Name);
+
+            if (collectionElementType != null)
+            {
+                if (coerceElementTypeIfNeeded)
                 {
-                    result = resultCollection;
+                    bindingTracer.WriteLine(
+                        "Coercing scalar arg value to type {0}",
+                        collectionElementType);
 
-                    // Set the converted result object untrusted if necessary
-                    ExecutionContext.PropagateInputSource(originalValue, result, Context.LanguageMode);
+                    // Coerce the scalar type into the collection
+
+                    currentValue =
+                        CoerceTypeAsNeeded(
+                            argument,
+                            parameterName,
+                            collectionElementType,
+                            null,
+                            currentValue);
                 }
-            } while (false);
+                else
+                {
+                    Type currentValueElementType = currentValue.GetType();
+                    Type desiredElementType = collectionElementType;
 
-            return result;
+                    if (currentValueElementType != desiredElementType &&
+                        !currentValueElementType.IsSubclassOf(desiredElementType))
+                    {
+                        bindingTracer.WriteLine(
+                            "COERCION REQUIRED: Did not coerce scalar arg value to type {1}",
+                            collectionElementType);
+
+                        coercionRequired = true;
+                        return;
+                    }
+                }
+            }
+
+            AddElementToCollection(
+                argument,
+                parameterName,
+                collectionTypeInformation,
+                toType,
+                resultCollection,
+                resultAsIList,
+                addMethod,
+                isSystemDotArray,
+                currentValue,
+                0);
+        }
+
+        private void AddElementToCollection(
+            CommandParameterInternal argument,
+            string parameterName,
+            ParameterCollectionTypeInformation collectionTypeInformation,
+            Type toType,
+            object resultCollection,
+            IList resultAsIList,
+            MethodInfo addMethod,
+            bool isSystemDotArray,
+            object value,
+            int arrayIndex)
+        {
+            // Add() will fail with ArgumentException for Collection<T> with the wrong type.
+            try
+            {
+                if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.Array ||
+                    isSystemDotArray)
+                {
+                    bindingTracer.WriteLine(
+                        "Adding element of type {0} to array position {1}",
+                        (value == null) ? "null" : value.GetType().Name,
+                        arrayIndex);
+                    resultAsIList[arrayIndex] = value;
+                }
+                else if (collectionTypeInformation.ParameterCollectionType == ParameterCollectionType.IList)
+                {
+                    bindingTracer.WriteLine(
+                        "Adding element of type {0} via IList.Add",
+                        (value == null) ? "null" : value.GetType().Name);
+                    resultAsIList.Add(value);
+                }
+                else
+                {
+                    bindingTracer.WriteLine(
+                        "Adding element of type {0} via ICollection<T>::Add()",
+                        (value == null) ? "null" : value.GetType().Name);
+                    addMethod.Invoke(resultCollection, new object[1] { value });
+                }
+            }
+            catch (Exception error) // OK, we catch all here by design
+            {
+                // The inner exception to TargetInvocationException
+                // (if present) has a better Message
+                if (error is TargetInvocationException &&
+                    error.InnerException != null)
+                {
+                    error = error.InnerException;
+                }
+
+                ParameterBindingException bindingException =
+                    new ParameterBindingException(
+                        error,
+                        ErrorCategory.InvalidArgument,
+                        this.InvocationInfo,
+                        GetErrorExtent(argument),
+                        parameterName,
+                        toType,
+                        value?.GetType(),
+                        ParameterBinderStrings.CannotConvertArgument,
+                        "CannotConvertArgument",
+                        value ?? "null",
+                        error.Message);
+                throw bindingException;
+            }
         }
 
         internal static IList GetIList(object value)
@@ -1913,6 +1993,10 @@ namespace System.Management.Automation
             return result;
         }
 
+        /// <summary>
+        /// Gets the script extent used to position binding errors for a parameter argument.
+        /// Falls back to <see cref="InvocationInfo.ScriptPosition"/> when argument extent is unavailable.
+        /// </summary>
         protected IScriptExtent GetErrorExtent(CommandParameterInternal cpi)
         {
             var result = cpi.ErrorExtent;
@@ -1923,6 +2007,10 @@ namespace System.Management.Automation
             return result;
         }
 
+        /// <summary>
+        /// Gets the script extent for the parameter name token when reporting parameter-name
+        /// resolution errors, with fallback to <see cref="InvocationInfo.ScriptPosition"/>.
+        /// </summary>
         protected IScriptExtent GetParameterErrorExtent(CommandParameterInternal cpi)
         {
             var result = cpi.ParameterExtent;
