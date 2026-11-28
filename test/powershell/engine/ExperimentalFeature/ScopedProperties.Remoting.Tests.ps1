@@ -13,7 +13,7 @@ Describe 'PSScopedProperties mutable remoting settings' -Tag 'CI' {
 
     It 'keeps PSSessionOption concrete and isolates property writes by scope' {
         & {
-            $parentOptions = $PS.AtScope('Local').Remoting.SessionOptions
+            $parentOptions = $PSSettings.AtScope('Local').Remoting.SessionOptions
             $parentOptions | Should -BeOfType ([System.Management.Automation.Remoting.PSSessionOption])
             $parentOptions.OperationTimeout = [timespan]::FromSeconds(41)
             $PSSessionOption.OperationTimeout | Should -Be ([timespan]::FromSeconds(41))
@@ -21,7 +21,7 @@ Describe 'PSScopedProperties mutable remoting settings' -Tag 'CI' {
             $parentOptions.OperationTimeout | Should -Be ([timespan]::FromSeconds(39))
             $parentOptions.OperationTimeout = [timespan]::FromSeconds(41)
             & {
-                $childOptions = $PS.AtScope('Local').Remoting.SessionOptions
+                $childOptions = $PSSettings.AtScope('Local').Remoting.SessionOptions
                 $childOptions.OperationTimeout = [timespan]::FromSeconds(17)
                 $childOptions.OperationTimeout | Should -Be ([timespan]::FromSeconds(17))
                 $parentOptions.OperationTimeout | Should -Be ([timespan]::FromSeconds(41))
@@ -32,8 +32,8 @@ Describe 'PSScopedProperties mutable remoting settings' -Tag 'CI' {
                 { $childOptions.ProxyAuthentication = [System.Management.Automation.Runspaces.AuthenticationMechanism]::Credssp } | Should -Throw
                 $childOptions.ProxyAuthentication | Should -Be ([System.Management.Automation.Runspaces.AuthenticationMechanism]::Basic)
 
-                $PS.Reset('Remoting.SessionOptions')
-                $PS.Remoting.SessionOptions.OperationTimeout | Should -Be ([timespan]::FromSeconds(41))
+                $PSSettings.Reset('Remoting.SessionOptions')
+                $PSSettings.Remoting.SessionOptions.OperationTimeout | Should -Be ([timespan]::FromSeconds(41))
             }
         }
 
@@ -44,7 +44,7 @@ Describe 'PSScopedProperties mutable remoting settings' -Tag 'CI' {
 
     It 'uses live ApplicationArguments views with shallow copy-on-write and dictionary interfaces' {
         & {
-            $parentOptions = $PS.AtScope('Local').Remoting.SessionOptions
+            $parentOptions = $PSSettings.AtScope('Local').Remoting.SessionOptions
             $dictionary = [System.Management.Automation.PSPrimitiveDictionary]::new()
             $dictionary.Add('marker', 'parent')
             $sharedList = [System.Collections.ArrayList]::new()
@@ -52,7 +52,7 @@ Describe 'PSScopedProperties mutable remoting settings' -Tag 'CI' {
             $dictionary.Add('items', [object]$sharedList)
             $parentOptions.ApplicationArguments = $dictionary
 
-            $capturedOptions = $PS.Remoting.SessionOptions
+            $capturedOptions = $PSSettings.Remoting.SessionOptions
             & {
                 $capturedArguments = $capturedOptions.ApplicationArguments
                 $capturedOptions.ApplicationArguments = $capturedArguments
@@ -98,35 +98,35 @@ Describe 'PSScopedProperties mutable remoting settings' -Tag 'CI' {
 
     It 'preserves explicit null SessionOptions and rejects a captured view after nulling it' {
         & {
-            $options = $PS.AtScope('Local').Remoting.SessionOptions
+            $options = $PSSettings.AtScope('Local').Remoting.SessionOptions
             $options.OperationTimeout = [timespan]::FromSeconds(29)
-            $captured = $PS.Remoting.SessionOptions
+            $captured = $PSSettings.Remoting.SessionOptions
             $PSSessionOption = $null
 
             $PSSessionOption | Should -BeNullOrEmpty
-            $PS.Remoting.SessionOptions | Should -BeNullOrEmpty
+            $PSSettings.Remoting.SessionOptions | Should -BeNullOrEmpty
             { $captured.OperationTimeout } | Should -Throw
 
-            $PS.Reset('Remoting.SessionOptions')
-            $PS.Remoting.SessionOptions | Should -Not -BeNullOrEmpty
+            $PSSettings.Reset('Remoting.SessionOptions')
+            $PSSettings.Remoting.SessionOptions | Should -Not -BeNullOrEmpty
         }
     }
 
     It 'copies ordinary Hashtable and primitive dictionary overrides without changing the parent' {
         & {
-            $parentView = $PS.AtScope('Local')
+            $parentView = $PSSettings.AtScope('Local')
             $globalData = [hashtable]::new([StringComparer]::OrdinalIgnoreCase)
             $globalData['origin'] = 'global'
             $parentView.Remoting.ApplicationPrivateData = $globalData
 
             & {
-                $scopeData = $PS.AtScope('Local').Remoting.ApplicationPrivateData
+                $scopeData = $PSSettings.AtScope('Local').Remoting.ApplicationPrivateData
                 $scopeData | Should -BeOfType ([hashtable])
                 $scopeData['local'] = 'child'
                 $scopeData['local'] | Should -BeExactly 'child'
                 $scopeData.ContainsKey('origin') | Should -BeTrue
-                $PS.Reset('Remoting.ApplicationPrivateData')
-                $PS.Remoting.ApplicationPrivateData.ContainsKey('local') | Should -BeFalse
+                $PSSettings.Reset('Remoting.ApplicationPrivateData')
+                $PSSettings.Remoting.ApplicationPrivateData.ContainsKey('local') | Should -BeFalse
             }
             $parentView.Remoting.ApplicationPrivateData.ContainsKey('local') | Should -BeFalse
 
@@ -134,7 +134,7 @@ Describe 'PSScopedProperties mutable remoting settings' -Tag 'CI' {
             $wrappedSourceObject = [System.Management.Automation.PSObject]::AsPSObject($wrappedSource)
             $parentView.Remoting.ApplicationPrivateData = $wrappedSourceObject
             & {
-                $wrappedView = $PS.AtScope('Local').Remoting.ApplicationPrivateData
+                $wrappedView = $PSSettings.AtScope('Local').Remoting.ApplicationPrivateData
                 $wrappedView['local'] = 'child'
                 $wrappedView['local'] | Should -BeExactly 'child'
             }
@@ -145,7 +145,7 @@ Describe 'PSScopedProperties mutable remoting settings' -Tag 'CI' {
             $primitive.Add('first', 1)
             $parentView.Remoting.ApplicationPrivateData = $primitive
             & {
-                $captured = $PS.AtScope('Local').Remoting.ApplicationPrivateData
+                $captured = $PSSettings.AtScope('Local').Remoting.ApplicationPrivateData
                 $captured | Should -BeOfType ([System.Management.Automation.PSPrimitiveDictionary])
                 $captured['second'] = 2
                 $captured.Count | Should -Be 2

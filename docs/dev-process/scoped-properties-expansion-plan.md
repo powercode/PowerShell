@@ -7,7 +7,7 @@
 
 ## Goal and design
 
-Expand `$PS` to cover the remaining built-in configuration and runtime
+Expand `$PSSettings` to cover the remaining built-in configuration and runtime
 variables, including names without a `PS` prefix. Keep legacy variables as
 compatible access paths. Preserve the current `ActionPreference` and `Style`
 APIs, and complete `Style` using the existing `PSStyle` member names, including
@@ -32,14 +32,14 @@ consumers through a configuration-default model when they consume runtime
 state.
 
 `$_` and `$PSItem` remain variables. Expose `$?` additionally as
-`$PS.LastStatementSuccessful`, and use `$PS.NativeCommand.Encoding.ToProcess`
+`$PSSettings.LastStatementSuccessful`, and use `$PSSettings.NativeCommand.Encoding.ToProcess`
 and `.FromProcess` for native-process text encoding. Automatic variables are
 conceptually read-only in the documentation, but this plan intentionally
 preserves existing runtime setters where legacy behavior permits them.
 
 ## Public API mapping
 
-All paths are relative to `$PS`. Existing `ActionPreference` and `Style` APIs
+All paths are relative to `$PSSettings`. Existing `ActionPreference` and `Style` APIs
 remain. The following inventory preserves the original proposed mapping; the
 semantics and boundaries below refine it.
 
@@ -85,7 +85,7 @@ current script; the latter describe the caller in invocation metadata.
   compiler paths, and engine consumers use that descriptor.
 - Reads inherit through scopes; writes create local overrides unless explicitly
   targeted with `AtScope('Local'|'Script'|'Global')`. `Reset(path)` removes only
-  the selected override. With the feature disabled, `$PS` remains an ordinary
+  the selected override. With the feature disabled, `$PSSettings` remains an ordinary
   variable name and legacy storage remains unchanged. Preserve forwarding only
   for explicitly constructed facades where supported.
 - Retain legacy variable metadata, validation, breakpoints, common-parameter
@@ -151,7 +151,7 @@ after startup scripts, so preserve the boundary and global consumption.
 ## Exclusions and security
 
 Exclude environment-provider entries, arbitrary user/module variables,
-retired Windows PowerShell-only variables, and a recursive `$PS` self-property.
+retired Windows PowerShell-only variables, and a recursive `$PSSettings` self-property.
 Do not bypass class, manifest, or language-mode restrictions or expose values
 that legacy visibility rules forbid. Property and method access must retain
 existing constrained-language checks.

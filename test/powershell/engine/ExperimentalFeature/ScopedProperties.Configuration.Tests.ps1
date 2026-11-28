@@ -46,7 +46,7 @@ Describe 'PSScopedProperties scalar configuration' -Tag 'CI' {
             $snapshots = $shell.AddScript({
                 param($path, $variableName)
                 $before = $null -ne (Get-Variable -Name $variableName -Scope Global -ErrorAction Ignore)
-                $value = $PS
+                $value = $PSSettings
                 foreach ($segment in $path.Split('.')) { $value = $value.$segment }
                 $variable = Get-Variable -Name $variableName -Scope Global -ErrorAction Ignore
                 [pscustomobject]@{
@@ -85,7 +85,7 @@ Describe 'PSScopedProperties scalar configuration' -Tag 'CI' {
                 $baseline = & $renderError $errorRecord
                 Remove-Variable -Name ErrorView -Scope Global -Force
                 $bindingAbsentBeforeRead = $null -eq (Get-Variable -Name ErrorView -Scope Global -ErrorAction Ignore)
-                $effectiveView = $PS.Formatting.ErrorView
+                $effectiveView = $PSSettings.Formatting.ErrorView
                 $actual = & $renderError $errorRecord
                 [pscustomobject]@{
                     EffectiveView = $effectiveView
@@ -108,88 +108,88 @@ Describe 'PSScopedProperties scalar configuration' -Tag 'CI' {
     }
 
     It 'shares scalar values in both directions and keeps failed conversions atomic' {
-        $PS.Formatting.ErrorView = 'NormalView'
+        $PSSettings.Formatting.ErrorView = 'NormalView'
         $ErrorView | Should -Be ([System.Management.Automation.ErrorView]::NormalView)
         $ErrorView = 'DetailedView'
-        $PS.Formatting.ErrorView | Should -Be ([System.Management.Automation.ErrorView]::DetailedView)
-        { $PS.Formatting.ErrorView = 'not an ErrorView' } | Should -Throw
-        $PS.Formatting.ErrorView | Should -Be ([System.Management.Automation.ErrorView]::DetailedView)
+        $PSSettings.Formatting.ErrorView | Should -Be ([System.Management.Automation.ErrorView]::DetailedView)
+        { $PSSettings.Formatting.ErrorView = 'not an ErrorView' } | Should -Throw
+        $PSSettings.Formatting.ErrorView | Should -Be ([System.Management.Automation.ErrorView]::DetailedView)
 
-        $PS.Formatting.EnumerationLimit = 2
+        $PSSettings.Formatting.EnumerationLimit = 2
         $FormatEnumerationLimit | Should -Be 2
         $FormatEnumerationLimit = 3
-        $PS.Formatting.EnumerationLimit | Should -Be 3
-        { $PS.Formatting.EnumerationLimit = 'not an integer' } | Should -Throw
-        $PS.Formatting.EnumerationLimit | Should -Be 3
+        $PSSettings.Formatting.EnumerationLimit | Should -Be 3
+        { $PSSettings.Formatting.EnumerationLimit = 'not an integer' } | Should -Throw
+        $PSSettings.Formatting.EnumerationLimit | Should -Be 3
 
-        $PS.Formatting.FieldSeparator = '::'
+        $PSSettings.Formatting.FieldSeparator = '::'
         $OFS | Should -BeExactly '::'
         $OFS = 17
-        $PS.Formatting.FieldSeparator | Should -Be 17
+        $PSSettings.Formatting.FieldSeparator | Should -Be 17
 
-        $PS.NativeCommand.Encoding.ToProcess = [System.Text.Encoding]::Unicode
+        $PSSettings.NativeCommand.Encoding.ToProcess = [System.Text.Encoding]::Unicode
         $OutputEncoding | Should -Be ([System.Text.Encoding]::Unicode)
         $OutputEncoding = [System.Text.Encoding]::UTF8
-        $PS.NativeCommand.Encoding.ToProcess | Should -Be ([System.Text.Encoding]::UTF8)
-        { $PS.NativeCommand.Encoding.ToProcess = 'not an encoding' } | Should -Throw
-        $PS.NativeCommand.Encoding.ToProcess | Should -Be ([System.Text.Encoding]::UTF8)
+        $PSSettings.NativeCommand.Encoding.ToProcess | Should -Be ([System.Text.Encoding]::UTF8)
+        { $PSSettings.NativeCommand.Encoding.ToProcess = 'not an encoding' } | Should -Throw
+        $PSSettings.NativeCommand.Encoding.ToProcess | Should -Be ([System.Text.Encoding]::UTF8)
 
-        $PS.NativeCommand.Encoding.FromProcess = [System.Text.Encoding]::Unicode
+        $PSSettings.NativeCommand.Encoding.FromProcess = [System.Text.Encoding]::Unicode
         $PSApplicationOutputEncoding | Should -Be ([System.Text.Encoding]::Unicode)
         $PSApplicationOutputEncoding = [System.Text.Encoding]::UTF8
-        $PS.NativeCommand.Encoding.FromProcess | Should -Be ([System.Text.Encoding]::UTF8)
-        { $PS.NativeCommand.Encoding.FromProcess = 'not an encoding' } | Should -Throw
-        $PS.NativeCommand.Encoding.FromProcess | Should -Be ([System.Text.Encoding]::UTF8)
-        $PS.NativeCommand.Encoding.FromProcess = $null
-        $PS.NativeCommand.Encoding.FromProcess | Should -BeNullOrEmpty
+        $PSSettings.NativeCommand.Encoding.FromProcess | Should -Be ([System.Text.Encoding]::UTF8)
+        { $PSSettings.NativeCommand.Encoding.FromProcess = 'not an encoding' } | Should -Throw
+        $PSSettings.NativeCommand.Encoding.FromProcess | Should -Be ([System.Text.Encoding]::UTF8)
+        $PSSettings.NativeCommand.Encoding.FromProcess = $null
+        $PSSettings.NativeCommand.Encoding.FromProcess | Should -BeNullOrEmpty
         $PSApplicationOutputEncoding | Should -BeNullOrEmpty
 
-        $PS.NativeCommand.ArgumentPassing = 'Legacy'
+        $PSSettings.NativeCommand.ArgumentPassing = 'Legacy'
         $PSNativeCommandArgumentPassing | Should -Be ([System.Management.Automation.NativeArgumentPassingStyle]::Legacy)
-        { $PS.NativeCommand.ArgumentPassing = 'invalid style' } | Should -Throw
-        $PS.NativeCommand.ArgumentPassing | Should -Be ([System.Management.Automation.NativeArgumentPassingStyle]::Legacy)
-        $PS.NativeCommand.UseErrorActionPreference = $true
+        { $PSSettings.NativeCommand.ArgumentPassing = 'invalid style' } | Should -Throw
+        $PSSettings.NativeCommand.ArgumentPassing | Should -Be ([System.Management.Automation.NativeArgumentPassingStyle]::Legacy)
+        $PSSettings.NativeCommand.UseErrorActionPreference = $true
         $PSNativeCommandUseErrorActionPreference | Should -BeTrue
         $PSNativeCommandUseErrorActionPreference = $false
-        $PS.NativeCommand.UseErrorActionPreference | Should -BeFalse
+        $PSSettings.NativeCommand.UseErrorActionPreference | Should -BeFalse
 
-        $PS.Module.AutoLoadingPreference = 'None'
+        $PSSettings.Module.AutoLoadingPreference = 'None'
         $PSModuleAutoLoadingPreference | Should -Be ([System.Management.Automation.PSModuleAutoLoadingPreference]::None)
         $PSModuleAutoLoadingPreference = 'All'
-        $PS.Module.AutoLoadingPreference | Should -Be ([System.Management.Automation.PSModuleAutoLoadingPreference]::All)
-        { $PS.Module.AutoLoadingPreference = 'invalid preference' } | Should -Throw
-        $PS.Module.AutoLoadingPreference | Should -Be ([System.Management.Automation.PSModuleAutoLoadingPreference]::All)
-        $PS.Module.AutoLoadingPreference = $null
-        $PS.Module.AutoLoadingPreference | Should -BeNullOrEmpty
+        $PSSettings.Module.AutoLoadingPreference | Should -Be ([System.Management.Automation.PSModuleAutoLoadingPreference]::All)
+        { $PSSettings.Module.AutoLoadingPreference = 'invalid preference' } | Should -Throw
+        $PSSettings.Module.AutoLoadingPreference | Should -Be ([System.Management.Automation.PSModuleAutoLoadingPreference]::All)
+        $PSSettings.Module.AutoLoadingPreference = $null
+        $PSSettings.Module.AutoLoadingPreference | Should -BeNullOrEmpty
         $PSModuleAutoLoadingPreference | Should -BeNullOrEmpty
 
-        $PS.History.MaximumCount = 10
+        $PSSettings.History.MaximumCount = 10
         $MaximumHistoryCount | Should -Be 10
         $MaximumHistoryCount = 11
-        $PS.History.MaximumCount | Should -Be 11
-        { $PS.History.MaximumCount = 0 } | Should -Throw
-        $PS.History.MaximumCount | Should -Be 11
+        $PSSettings.History.MaximumCount | Should -Be 11
+        { $PSSettings.History.MaximumCount = 0 } | Should -Throw
+        $PSSettings.History.MaximumCount | Should -Be 11
 
-        $PS.Transcription.Path = 'transcript.txt'
+        $PSSettings.Transcription.Path = 'transcript.txt'
         $TRANSCRIPT | Should -BeExactly 'transcript.txt'
         $TRANSCRIPT = 'legacy-transcript.txt'
-        $PS.Transcription.Path | Should -BeExactly 'legacy-transcript.txt'
-        $PS.Mail.Server = 'smtp.example.test'
+        $PSSettings.Transcription.Path | Should -BeExactly 'legacy-transcript.txt'
+        $PSSettings.Mail.Server = 'smtp.example.test'
         $PSEmailServer | Should -BeExactly 'smtp.example.test'
         $PSEmailServer = 'smtp2.example.test'
-        $PS.Mail.Server | Should -BeExactly 'smtp2.example.test'
-        $PS.Help.VerboseErrors = $true
+        $PSSettings.Mail.Server | Should -BeExactly 'smtp2.example.test'
+        $PSSettings.Help.VerboseErrors = $true
         $VerboseHelpErrors | Should -BeTrue
         $VerboseHelpErrors = $false
-        $PS.Help.VerboseErrors | Should -BeFalse
+        $PSSettings.Help.VerboseErrors | Should -BeFalse
 
-        $PS.Logging.EngineHealthEvent = $false
-        $PS.Logging.EngineLifecycleEvent = $false
-        $PS.Logging.CommandHealthEvent = $false
-        $PS.Logging.CommandLifecycleEvent = $false
-        $PS.Logging.ProviderHealthEvent = $false
-        $PS.Logging.ProviderLifecycleEvent = $false
-        $PS.Logging.SettingsEvent = $false
+        $PSSettings.Logging.EngineHealthEvent = $false
+        $PSSettings.Logging.EngineLifecycleEvent = $false
+        $PSSettings.Logging.CommandHealthEvent = $false
+        $PSSettings.Logging.CommandLifecycleEvent = $false
+        $PSSettings.Logging.ProviderHealthEvent = $false
+        $PSSettings.Logging.ProviderLifecycleEvent = $false
+        $PSSettings.Logging.SettingsEvent = $false
         $LogEngineHealthEvent | Should -BeFalse
         $LogEngineLifecycleEvent | Should -BeFalse
         $LogCommandHealthEvent | Should -BeFalse
@@ -198,22 +198,22 @@ Describe 'PSScopedProperties scalar configuration' -Tag 'CI' {
         $LogProviderLifecycleEvent | Should -BeFalse
         $LogSettingsEvent | Should -BeFalse
         $LogEngineHealthEvent = $true
-        $PS.Logging.EngineHealthEvent | Should -BeTrue
+        $PSSettings.Logging.EngineHealthEvent | Should -BeTrue
 
-        $PS.Logging.EngineHealthEvent = $null
-        $PS.Logging.EngineLifecycleEvent = $null
-        $PS.Logging.CommandHealthEvent = $null
-        $PS.Logging.CommandLifecycleEvent = $null
-        $PS.Logging.ProviderHealthEvent = $null
-        $PS.Logging.ProviderLifecycleEvent = $null
-        $PS.Logging.SettingsEvent = $null
-        $PS.Logging.EngineHealthEvent | Should -BeNullOrEmpty
-        $PS.Logging.EngineLifecycleEvent | Should -BeNullOrEmpty
-        $PS.Logging.CommandHealthEvent | Should -BeNullOrEmpty
-        $PS.Logging.CommandLifecycleEvent | Should -BeNullOrEmpty
-        $PS.Logging.ProviderHealthEvent | Should -BeNullOrEmpty
-        $PS.Logging.ProviderLifecycleEvent | Should -BeNullOrEmpty
-        $PS.Logging.SettingsEvent | Should -BeNullOrEmpty
+        $PSSettings.Logging.EngineHealthEvent = $null
+        $PSSettings.Logging.EngineLifecycleEvent = $null
+        $PSSettings.Logging.CommandHealthEvent = $null
+        $PSSettings.Logging.CommandLifecycleEvent = $null
+        $PSSettings.Logging.ProviderHealthEvent = $null
+        $PSSettings.Logging.ProviderLifecycleEvent = $null
+        $PSSettings.Logging.SettingsEvent = $null
+        $PSSettings.Logging.EngineHealthEvent | Should -BeNullOrEmpty
+        $PSSettings.Logging.EngineLifecycleEvent | Should -BeNullOrEmpty
+        $PSSettings.Logging.CommandHealthEvent | Should -BeNullOrEmpty
+        $PSSettings.Logging.CommandLifecycleEvent | Should -BeNullOrEmpty
+        $PSSettings.Logging.ProviderHealthEvent | Should -BeNullOrEmpty
+        $PSSettings.Logging.ProviderLifecycleEvent | Should -BeNullOrEmpty
+        $PSSettings.Logging.SettingsEvent | Should -BeNullOrEmpty
         $LogEngineHealthEvent | Should -BeNullOrEmpty
         $LogEngineLifecycleEvent | Should -BeNullOrEmpty
         $LogCommandHealthEvent | Should -BeNullOrEmpty
@@ -223,38 +223,38 @@ Describe 'PSScopedProperties scalar configuration' -Tag 'CI' {
         $LogSettingsEvent | Should -BeNullOrEmpty
 
         $userData = [pscustomobject]@{ Marker = 'reference' }
-        $PS.Logging.UserData = $userData
+        $PSSettings.Logging.UserData = $userData
         [object]::ReferenceEquals($PSLogUserData, $userData) | Should -BeTrue
         $PSLogUserData = $null
-        $PS.Logging.UserData | Should -BeNullOrEmpty
+        $PSSettings.Logging.UserData | Should -BeNullOrEmpty
 
-        $PS.Remoting.ConfigurationName = 'TestConfiguration'
+        $PSSettings.Remoting.ConfigurationName = 'TestConfiguration'
         $PSSessionConfigurationName | Should -BeExactly 'TestConfiguration'
         $PSSessionConfigurationName = 'OtherConfiguration'
-        $PS.Remoting.ConfigurationName | Should -BeExactly 'OtherConfiguration'
-        $PS.Remoting.ApplicationName = 'TestApplication'
+        $PSSettings.Remoting.ConfigurationName | Should -BeExactly 'OtherConfiguration'
+        $PSSettings.Remoting.ApplicationName = 'TestApplication'
         $PSSessionApplicationName | Should -BeExactly 'TestApplication'
         $PSSessionApplicationName = 'OtherApplication'
-        $PS.Remoting.ApplicationName | Should -BeExactly 'OtherApplication'
-        $PS.Remoting.ConfigurationName = $null
-        $PS.Remoting.ConfigurationName | Should -BeNullOrEmpty
+        $PSSettings.Remoting.ApplicationName | Should -BeExactly 'OtherApplication'
+        $PSSettings.Remoting.ConfigurationName = $null
+        $PSSettings.Remoting.ConfigurationName | Should -BeNullOrEmpty
         $PSSessionConfigurationName | Should -BeNullOrEmpty
-        $PS.Remoting.ApplicationName = $null
-        $PS.Remoting.ApplicationName | Should -BeNullOrEmpty
+        $PSSettings.Remoting.ApplicationName = $null
+        $PSSettings.Remoting.ApplicationName | Should -BeNullOrEmpty
         $PSSessionApplicationName | Should -BeNullOrEmpty
     }
 
     It 'inherits and resets scalar overrides through local, script, and global views' {
-        $globalView = $PS.AtScope('Global')
+        $globalView = $PSSettings.AtScope('Global')
         $scriptView = $null
         $originalGlobalLimit = Get-Variable -Name FormatEnumerationLimit -Scope Global -ErrorAction Ignore
         $originalGlobalLimitValue = if ($null -ne $originalGlobalLimit) { $originalGlobalLimit.Value } else { $null }
         try {
             $globalView.Formatting.EnumerationLimit = 7
-            $scriptView = $PS.AtScope('Script')
+            $scriptView = $PSSettings.AtScope('Script')
             $scriptView.Formatting.EnumerationLimit = 5
             & {
-                $localView = $PS.AtScope('Local')
+                $localView = $PSSettings.AtScope('Local')
                 $localView.Formatting.EnumerationLimit = 2
                 $localView.Formatting.EnumerationLimit | Should -Be 2
                 $localView.Reset('Formatting.EnumerationLimit')
@@ -276,35 +276,35 @@ Describe 'PSScopedProperties scalar configuration' -Tag 'CI' {
             }
         }
 
-        $PS.NativeCommand.Encoding.ToProcess = [System.Text.Encoding]::ASCII
-        $captured = $PS.NativeCommand.Encoding
+        $PSSettings.NativeCommand.Encoding.ToProcess = [System.Text.Encoding]::ASCII
+        $captured = $PSSettings.NativeCommand.Encoding
         & {
             $captured.ToProcess = [System.Text.Encoding]::Unicode
-            $PS.NativeCommand.Encoding.ToProcess | Should -Be ([System.Text.Encoding]::Unicode)
+            $PSSettings.NativeCommand.Encoding.ToProcess | Should -Be ([System.Text.Encoding]::Unicode)
         }
-        $PS.NativeCommand.Encoding.ToProcess | Should -Be ([System.Text.Encoding]::ASCII)
-        $PS.Reset('NativeCommand.Encoding.ToProcess')
+        $PSSettings.NativeCommand.Encoding.ToProcess | Should -Be ([System.Text.Encoding]::ASCII)
+        $PSSettings.Reset('NativeCommand.Encoding.ToProcess')
     }
 
     It 'uses FieldSeparator and EnumerationLimit in actual formatting' {
         $joined = & {
-            $PS.Formatting.FieldSeparator = '::'
+            $PSSettings.Formatting.FieldSeparator = '::'
             $items = 1, 2
             "$items"
         }
         $joined | Should -BeExactly '1::2'
 
         $rendered = & {
-            $inheritedLimit = $PS.Formatting.EnumerationLimit
-            $PS.Formatting.EnumerationLimit = 1
+            $inheritedLimit = $PSSettings.Formatting.EnumerationLimit
+            $PSSettings.Formatting.EnumerationLimit = 1
             $output = Format-Table -InputObject @{ test = 1, 2 } | Out-String
             [pscustomobject]@{ Text = $output; InheritedLimit = $inheritedLimit }
         }
         $rendered.Text | Should -Match 'test\s+\{1(?:\.\.\.|…)\}'
-        $PS.Formatting.EnumerationLimit | Should -Be $rendered.InheritedLimit
+        $PSSettings.Formatting.EnumerationLimit | Should -Be $rendered.InheritedLimit
 
         $errorText = & {
-            $PS.Formatting.ErrorView = 'NormalView'
+            $PSSettings.Formatting.ErrorView = 'NormalView'
             Write-Error 'scoped error view marker' -ErrorAction Continue 2>&1 | Out-String
         }
         $errorText | Should -Match 'CategoryInfo'
@@ -331,14 +331,14 @@ $errorBytes = [Text.Encoding]::Unicode.GetBytes('naïve')
         $noBomUnicode = [Text.UnicodeEncoding]::new($false, $false)
         $expectedPrefix = [Convert]::ToHexString($noBomUnicode.GetBytes($text))
         $stdinHex = & {
-            $PS.NativeCommand.Encoding.ToProcess = $noBomUnicode
+            $PSSettings.NativeCommand.Encoding.ToProcess = $noBomUnicode
             $text | & $pwsh -NoLogo -NoProfile -File $inputProbe
         } | Out-String
         $stdinHex.Trim().StartsWith($expectedPrefix, [StringComparison]::Ordinal) | Should -BeTrue
 
         $combinedOutput = & {
-            $PS.NativeCommand.Encoding.ToProcess = [Text.Encoding]::ASCII
-            $PS.NativeCommand.Encoding.FromProcess = [Text.Encoding]::Unicode
+            $PSSettings.NativeCommand.Encoding.ToProcess = [Text.Encoding]::ASCII
+            $PSSettings.NativeCommand.Encoding.FromProcess = [Text.Encoding]::Unicode
             & $pwsh -NoLogo -NoProfile -File $outputProbe 2>&1
         }
         $stdoutText = [string]::Join('', @($combinedOutput | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }))
@@ -350,7 +350,7 @@ $errorBytes = [Text.Encoding]::Unicode.GetBytes('naïve')
     It 'uses a scoped Transcription.Path as the Start-Transcript default' {
         $transcriptPath = Join-Path $TestDrive 'scoped-transcript.txt'
         & {
-            $PS.Transcription.Path = $transcriptPath
+            $PSSettings.Transcription.Path = $transcriptPath
             Start-Transcript | Out-Null
             Write-Host 'scoped transcription marker'
             Stop-Transcript | Out-Null
@@ -361,8 +361,8 @@ $errorBytes = [Text.Encoding]::Unicode.GetBytes('naïve')
         $generatedDirectory = Join-Path $TestDrive 'generated-transcript'
         New-Item -ItemType Directory -Path $generatedDirectory -Force | Out-Null
         & {
-            $PS.Transcription.Path = $null
-            $PS.Transcription.Path | Should -BeNullOrEmpty
+            $PSSettings.Transcription.Path = $null
+            $PSSettings.Transcription.Path | Should -BeNullOrEmpty
             $TRANSCRIPT | Should -BeNullOrEmpty
             Start-Transcript -OutputDirectory $generatedDirectory | Out-Null
             Write-Host 'generated transcription marker'
@@ -388,13 +388,13 @@ Export-ModuleMember -Function Get-ScopedPropertiesAutoLoadProbe
         try {
             $env:PSModulePath = $moduleRoot + [IO.Path]::PathSeparator + $originalModulePath
             & {
-                $PS.Module.AutoLoadingPreference = $null
-                $PS.Module.AutoLoadingPreference | Should -BeNullOrEmpty
+                $PSSettings.Module.AutoLoadingPreference = $null
+                $PSSettings.Module.AutoLoadingPreference | Should -BeNullOrEmpty
                 $env:PSModuleAutoLoadingPreference = 'None'
                 { Get-ScopedPropertiesAutoLoadProbe } | Should -Throw
                 $env:PSModuleAutoLoadingPreference = 'All'
                 Get-ScopedPropertiesAutoLoadProbe | Should -BeExactly 'module loaded'
-                $PS.Module.AutoLoadingPreference | Should -BeNullOrEmpty
+                $PSSettings.Module.AutoLoadingPreference | Should -BeNullOrEmpty
             }
         }
         finally {

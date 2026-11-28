@@ -49,58 +49,58 @@ Describe 'PSScopedProperties PSStyle configuration' -Tag 'CI' {
     }
 
     It 'exposes one concrete PSStyle type through the facade and legacy variable' {
-        $PS.Style | Should -BeOfType ([System.Management.Automation.PSStyle])
+        $PSSettings.Style | Should -BeOfType ([System.Management.Automation.PSStyle])
         $PSStyle | Should -BeOfType ([System.Management.Automation.PSStyle])
-        [object]::ReferenceEquals($PS.Style, $PSStyle) | Should -BeTrue
-        ([Enum]::GetValues([System.Management.Automation.OutputRendering]) -contains $PS.Style.OutputRendering) | Should -BeTrue
-        $PS.Style.Progress.Style | Should -Be "`e[33;1m"
-        $PS.Style.Progress.MaxWidth | Should -Be 120
-        $PS.Style.Progress.UseOSCIndicator | Should -BeFalse
-        $PS.Style.Formatting.FeedbackName | Should -Be "`e[33m"
-        $PS.Style.FileInfo.Extension['.ps1'] | Should -Be "`e[33;1m"
+        [object]::ReferenceEquals($PSSettings.Style, $PSStyle) | Should -BeTrue
+        ([Enum]::GetValues([System.Management.Automation.OutputRendering]) -contains $PSSettings.Style.OutputRendering) | Should -BeTrue
+        $PSSettings.Style.Progress.Style | Should -Be "`e[33;1m"
+        $PSSettings.Style.Progress.MaxWidth | Should -Be 120
+        $PSSettings.Style.Progress.UseOSCIndicator | Should -BeFalse
+        $PSSettings.Style.Formatting.FeedbackName | Should -Be "`e[33m"
+        $PSSettings.Style.FileInfo.Extension['.ps1'] | Should -Be "`e[33;1m"
     }
 
     It 'scopes each style leaf independently and resumes inheritance after reset: <Path>' -TestCases $styleLeafCases {
         param($Path, $Value)
 
-        $targetStyle = $PS.AtScope('Local').Style
+        $targetStyle = $PSSettings.AtScope('Local').Style
         $baseline = & $script:getStyleLeaf $targetStyle $Path
         & {
-            $targetStyle = $PS.AtScope('Local').Style
+            $targetStyle = $PSSettings.AtScope('Local').Style
             & $script:setStyleLeaf $targetStyle $Path $Value
             (& $script:getStyleLeaf $targetStyle $Path) | Should -Be $Value
-            $PS.Reset("Style.$Path")
+            $PSSettings.Reset("Style.$Path")
             (& $script:getStyleLeaf $targetStyle $Path) | Should -Be $baseline
         }
     }
 
     It 'scopes style leaves independently and resets only the selected local value' {
-        $warningBaseline = $PS.Style.Formatting.Warning
-        $PS.Style.Formatting.Error = "`e[35m"
-        $PS.Style.Progress.Style = "`e[36m"
+        $warningBaseline = $PSSettings.Style.Formatting.Warning
+        $PSSettings.Style.Formatting.Error = "`e[35m"
+        $PSSettings.Style.Progress.Style = "`e[36m"
 
         & {
-            $PS.Style.Formatting.Error = "`e[31m"
-            $PS.Style.Formatting.Warning = "`e[33m"
-            $PS.Style.Formatting.Error | Should -Be "`e[31m"
-            $PS.Reset('Style.Formatting.Error')
-            $PS.Style.Formatting.Error | Should -Be "`e[35m"
-            $PS.Style.Formatting.Warning | Should -Be "`e[33m"
-            $PS.Style.Progress.Style | Should -Be "`e[36m"
+            $PSSettings.Style.Formatting.Error = "`e[31m"
+            $PSSettings.Style.Formatting.Warning = "`e[33m"
+            $PSSettings.Style.Formatting.Error | Should -Be "`e[31m"
+            $PSSettings.Reset('Style.Formatting.Error')
+            $PSSettings.Style.Formatting.Error | Should -Be "`e[35m"
+            $PSSettings.Style.Formatting.Warning | Should -Be "`e[33m"
+            $PSSettings.Style.Progress.Style | Should -Be "`e[36m"
         }
 
-        $PS.Style.Formatting.Error | Should -Be "`e[35m"
-        $PS.Style.Formatting.Warning | Should -Be $warningBaseline
+        $PSSettings.Style.Formatting.Error | Should -Be "`e[35m"
+        $PSSettings.Style.Formatting.Warning | Should -Be $warningBaseline
     }
 
     It 'binds AtScope style views and rejects a captured view after its target scope expires' {
-        $style = & { $PS.AtScope('Local').Style }
+        $style = & { $PSSettings.AtScope('Local').Style }
         { $style.Progress.Style } | Should -Throw
         foreach ($property in 'Reset', 'BlinkOff', 'Blink', 'BoldOff', 'Bold', 'DimOff', 'Dim', 'Hidden', 'HiddenOff', 'Reverse', 'ReverseOff', 'ItalicOff', 'Italic', 'UnderlineOff', 'Underline', 'StrikethroughOff', 'Strikethrough') {
             { $style.$property } | Should -Throw
         }
 
-        $foreground = & { $PS.AtScope('Local').Style.Foreground }
+        $foreground = & { $PSSettings.AtScope('Local').Style.Foreground }
         { $foreground.Red } | Should -Throw
         { $foreground.FromRgb(1, 2, 3) } | Should -Throw
     }
@@ -111,28 +111,28 @@ Describe 'PSScopedProperties PSStyle configuration' -Tag 'CI' {
     }
 
     It 'copies only the file extension dictionary when it is successfully mutated' {
-        $PS.Style.FileInfo.Extension['.scopedtest'] = "`e[34m"
-        $PS.Style.FileInfo.Extension.ContainsKey('.scopedtest') | Should -BeTrue
+        $PSSettings.Style.FileInfo.Extension['.scopedtest'] = "`e[34m"
+        $PSSettings.Style.FileInfo.Extension.ContainsKey('.scopedtest') | Should -BeTrue
 
         & {
-            $PS.Style.FileInfo.Extension.Remove('.scopedtest')
-            $PS.Style.FileInfo.Extension.ContainsKey('.scopedtest') | Should -BeFalse
-            $PS.Reset('Style.FileInfo.Extension')
-            $PS.Style.FileInfo.Extension.ContainsKey('.scopedtest') | Should -BeTrue
+            $PSSettings.Style.FileInfo.Extension.Remove('.scopedtest')
+            $PSSettings.Style.FileInfo.Extension.ContainsKey('.scopedtest') | Should -BeFalse
+            $PSSettings.Reset('Style.FileInfo.Extension')
+            $PSSettings.Style.FileInfo.Extension.ContainsKey('.scopedtest') | Should -BeTrue
         }
 
-        $PS.Style.FileInfo.Extension.Remove('.scopedtest')
+        $PSSettings.Style.FileInfo.Extension.Remove('.scopedtest')
     }
 
     It 'does not publish invalid scalar or extension mutations' {
-        $before = $PS.Style.Progress.Style
-        { $PS.Style.Progress.Style = 'visible text' } | Should -Throw
-        { $PS.Style.Progress.MaxWidth = 17 } | Should -Throw
-        $PS.Style.Progress.Style | Should -Be $before
+        $before = $PSSettings.Style.Progress.Style
+        { $PSSettings.Style.Progress.Style = 'visible text' } | Should -Throw
+        { $PSSettings.Style.Progress.MaxWidth = 17 } | Should -Throw
+        $PSSettings.Style.Progress.Style | Should -Be $before
 
-        $beforeZip = $PS.Style.FileInfo.Extension['.zip']
-        { $PS.Style.FileInfo.Extension.Add('.zip', "`e[31m") } | Should -Throw
-        $PS.Style.FileInfo.Extension['.zip'] | Should -Be $beforeZip
+        $beforeZip = $PSSettings.Style.FileInfo.Extension['.zip']
+        { $PSSettings.Style.FileInfo.Extension.Add('.zip', "`e[31m") } | Should -Throw
+        $PSSettings.Style.FileInfo.Extension['.zip'] | Should -Be $beforeZip
     }
 
     It 'keeps public nested style objects standalone' {
@@ -149,26 +149,26 @@ Describe 'PSScopedProperties PSStyle configuration' -Tag 'CI' {
         $progress.View | Should -Be ([System.Management.Automation.ProgressView]::Classic)
         $formatting.Error | Should -Be "`e[35m"
         $fileInfo.Extension['.standalone'] | Should -Be "`e[36m"
-        $PS.Style.Progress.Style | Should -Not -Be "`e[34m"
-        $PS.Style.Formatting.Error | Should -Not -Be "`e[35m"
-        $PS.Style.FileInfo.Extension.ContainsKey('.standalone') | Should -BeFalse
+        $PSSettings.Style.Progress.Style | Should -Not -Be "`e[34m"
+        $PSSettings.Style.Formatting.Error | Should -Not -Be "`e[35m"
+        $PSSettings.Style.FileInfo.Extension.ContainsKey('.standalone') | Should -BeFalse
     }
 
     It 'resolves unbound style views in the caller runspace and rejects bound views from another runspace' {
         $first = [powershell]::Create()
         $second = [powershell]::Create()
         try {
-            $unboundStyle = $first.AddScript({ $PS.Style }).Invoke()[0]
+            $unboundStyle = $first.AddScript({ $PSSettings.Style }).Invoke()[0]
             $values = $second.AddScript({
                 param($styleView)
-                $PS.Style.OutputRendering = [System.Management.Automation.OutputRendering]::Ansi
+                $PSSettings.Style.OutputRendering = [System.Management.Automation.OutputRendering]::Ansi
                 @($styleView.OutputRendering, $styleView.Reset)
             }).AddArgument($unboundStyle).Invoke()
             $values[0] | Should -Be ([System.Management.Automation.OutputRendering]::Ansi)
             $values[1] | Should -Be "`e[0m"
 
             $first.Commands.Clear()
-            $boundStyle = $first.AddScript({ $PS.AtScope('Global').Style }).Invoke()[0]
+            $boundStyle = $first.AddScript({ $PSSettings.AtScope('Global').Style }).Invoke()[0]
             $second.Commands.Clear()
             $second.Streams.Error.Clear()
             foreach ($property in 'OutputRendering', 'Bold', 'Reset') {

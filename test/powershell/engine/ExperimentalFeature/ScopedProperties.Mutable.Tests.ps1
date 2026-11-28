@@ -38,14 +38,14 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         $PSDefaultParameterValues.Remove($outerKey)
         $PSDefaultParameterValues.Remove($childKey)
         $PSDefaultParameterValues[$outerKey] = 31
-        $captured = $PS.Command.DefaultParameterValues
+        $captured = $PSSettings.Command.DefaultParameterValues
         $legacyCaptured = $PSDefaultParameterValues
 
         & {
             $captured[$childKey] = 42
             $legacyCaptured['ScopedMutableLegacyChild:Value'] = 43
-            $PS.Command.DefaultParameterValues[$childKey] | Should -Be 42
-            $PS.Command.DefaultParameterValues[$outerKey] | Should -Be 31
+            $PSSettings.Command.DefaultParameterValues[$childKey] | Should -Be 42
+            $PSSettings.Command.DefaultParameterValues[$outerKey] | Should -Be 31
         }
 
         $PSDefaultParameterValues.ContainsKey($childKey) | Should -BeFalse
@@ -59,7 +59,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         $PSDefaultParameterValues.Remove($duplicateKey)
         $PSDefaultParameterValues[$duplicateKey] = 1
         & {
-            $local = $PS.AtScope('Local')
+            $local = $PSSettings.AtScope('Local')
             $before = Get-Variable -Name PSDefaultParameterValues -Scope Local -ErrorAction Ignore
             { $local.Command.DefaultParameterValues.Add('not-a-valid-default-key', 1) } | Should -Throw
             $afterInvalid = Get-Variable -Name PSDefaultParameterValues -Scope Local -ErrorAction Ignore
@@ -73,24 +73,24 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
     }
 
     It 'preserves explicit null and makes previously captured views unavailable' {
-        $saved = $PS.Command.DefaultParameterValues.Clone()
-        $captured = $PS.Command.DefaultParameterValues
+        $saved = $PSSettings.Command.DefaultParameterValues.Clone()
+        $captured = $PSSettings.Command.DefaultParameterValues
         try {
-            $PS.Command.DefaultParameterValues = $null
+            $PSSettings.Command.DefaultParameterValues = $null
             $PSDefaultParameterValues | Should -BeNullOrEmpty
-            $PS.Command.DefaultParameterValues | Should -BeNullOrEmpty
+            $PSSettings.Command.DefaultParameterValues | Should -BeNullOrEmpty
             { $captured.Count } | Should -Throw
             { $captured.Add('ScopedNull:Value', 1) } | Should -Throw
 
             $PSDefaultParameterValues = $saved
-            ($null -ne $PS.Command.DefaultParameterValues) | Should -BeTrue
-            $PS.Command.DefaultParameterValues.Count | Should -Be $saved.Count
-            $PS.Command.DefaultParameterValues = $null
+            ($null -ne $PSSettings.Command.DefaultParameterValues) | Should -BeTrue
+            $PSSettings.Command.DefaultParameterValues.Count | Should -Be $saved.Count
+            $PSSettings.Command.DefaultParameterValues = $null
             $PSDefaultParameterValues | Should -BeNullOrEmpty
-            $PS.Command.DefaultParameterValues | Should -BeNullOrEmpty
+            $PSSettings.Command.DefaultParameterValues | Should -BeNullOrEmpty
         }
         finally {
-            $PS.Command.DefaultParameterValues = $saved
+            $PSSettings.Command.DefaultParameterValues = $saved
         }
     }
 
@@ -99,7 +99,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         $PSDefaultParameterValues.Remove($key)
 
         & {
-            $values = $PS.Command.DefaultParameterValues
+            $values = $PSSettings.Command.DefaultParameterValues
             ([System.Collections.IDictionary]$values).Add($key, 9)
             ([System.Collections.IDictionary]$values).Contains($key) | Should -BeTrue
             $values.Count | Should -BeGreaterThan 0
@@ -117,11 +117,11 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         $key = 'Get-ScopedMutableDefaultProbe:Value'
         $originalValue = $PSDefaultParameterValues[$key]
         try {
-            $PS.Command.DefaultParameterValues[$key] = { 73 }
+            $PSSettings.Command.DefaultParameterValues[$key] = { 73 }
             Get-ScopedMutableDefaultProbe | Should -Be 73
 
             & {
-                $PS.Command.DefaultParameterValues[$key] = { 84 }
+                $PSSettings.Command.DefaultParameterValues[$key] = { 84 }
                 Get-ScopedMutableDefaultProbe | Should -Be 84
             }
 
@@ -131,7 +131,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
             Get-ScopedMutableDefaultProbe | Should -Be 73
 
             $snapshotKey = 'Invoke-ScopedMutableSnapshotProbe:Value'
-            $PS.Command.DefaultParameterValues[$snapshotKey] = 73
+            $PSSettings.Command.DefaultParameterValues[$snapshotKey] = 73
             Invoke-ScopedMutableSnapshotProbe -PSDefaultParameterValues @{ 'Invoke-ScopedMutableSnapshotProbe:Value' = 84 } | Should -Be 73
         }
         finally {
@@ -139,7 +139,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
                 $PSDefaultParameterValues.Remove($key)
             }
             else {
-                $PS.Command.DefaultParameterValues[$key] = $originalValue
+                $PSSettings.Command.DefaultParameterValues[$key] = $originalValue
             }
         }
     }
@@ -148,11 +148,11 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         $key = 'ScopedMutableNested:Value'
         $nested = [pscustomobject]@{ Value = 1 }
         $PSDefaultParameterValues.Remove($key)
-        $PS.Command.DefaultParameterValues[$key] = $nested
+        $PSSettings.Command.DefaultParameterValues[$key] = $nested
 
         & {
-            $PS.Command.DefaultParameterValues[$key].Value = 2
-            $PS.Command.DefaultParameterValues['ScopedMutableNestedChild:Value'] = 3
+            $PSSettings.Command.DefaultParameterValues[$key].Value = 2
+            $PSSettings.Command.DefaultParameterValues['ScopedMutableNestedChild:Value'] = 3
         }
 
         $PSDefaultParameterValues[$key].Value | Should -Be 2
@@ -231,7 +231,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
     It 'allows mutable member changes on read-only bindings but rejects replacement' {
         $key = 'ScopedMutableReadOnly:Value'
         & {
-            $local = $PS.AtScope('Local')
+            $local = $PSSettings.AtScope('Local')
             $PSDefaultParameterValues = @{ $key = 51 }
             Set-Variable -Name PSDefaultParameterValues -Option ReadOnly -Scope Local
 
@@ -247,7 +247,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
     It 'allows mutable member changes on constant bindings but rejects replacement' {
         $key = 'ScopedMutableConstant:Value'
         & {
-            $local = $PS.AtScope('Local')
+            $local = $PSSettings.AtScope('Local')
             New-Variable -Name PSDefaultParameterValues -Scope Local -Value @{ $key = 61 } -Option Constant
 
             $PSDefaultParameterValues[$key] = 62

@@ -1063,7 +1063,7 @@ namespace System.Management.Automation.Language
             VariablePath variablePath = variableExpressionAst.VariablePath;
             if (ExperimentalFeature.PSScopedProperties
                 && (variablePath.IsGlobal || variablePath.IsScript || variablePath.IsLocal || variablePath.IsPrivate)
-                && variablePath.UnqualifiedPath.Equals("PS", StringComparison.OrdinalIgnoreCase))
+                && variablePath.UnqualifiedPath.Equals(SpecialVariables.PSSettings, StringComparison.OrdinalIgnoreCase))
             {
                 _parser.ReportError(variableExpressionAst.Extent,
                     nameof(ParserStrings.ScopedPSVariableNotSupported),

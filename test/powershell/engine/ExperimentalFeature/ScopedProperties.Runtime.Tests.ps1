@@ -18,13 +18,13 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
             param([Parameter(ValueFromPipeline)] $Item)
             process {
                 [pscustomobject]@{
-                    InfoSame = [object]::ReferenceEquals($MyInvocation, $PS.Invocation.Info)
-                    InputSame = [object]::ReferenceEquals($input, $PS.Invocation.Input)
-                    ExecutionContextSame = [object]::ReferenceEquals($ExecutionContext, $PS.Session.ExecutionContext)
-                    HostSame = [object]::ReferenceEquals($Host, $PS.Session.Host)
-                    InputType = $PS.Invocation.Input.GetType().FullName
+                    InfoSame = [object]::ReferenceEquals($MyInvocation, $PSSettings.Invocation.Info)
+                    InputSame = [object]::ReferenceEquals($input, $PSSettings.Invocation.Input)
+                    ExecutionContextSame = [object]::ReferenceEquals($ExecutionContext, $PSSettings.Session.ExecutionContext)
+                    HostSame = [object]::ReferenceEquals($Host, $PSSettings.Session.Host)
+                    InputType = $PSSettings.Invocation.Input.GetType().FullName
                     InputStillReadable = $Item
-                    Display = "$($PS.Invocation) $($PS.Session)"
+                    Display = "$($PSSettings.Invocation) $($PSSettings.Session)"
                 }
             }
         }
@@ -44,13 +44,13 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
             [CmdletBinding()]
             param($First, $Second)
             [pscustomobject]@{
-                Args = @($PS.Invocation.Arguments)
-                Bound = $PS.Invocation.BoundParameters
-                InfoSame = [object]::ReferenceEquals($PS.Invocation.Info, $MyInvocation)
-                CmdletSame = [object]::ReferenceEquals($PS.Invocation.Cmdlet, $PSCmdlet)
-                FunctionName = $PS.Invocation.Info.MyCommand.Name
-                ScriptRoot = $PS.Invocation.ScriptRoot
-                CommandPath = $PS.Invocation.CommandPath
+                Args = @($PSSettings.Invocation.Arguments)
+                Bound = $PSSettings.Invocation.BoundParameters
+                InfoSame = [object]::ReferenceEquals($PSSettings.Invocation.Info, $MyInvocation)
+                CmdletSame = [object]::ReferenceEquals($PSSettings.Invocation.Cmdlet, $PSCmdlet)
+                FunctionName = $PSSettings.Invocation.Info.MyCommand.Name
+                ScriptRoot = $PSSettings.Invocation.ScriptRoot
+                CommandPath = $PSSettings.Invocation.CommandPath
             }
         }
 
@@ -65,8 +65,8 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         function Get-ArgsView {
             [pscustomobject]@{
                 Legacy = $args
-                Facade = $PS.Invocation.Arguments
-                Same = [object]::ReferenceEquals($args, $PS.Invocation.Arguments)
+                Facade = $PSSettings.Invocation.Arguments
+                Same = [object]::ReferenceEquals($args, $PSSettings.Invocation.Arguments)
             }
         }
         $arguments = Get-ArgsView alpha beta
@@ -75,7 +75,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         $arguments.Same | Should -BeTrue
 
         $dotScript = Join-Path $TestDrive 'runtime-dotted.ps1'
-        $scriptText = '[pscustomobject]@{ Root=$PS.Invocation.ScriptRoot; Path=$PS.Invocation.CommandPath; InfoRoot=$PS.Invocation.Info.PSScriptRoot; InfoPath=$PS.Invocation.Info.PSCommandPath; LegacyInfoRoot=$MyInvocation.PSScriptRoot; LegacyInfoPath=$MyInvocation.PSCommandPath }'
+        $scriptText = '[pscustomobject]@{ Root=$PSSettings.Invocation.ScriptRoot; Path=$PSSettings.Invocation.CommandPath; InfoRoot=$PSSettings.Invocation.Info.PSScriptRoot; InfoPath=$PSSettings.Invocation.Info.PSCommandPath; LegacyInfoRoot=$MyInvocation.PSScriptRoot; LegacyInfoPath=$MyInvocation.PSCommandPath }'
         Set-Content -LiteralPath $dotScript -Value $scriptText
         $dot = . $dotScript
         $dot.Root | Should -Be (Split-Path -Parent $dotScript)
@@ -89,15 +89,15 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         $savedExitCodeValue = if ($null -ne $savedExitCode) { $savedExitCode.Value }
         try {
             $global:LASTEXITCODE = 31
-            $PS.AtScope('Global').LastExitCode | Should -Be 31
-            $PS.LastExitCode = 32
+            $PSSettings.AtScope('Global').LastExitCode | Should -Be 31
+            $PSSettings.LastExitCode = 32
             $LASTEXITCODE | Should -Be 32
             $global:LASTEXITCODE | Should -Be 31
-            $PS.AtScope('Global').LastExitCode = 33
+            $PSSettings.AtScope('Global').LastExitCode = 33
             $global:LASTEXITCODE | Should -Be 33
-            $PS.LastExitCode | Should -Be 32
-            { $PS.Reset('Runtime.ProcessId') } | Should -Throw
-            { $PS.Reset('Invocation.Arguments') } | Should -Throw
+            $PSSettings.LastExitCode | Should -Be 32
+            { $PSSettings.Reset('Runtime.ProcessId') } | Should -Throw
+            { $PSSettings.Reset('Invocation.Arguments') } | Should -Throw
         } finally {
             if ($null -ne $savedExitCode) {
                 Set-Variable LASTEXITCODE $savedExitCodeValue -Scope Global
@@ -112,24 +112,24 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         $savedProfileValue = if ($null -ne $savedProfile) { $savedProfile.Value }
         try {
             if ($null -ne $savedProfile) {
-                $PS.Session.Profile | Should -Be $savedProfileValue
+                $PSSettings.Session.Profile | Should -Be $savedProfileValue
             }
             Remove-Variable PROFILE -Scope Global -Force -ErrorAction Ignore
             Set-StrictMode -Off
-            $PS.Session.Profile | Should -BeNullOrEmpty
-            "$($PS.Session.Profile)" | Should -BeExactly ''
+            $PSSettings.Session.Profile | Should -BeNullOrEmpty
+            "$($PSSettings.Session.Profile)" | Should -BeExactly ''
 
             Set-StrictMode -Version 1
-            { $PS.Session.Profile } | Should -Throw
-            "$($PS.Session.Profile)" | Should -BeExactly ''
+            { $PSSettings.Session.Profile } | Should -Throw
+            "$($PSSettings.Session.Profile)" | Should -BeExactly ''
 
             Set-StrictMode -Version 2
-            { $PS.Session.Profile } | Should -Throw
-            { "$($PS.Session.Profile)" } | Should -Throw
+            { $PSSettings.Session.Profile } | Should -Throw
+            { "$($PSSettings.Session.Profile)" } | Should -Throw
 
             $global:PROFILE = $null
-            $PS.Session.Profile | Should -BeNullOrEmpty
-            "$($PS.Session.Profile)" | Should -BeExactly ''
+            $PSSettings.Session.Profile | Should -BeNullOrEmpty
+            "$($PSSettings.Session.Profile)" | Should -BeExactly ''
         } finally {
             Set-StrictMode -Off
             Remove-Variable PROFILE -Scope Global -Force -ErrorAction Ignore
@@ -142,29 +142,29 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         Push-Location $originalLocation
         try {
             Set-Location $TestDrive
-            $PS.Session.CurrentLocation.Path | Should -Be (Get-Location).Path
+            $PSSettings.Session.CurrentLocation.Path | Should -Be (Get-Location).Path
             function Read-ShadowedPwd {
                 $PWD = 'shadow-value'
-                $PS.Session.CurrentLocation | Should -BeExactly 'shadow-value'
+                $PSSettings.Session.CurrentLocation | Should -BeExactly 'shadow-value'
                 $PWD = Get-Location
-                [object]::ReferenceEquals($PWD, $PS.Session.CurrentLocation) | Should -BeTrue
+                [object]::ReferenceEquals($PWD, $PSSettings.Session.CurrentLocation) | Should -BeTrue
             }
             Read-ShadowedPwd
         } finally {
             Pop-Location
         }
-        $PS.Session.CurrentLocation.Path | Should -Be $originalLocation.Path
+        $PSSettings.Session.CurrentLocation.Path | Should -Be $originalLocation.Path
     }
 
     It 'preserves class and ETS this ownership in methods, script properties, and script methods' {
         $instance = [RuntimeThisProbe]::new()
-        $instance.SameThis($PS) | Should -BeTrue
+        $instance.SameThis($PSSettings) | Should -BeTrue
 
         Add-Member -InputObject $instance -MemberType ScriptProperty -Name ScopedThis -Value {
-            [object]::ReferenceEquals($this, $PS.Invocation.This)
+            [object]::ReferenceEquals($this, $PSSettings.Invocation.This)
         } -Force
         Add-Member -InputObject $instance -MemberType ScriptMethod -Name ScopedThisMethod -Value {
-            [object]::ReferenceEquals($this, $PS.Invocation.This)
+            [object]::ReferenceEquals($this, $PSSettings.Invocation.This)
         } -Force
         $instance.ScopedThis | Should -BeTrue
         $instance.ScopedThisMethod() | Should -BeTrue
@@ -172,8 +172,8 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
 
     It 'keeps input identity and does not consume input during access or display' {
         function Test-InputView {
-            $facadeInput = $PS.Invocation.Input
-            $display = "$($PS) $($PS.Invocation)"
+            $facadeInput = $PSSettings.Invocation.Input
+            $display = "$($PSSettings) $($PSSettings.Invocation)"
             [object]::ReferenceEquals($facadeInput, $input) | Should -BeTrue
             $display | Should -Not -BeNullOrEmpty
             $seen = [System.Collections.Generic.List[object]]::new()
@@ -188,60 +188,60 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
     It 'preserves foreach and switch enumerator identity and restores nested loop state' {
         $seen = [System.Collections.Generic.List[object]]::new()
         foreach ($outer in 1, 2) {
-            $outerEnumerator = $PS.Invocation.ForEachEnumerator
+            $outerEnumerator = $PSSettings.Invocation.ForEachEnumerator
             [object]::ReferenceEquals($outerEnumerator, $foreach) | Should -BeTrue
             foreach ($inner in 'x') {
-                [object]::ReferenceEquals($PS.Invocation.ForEachEnumerator, $foreach) | Should -BeTrue
+                [object]::ReferenceEquals($PSSettings.Invocation.ForEachEnumerator, $foreach) | Should -BeTrue
                 $seen.Add("$outer$inner")
             }
-            [object]::ReferenceEquals($PS.Invocation.ForEachEnumerator, $outerEnumerator) | Should -BeTrue
+            [object]::ReferenceEquals($PSSettings.Invocation.ForEachEnumerator, $outerEnumerator) | Should -BeTrue
             try { foreach ($inner in 'throw') { throw 'unwind inner loop' } } catch {}
-            [object]::ReferenceEquals($PS.Invocation.ForEachEnumerator, $outerEnumerator) | Should -BeTrue
+            [object]::ReferenceEquals($PSSettings.Invocation.ForEachEnumerator, $outerEnumerator) | Should -BeTrue
             foreach ($inner in 'break') { break }
-            [object]::ReferenceEquals($PS.Invocation.ForEachEnumerator, $outerEnumerator) | Should -BeTrue
+            [object]::ReferenceEquals($PSSettings.Invocation.ForEachEnumerator, $outerEnumerator) | Should -BeTrue
         }
         $seen | Should -Be @('1x', '2x')
 
         switch -Regex ('alpha') {
             'alpha' {
-                [object]::ReferenceEquals($PS.Invocation.SwitchEnumerator, $switch) | Should -BeTrue
-                $PS.Invocation.SwitchEnumerator.Current | Should -Be 'alpha'
-                $outerSwitch = $PS.Invocation.SwitchEnumerator
+                [object]::ReferenceEquals($PSSettings.Invocation.SwitchEnumerator, $switch) | Should -BeTrue
+                $PSSettings.Invocation.SwitchEnumerator.Current | Should -Be 'alpha'
+                $outerSwitch = $PSSettings.Invocation.SwitchEnumerator
                 try { switch ('inner') { default { throw 'unwind switch' } } } catch {}
-                [object]::ReferenceEquals($PS.Invocation.SwitchEnumerator, $outerSwitch) | Should -BeTrue
+                [object]::ReferenceEquals($PSSettings.Invocation.SwitchEnumerator, $outerSwitch) | Should -BeTrue
                 switch ('inner') { default { break } }
-                [object]::ReferenceEquals($PS.Invocation.SwitchEnumerator, $outerSwitch) | Should -BeTrue
+                [object]::ReferenceEquals($PSSettings.Invocation.SwitchEnumerator, $outerSwitch) | Should -BeTrue
             }
         }
 
         foreach ($x in 1, 2) {
             try { if ($x -eq 1) { throw 'early' } } catch {}
         }
-        $PS.Invocation.ForEachEnumerator | Should -BeNullOrEmpty
-        $PS.Invocation.SwitchEnumerator | Should -BeNullOrEmpty
+        $PSSettings.Invocation.ForEachEnumerator | Should -BeNullOrEmpty
+        $PSSettings.Invocation.SwitchEnumerator | Should -BeNullOrEmpty
     }
 
     It 'keeps Matches from the last successful scalar, collection, and switch-regex match' {
         'abc' -match '(?<letters>a)' | Should -BeTrue
-        [object]::ReferenceEquals($Matches, $PS.Invocation.Matches) | Should -BeTrue
-        $PS.Invocation.Matches.letters | Should -Be 'a'
+        [object]::ReferenceEquals($Matches, $PSSettings.Invocation.Matches) | Should -BeTrue
+        $PSSettings.Invocation.Matches.letters | Should -Be 'a'
         'no-match' -match 'never' | Should -BeFalse
-        $PS.Invocation.Matches.letters | Should -Be 'a'
+        $PSSettings.Invocation.Matches.letters | Should -Be 'a'
 
         @('first-1', 'second-2') -match '(?<digit>\d)' | Out-Null
-        $PS.Invocation.Matches.letters | Should -Be 'a'
-        switch -Regex ('switch-3') { '(?<digit>\d)' { $PS.Invocation.Matches.digit | Should -Be '3' } }
+        $PSSettings.Invocation.Matches.letters | Should -Be 'a'
+        switch -Regex ('switch-3') { '(?<digit>\d)' { $PSSettings.Invocation.Matches.digit | Should -Be '3' } }
     }
 
     It 'returns live diagnostic references and preserves error history identity' {
-        $errors = $PS.Diagnostics.Errors
+        $errors = $PSSettings.Diagnostics.Errors
         [object]::ReferenceEquals($errors, $Error) | Should -BeTrue
         $count = $errors.Count
         Write-Error 'runtime-view-error' -ErrorAction Continue
-        $PS.Diagnostics.Errors.Count | Should -BeGreaterThan $count
-        [object]::ReferenceEquals($errors, $PS.Diagnostics.Errors) | Should -BeTrue
-        $PS.Diagnostics.StackTrace | Should -Be $StackTrace
-        $PS.Diagnostics.ToString() | Should -Not -BeNullOrEmpty
+        $PSSettings.Diagnostics.Errors.Count | Should -BeGreaterThan $count
+        [object]::ReferenceEquals($errors, $PSSettings.Diagnostics.Errors) | Should -BeTrue
+        $PSSettings.Diagnostics.StackTrace | Should -Be $StackTrace
+        $PSSettings.Diagnostics.ToString() | Should -Not -BeNullOrEmpty
     }
 
     It 'keeps event values and event-local Error lists for a subscription lifetime' {
@@ -258,18 +258,18 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         }
         $action = {
             $Event.MessageData.Observations.Add([pscustomobject]@{
-                RecordSame = [object]::ReferenceEquals($Event, $PS.Event.Record)
-                Record = $PS.Event.Record
-                SubscriberSame = [object]::ReferenceEquals($EventSubscriber, $PS.Event.Subscriber)
-                ArgsSame = [object]::ReferenceEquals($EventArgs, $PS.Event.Arguments)
-                SenderSame = [object]::ReferenceEquals($Sender, $PS.Event.Sender)
-                Errors = $PS.Diagnostics.Errors
-                ErrorCount = $PS.Diagnostics.Errors.Count
+                RecordSame = [object]::ReferenceEquals($Event, $PSSettings.Event.Record)
+                Record = $PSSettings.Event.Record
+                SubscriberSame = [object]::ReferenceEquals($EventSubscriber, $PSSettings.Event.Subscriber)
+                ArgsSame = [object]::ReferenceEquals($EventArgs, $PSSettings.Event.Arguments)
+                SenderSame = [object]::ReferenceEquals($Sender, $PSSettings.Event.Sender)
+                Errors = $PSSettings.Diagnostics.Errors
+                ErrorCount = $PSSettings.Diagnostics.Errors.Count
             })
             Write-Error 'event-local-error' -ErrorAction Continue
         }
         $secondAction = {
-            $Event.MessageData.Observations.Add($PS.Diagnostics.Errors)
+            $Event.MessageData.Observations.Add($PSSettings.Diagnostics.Errors)
         }
         try {
             $firstJob = Register-EngineEvent -SourceIdentifier $eventName -Action $action
@@ -288,7 +288,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
             [object]::ReferenceEquals($received[0].Errors, $received[1].Errors) | Should -BeTrue
             $received[1].ErrorCount | Should -BeGreaterThan $received[0].ErrorCount
             [object]::ReferenceEquals($received[0].Errors, $secondReceived[0]) | Should -BeFalse
-            $persistedEvent = & $firstJob.Module { $PS.Event.Record }
+            $persistedEvent = & $firstJob.Module { $PSSettings.Event.Record }
             [object]::ReferenceEquals($persistedEvent, $received[1].Record) | Should -BeTrue
             [object]::ReferenceEquals($received[0].Errors, $Error) | Should -BeFalse
         } finally {
@@ -302,42 +302,42 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
 
     It 'keeps optional producer values absent outside debugger, profile, prompt, and remoting lifetimes' {
         Set-StrictMode -Off
-        $PS.Diagnostics.DebugContext | Should -BeNullOrEmpty
+        $PSSettings.Diagnostics.DebugContext | Should -BeNullOrEmpty
         $legacyProfile = Get-Variable PROFILE -ErrorAction Ignore
         if ($null -eq $legacyProfile) {
-            $PS.Session.Profile | Should -BeNullOrEmpty
+            $PSSettings.Session.Profile | Should -BeNullOrEmpty
         } else {
-            $PS.Session.Profile | Should -Be $legacyProfile.Value
+            $PSSettings.Session.Profile | Should -Be $legacyProfile.Value
         }
-        $PS.Session.CurrentlyExecutingCommand | Should -BeNullOrEmpty
-        $PS.Remoting.SenderInfo | Should -BeNullOrEmpty
-        { $PS.Invocation.Cmdlet } | Should -Not -Throw
-        { $PS.Invocation.ScriptRoot } | Should -Not -Throw
-        { $PS.Invocation.CommandPath } | Should -Not -Throw
+        $PSSettings.Session.CurrentlyExecutingCommand | Should -BeNullOrEmpty
+        $PSSettings.Remoting.SenderInfo | Should -BeNullOrEmpty
+        { $PSSettings.Invocation.Cmdlet } | Should -Not -Throw
+        { $PSSettings.Invocation.ScriptRoot } | Should -Not -Throw
+        { $PSSettings.Invocation.CommandPath } | Should -Not -Throw
     }
 
     It 'keeps process, runspace, culture, platform, and language constant values live' {
-        $PS.Runtime.ProcessId | Should -Be $PID
-        $PS.Runtime.InstallationDirectory | Should -Be $PSHOME
-        $PS.Runtime.Edition | Should -Be $PSEdition
-        $PS.Runtime.ShellId | Should -Be $ShellId
-        [object]::ReferenceEquals($PS.Runtime.VersionTable, $PSVersionTable) | Should -BeTrue
-        $PS.Runtime.Culture | Should -Be $PSCulture
-        $PS.Runtime.UICulture | Should -Be $PSUICulture
-        $PS.Runtime.IsWindows | Should -Be ([bool]$IsWindows)
-        $PS.Runtime.IsLinux | Should -Be ([bool]$IsLinux)
-        $PS.Runtime.IsMacOS | Should -Be ([bool]$IsMacOS)
-        $PS.Runtime.IsCoreCLR | Should -Be ([bool]$IsCoreCLR)
-        $PS.Constants.True | Should -Be $true
-        $PS.Constants.False | Should -Be $false
-        $PS.Constants.Null | Should -BeNullOrEmpty
-        $PS.LastStatementSuccessful | Should -Be $?
-        { $PS.LastStatementSuccessful = $false } | Should -Throw
+        $PSSettings.Runtime.ProcessId | Should -Be $PID
+        $PSSettings.Runtime.InstallationDirectory | Should -Be $PSHOME
+        $PSSettings.Runtime.Edition | Should -Be $PSEdition
+        $PSSettings.Runtime.ShellId | Should -Be $ShellId
+        [object]::ReferenceEquals($PSSettings.Runtime.VersionTable, $PSVersionTable) | Should -BeTrue
+        $PSSettings.Runtime.Culture | Should -Be $PSCulture
+        $PSSettings.Runtime.UICulture | Should -Be $PSUICulture
+        $PSSettings.Runtime.IsWindows | Should -Be ([bool]$IsWindows)
+        $PSSettings.Runtime.IsLinux | Should -Be ([bool]$IsLinux)
+        $PSSettings.Runtime.IsMacOS | Should -Be ([bool]$IsMacOS)
+        $PSSettings.Runtime.IsCoreCLR | Should -Be ([bool]$IsCoreCLR)
+        $PSSettings.Constants.True | Should -Be $true
+        $PSSettings.Constants.False | Should -Be $false
+        $PSSettings.Constants.Null | Should -BeNullOrEmpty
+        $PSSettings.LastStatementSuccessful | Should -Be $?
+        { $PSSettings.LastStatementSuccessful = $false } | Should -Throw
     }
 
     It 'tracks parser history tokens and success separately from exit status' {
         $tokenComparison = & {
-            [pscustomobject]@{ LegacyFirst = $^; FacadeFirst = $PS.History.FirstToken; LegacyLast = $$; FacadeLast = $PS.History.LastToken }
+            [pscustomobject]@{ LegacyFirst = $^; FacadeFirst = $PSSettings.History.FirstToken; LegacyLast = $$; FacadeLast = $PSSettings.History.LastToken }
         }
         $tokenComparison.FacadeFirst | Should -Be $tokenComparison.LegacyFirst
         $tokenComparison.FacadeLast | Should -Be $tokenComparison.LegacyLast
@@ -345,13 +345,13 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         $savedExitCodeValue = if ($null -ne $savedExitCode) { $savedExitCode.Value }
         try {
             $global:LASTEXITCODE = 7
-            $PS.LastExitCode | Should -Be 7
+            $PSSettings.LastExitCode | Should -Be 7
             $null = 'success'
-            $success = $PS.LastStatementSuccessful
+            $success = $PSSettings.LastStatementSuccessful
             $success | Should -BeTrue
             Write-Error 'success-flag-failure' -ErrorAction SilentlyContinue
-            $PS.LastStatementSuccessful | Should -BeFalse
-            $PS.LastExitCode | Should -Be 7
+            $PSSettings.LastStatementSuccessful | Should -BeFalse
+            $PSSettings.LastExitCode | Should -Be 7
         } finally {
             if ($null -ne $savedExitCode) {
                 Set-Variable LASTEXITCODE $savedExitCodeValue -Scope Global
@@ -362,7 +362,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
     }
 
     It 'preserves runspace ownership and rejects foreign and expired bound views' {
-        $captured = $PS.AtScope('Local').Session
+        $captured = $PSSettings.AtScope('Local').Session
         $runspace = [runspacefactory]::CreateRunspace()
         try {
             $runspace.Open()
@@ -376,8 +376,8 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
             } finally { $powershell.Dispose() }
         } finally { $runspace.Dispose() }
 
-        $expired = & { $PS.AtScope('Local').Session }
+        $expired = & { $PSSettings.AtScope('Local').Session }
         { $expired.Host } | Should -Throw
-        $PS.Session.Host | Should -Not -BeNullOrEmpty
+        $PSSettings.Session.Host | Should -Not -BeNullOrEmpty
     }
 }

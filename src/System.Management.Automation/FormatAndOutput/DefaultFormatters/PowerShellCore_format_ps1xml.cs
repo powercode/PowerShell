@@ -1037,7 +1037,7 @@ namespace System.Management.Automation.Runspaces
                         .AddScriptBlockExpressionBinding(
                             """
                                     if ($EnabledExperimentalFeatures -contains 'PSScopedProperties') {
-                                        $scopedErrorView = $PS.Formatting.ErrorView
+                                        $scopedErrorView = $PSSettings.Formatting.ErrorView
                                     } else {
                                         $scopedErrorView = $ErrorView
                                     }
@@ -1104,7 +1104,7 @@ namespace System.Management.Automation.Runspaces
                                     $ErrorActionPreference = 'Stop'
                                     trap { 'Error found in error view definition: ' + $_.Exception.Message }
                                     if ($EnabledExperimentalFeatures -contains 'PSScopedProperties') {
-                                        $scopedErrorView = $PS.Formatting.ErrorView
+                                        $scopedErrorView = $PSSettings.Formatting.ErrorView
                                     } else {
                                         $scopedErrorView = $ErrorView
                                     }

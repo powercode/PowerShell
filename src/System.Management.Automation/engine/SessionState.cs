@@ -136,7 +136,7 @@ namespace System.Management.Automation
 
             if (ExperimentalFeature.PSScopedProperties)
             {
-                var scopedProperties = new PSVariable(SpecialVariables.PS, new PSScopedPropertyFacade(), ScopedItemOptions.Constant | ScopedItemOptions.AllScope)
+                var scopedProperties = new PSVariable(SpecialVariables.PSSettings, new PSScopedPropertyFacade(), ScopedItemOptions.Constant | ScopedItemOptions.AllScope)
                 {
                     Description = RunspaceInit.PSScopedPropertiesDescription,
                 };

@@ -10,43 +10,43 @@ Run `Enable-ExperimentalFeature PSScopedProperties` and start a new PowerShell p
 
 ## Using scoped settings
 
-The feature registers a constant, AllScope `$PS` variable. Its writable preference properties share typed values with their corresponding legacy variables. Action preferences use `ActionPreference`; ShouldProcess settings use the types shown below.
+The feature registers a constant, AllScope `$PSSettings` variable. Its writable preference properties share typed values with their corresponding legacy variables. Action preferences use `ActionPreference`; ShouldProcess settings use the types shown below.
 
 | Facade property | Legacy variable | Default |
 | --- | --- | --- |
-| `$PS.ActionPreference.Error` | `$ErrorActionPreference` | `Continue` |
-| `$PS.ActionPreference.Warning` | `$WarningPreference` | `Continue` |
-| `$PS.ActionPreference.Information` | `$InformationPreference` | `SilentlyContinue` |
-| `$PS.ActionPreference.Verbose` | `$VerbosePreference` | `SilentlyContinue` |
-| `$PS.ActionPreference.Debug` | `$DebugPreference` | `SilentlyContinue` |
-| `$PS.ActionPreference.Progress` | `$ProgressPreference` | `Continue` |
-| `$PS.ShouldProcess.Confirm` | `$ConfirmPreference` | `High` (`ConfirmImpact`) |
-| `$PS.ShouldProcess.WhatIf` | `$WhatIfPreference` | `false` (`Boolean`) |
+| `$PSSettings.ActionPreference.Error` | `$ErrorActionPreference` | `Continue` |
+| `$PSSettings.ActionPreference.Warning` | `$WarningPreference` | `Continue` |
+| `$PSSettings.ActionPreference.Information` | `$InformationPreference` | `SilentlyContinue` |
+| `$PSSettings.ActionPreference.Verbose` | `$VerbosePreference` | `SilentlyContinue` |
+| `$PSSettings.ActionPreference.Debug` | `$DebugPreference` | `SilentlyContinue` |
+| `$PSSettings.ActionPreference.Progress` | `$ProgressPreference` | `Continue` |
+| `$PSSettings.ShouldProcess.Confirm` | `$ConfirmPreference` | `High` (`ConfirmImpact`) |
+| `$PSSettings.ShouldProcess.WhatIf` | `$WhatIfPreference` | `false` (`Boolean`) |
 
-Each of these eight preferences and `$PS.Style.Progress.View` inherits independently through PowerShell scopes. Assignment in a scope without a binding creates a local override. Captured grouping objects resolve their properties against the active scope at each use.
+Each of these eight preferences and `$PSSettings.Style.Progress.View` inherits independently through PowerShell scopes. Assignment in a scope without a binding creates a local override. Captured grouping objects resolve their properties against the active scope at each use.
 
 ```powershell
-$PS.ActionPreference.Error = 'Continue'
-$PS.Style.Progress.View = 'Minimal'
+$PSSettings.ActionPreference.Error = 'Continue'
+$PSSettings.Style.Progress.View = 'Minimal'
 
 & {
     $ErrorActionPreference = 'Stop'
     $PSStyle.Progress.View = 'Classic'
-    $PS.ActionPreference.Error       # Stop
-    $PS.Style.Progress.View          # Classic
+    $PSSettings.ActionPreference.Error       # Stop
+    $PSSettings.Style.Progress.View          # Classic
 
-    $PS.Reset('ActionPreference.Error')
-    $PS.ActionPreference.Error       # Continue
-    $PS.Style.Progress.View          # Classic
+    $PSSettings.Reset('ActionPreference.Error')
+    $PSSettings.ActionPreference.Error       # Continue
+    $PSSettings.Style.Progress.View          # Classic
 }
 
-$PS.Style.Progress.View              # Minimal
+$PSSettings.Style.Progress.View              # Minimal
 ```
 
-Use `$PS.AtScope('Local')`, `$PS.AtScope('Script')`, or `$PS.AtScope('Global')` to target a concrete scope. For example, `$PS.AtScope('Script').Style.Progress.View = 'Classic'` writes to the script scope. Scope views expire with their target and belong to the runspace that created them. Use `AtScope()` for scope targeting because qualified expressions such as `$script:PS` are rejected.
+Use `$PSSettings.AtScope('Local')`, `$PSSettings.AtScope('Script')`, or `$PSSettings.AtScope('Global')` to target a concrete scope. For example, `$PSSettings.AtScope('Script').Style.Progress.View = 'Classic'` writes to the script scope. Scope views expire with their target and belong to the runspace that created them. Use `AtScope()` for scope targeting because qualified expressions such as `$script:PSSettings` are rejected.
 
 `Reset()` takes a case-insensitive path such as `ActionPreference.Warning` or `Style.Progress.View`. It removes the target override, subject to variable protections, and resumes inheritance. Calling it with no override present has no effect. It works with literal and dynamically supplied method names.
-`Remove-Variable WarningPreference -Scope Local` and `$PS.Reset('ActionPreference.Warning')` both remove a local warning preference.
+`Remove-Variable WarningPreference -Scope Local` and `$PSSettings.Reset('ActionPreference.Warning')` both remove a local warning preference.
 
 The console host uses the effective progress view from the latest update for its shared progress pane and may render in classic mode for terminals without the required capabilities.
 
@@ -55,7 +55,7 @@ The prototype covers six action preferences, Confirm, WhatIf, scalar and mutable
 ### Scalar configuration
 
 These properties use the same inheritance, assignment, and reset rules. Paths
-are relative to `$PS`; reads of an absent legacy binding do not create one.
+are relative to `$PSSettings`; reads of an absent legacy binding do not create one.
 
 | Path | Legacy variable | Default or fallback |
 | --- | --- | --- |
@@ -129,7 +129,7 @@ reading a child's override. A retained variable object from an exited scope
 keeps its value; explicitly removing its final binding clears it. ReadOnly and
 Constant protect binding replacement while allowing object member mutations.
 
-`$PS.Style` and `$PSStyle` expose the complete existing `PSStyle` surface:
+`$PSSettings.Style` and `$PSStyle` expose the complete existing `PSStyle` surface:
 formatting and file styles, extension mappings, progress settings, output
 rendering, automatic sizing, colors, and ANSI helpers. Mutable leaves inherit
 independently. The ANSI `Style.Reset` string remains distinct from the
@@ -213,7 +213,7 @@ The `ScopedRuntimeProperties` descriptor registry maps these paths; non-automati
 
 ### Class, strict-mode, and visibility boundaries
 
-The runtime facade does not bypass parser or language restrictions. Existing class rules prohibit unqualified `$PS` variable access in class bodies, and the feature parser rejects qualified `$script:PS`; code needing runtime facade access in a class should receive the facade as an explicit parameter. Module/private visibility is resolved using the normal session-state variable lookup and caller origin. Missing variable behavior remains legacy-compatible in ordinary reads and strict modes. In expandable strings, only the new sentinel representing an absent runtime backing is softened for strict mode 1; strict mode 2 still throws. A present `$null` is not converted into absence.
+The runtime facade does not bypass parser or language restrictions. Existing class rules prohibit unqualified `$PSSettings` variable access in class bodies, and the feature parser rejects qualified `$script:PSSettings`; code needing runtime facade access in a class should receive the facade as an explicit parameter. Module/private visibility is resolved using the normal session-state variable lookup and caller origin. Missing variable behavior remains legacy-compatible in ordinary reads and strict modes. In expandable strings, only the new sentinel representing an absent runtime backing is softened for strict mode 1; strict mode 2 still throws. A present `$null` is not converted into absence.
 
 ## Baseline before canonical Error storage
 
@@ -228,13 +228,13 @@ An additional run after phase 2 excluded `RemoteHyperV` and reported 417 passes,
 
 ## Canonical storage contract
 
-When `PSScopedProperties` is enabled, each legacy preference variable uses the same typed entry as the corresponding `$PS` property and engine consumers. `$PSStyle.Progress.View` also shares its typed entry with `$PS.Style.Progress.View`.
+When `PSScopedProperties` is enabled, each legacy preference variable uses the same typed entry as the corresponding `$PSSettings` property and engine consumers. `$PSStyle.Progress.View` also shares its typed entry with `$PSSettings.Style.Progress.View`.
 Both access paths convert and validate assignments before writing the target entry. The effective value comes from the nearest visible entry.
 When no entry is visible, preference resolution uses the default in the table and progress rendering uses `Minimal`. A legacy variable lookup can then return no variable.
 The preference variable adapter preserves variable protections and force rules, validation attributes, `Private` visibility, and explicitly configured `AllScope` sharing.
 Entries and bound scope views belong to their originating runspace. The console host continues to use the effective progress view, and `PSStyle` retains its context-free fallback.
 
-When the feature is disabled, `$PS` remains an ordinary variable name. Legacy preference variables and `$PSStyle.Progress.View` continue to use their existing storage and validation paths.
+When the feature is disabled, `$PSSettings` remains an ordinary variable name. Legacy preference variables and `$PSStyle.Progress.View` continue to use their existing storage and validation paths.
 
 Each action preference entry has a variable adapter that supplies the metadata and exposes the entry through `Value`. Explicit `AllScope` configuration shares the entry and its adapter across scope bindings.
 A variable object returned by `Get-Variable` or `New-Variable -PassThru` tracks the live entry. Explicit removal of its last binding clears its value and variable options and attributes, as with an ordinary removed variable. Editing the retained object afterward leaves that binding absent.
@@ -313,11 +313,11 @@ Before the cutover, installing an ordinary `PSVariable` in a fresh scope could m
     $supplied = [psvariable]::new('ErrorActionPreference', 'Stop')
     $ExecutionContext.SessionState.PSVariable.Set($supplied)
     $supplied.Value = 'SilentlyContinue'
-    $PS.ActionPreference.Error        # Before: SilentlyContinue. After: Stop.
+    $PSSettings.ActionPreference.Error        # Before: SilentlyContinue. After: Stop.
 
     $stored = Get-Variable ErrorActionPreference -Scope Local
     $stored.Value = 'Continue'
-    $PS.ActionPreference.Error        # Before and after: Continue.
+    $PSSettings.ActionPreference.Error        # Before and after: Continue.
 }
 ```
 
@@ -336,25 +336,25 @@ Before the cutover, advanced functions used an implicit `$ErrorActionPreference`
 Implicit function preferences and ordinary local assignments now use removable scope entries, regardless of how `Reset()` is invoked.
 
 ```powershell
-$PS.ActionPreference.Error = 'Continue'
+$PSSettings.ActionPreference.Error = 'Continue'
 function Show-Preference {
     [CmdletBinding()]
     param()
 
-    $PS.ActionPreference.Error        # Before and after: Stop.
-    try { $PS.Reset('ActionPreference.Error') } catch { 'reset failed' }
-    $PS.ActionPreference.Error        # Before: Stop after the failure. After: Continue.
+    $PSSettings.ActionPreference.Error        # Before and after: Stop.
+    try { $PSSettings.Reset('ActionPreference.Error') } catch { 'reset failed' }
+    $PSSettings.ActionPreference.Error        # Before: Stop after the failure. After: Continue.
     Write-Error 'expected' -ErrorAction Ignore
 }
 Show-Preference -ErrorAction Stop
 . Show-Preference -ErrorAction Stop  # The same reset outcome applies in a dot-sourced invocation.
-$PS.ActionPreference.Error          # Before and after: Continue in the caller.
+$PSSettings.ActionPreference.Error          # Before and after: Continue in the caller.
 
 function Show-DynamicReset {
     $ErrorActionPreference = 'Stop'
     $method = 'Reset'
-    try { $PS.$method('ActionPreference.Error') } catch { 'reset failed' }
-    $PS.ActionPreference.Error        # Before without a breakpoint: Stop after failure. After: Continue.
+    try { $PSSettings.$method('ActionPreference.Error') } catch { 'reset failed' }
+    $PSSettings.ActionPreference.Error        # Before without a breakpoint: Stop after failure. After: Continue.
 }
 Show-DynamicReset
 ```
@@ -393,7 +393,7 @@ The final source audit checked the scope mutation and initialization paths, comp
 
 Each of the five implementation commits built with the .NET 11 Windows SDK and passed its focused checks. Final focused xUnit coverage passed all 43 cases in each explicitly verified feature state. The selected preference, common-parameter, stream, variable, module, and debugger Pester suites passed 885 cases with the feature enabled and 868 with it disabled. The enabled run had five skips and nine pending cases; the disabled run had 22 skips and nine pending cases, including the 17 enabled-host scoped-property cases. Both metadata-registered scoped suites were included.
 
-The regression fixtures now avoid using the reserved `$PS` name for PowerShell instances or executable paths. The legacy Ignore test runs in a separate runspace so removing its global preference does not change later tests' variable metadata. Module preference fixtures explicitly suppress their own verbose diagnostics while testing exported values, including `Stop`.
+The regression fixtures were updated to avoid using the then-reserved `$PS` name for PowerShell instances or executable paths. The facade is now named `$PSSettings`, leaving `$PS` available for ordinary variables. The legacy Ignore test runs in a separate runspace so removing its global preference does not change later tests' variable metadata. Module preference fixtures explicitly suppress their own verbose diagnostics while testing exported values, including `Stop`.
 
 Two uninterrupted full xUnit attempts and an isolated socket-suite attempt encountered the previously observed `RemoteHyperV` hangs and were aborted after 90 seconds of test inactivity. Supplemental runs completed every case: the non-socket suite reported 451 passes, six skips, and the seven existing locale-dependent file-size failures; all 24 socket cases completed across the runs, with 23 passes and the existing Swedish-versus-English socket-message failure. Combined coverage was 474 passes, six skips, and eight known locale failures. This does not establish an uninterrupted full-suite pass. The socket tests and `test/xUnit/failed_loc.xml` were left unchanged.
 
@@ -549,7 +549,7 @@ same six failures: a redirected Documents/default-transcript-path assumption,
 two unavailable noninteractive prompts and two subsequent transcript file
 locks, and a culture-dependent formatted-number expectation. These failures
 are not counted as passes. Generic fixtures now avoid using the reserved
-`$ps` name. Three incompatible legacy assertions are skipped when enabled;
+`$ps` name used by the original facade. Three incompatible legacy assertions are skipped when enabled;
 dedicated feature cases verify typed Boolean normalization with native exits
 and actual scoped enumeration truncation. Results are under
 `artifacts/scoped-properties/expansion-stage2`.
@@ -597,7 +597,7 @@ variable restrictions.
 
 Affected parser, invocation, status, event, debugger, and restricted-language
 regressions initially passed 598 cases enabled and 602 disabled, with eight
-pending in each mode. An enabled parser fixture used the now-reserved `$ps`
+pending in each mode. An enabled parser fixture used the then-reserved `$ps`
 name; renaming it restored its four tokenizer checks. The complete parser
 rerun passed 421 cases in each mode, retaining two decimal-separator failures
 for floating-point limits. Both failures also reproduce with the installed,

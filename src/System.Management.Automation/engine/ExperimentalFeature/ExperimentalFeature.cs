@@ -117,7 +117,7 @@ namespace System.Management.Automation
                 ),
                 new ExperimentalFeature(
                     name: nameof(PSScopedProperties),
-                    description: "Expose scoped engine settings through the $PS variable."
+                    description: "Expose scoped engine settings through the $PSSettings variable."
                 )
             };
 

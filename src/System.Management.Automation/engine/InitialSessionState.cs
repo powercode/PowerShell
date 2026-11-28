@@ -3390,7 +3390,7 @@ namespace System.Management.Automation.Runspaces
                 && entry.Name.Equals(SpecialVariables.PSStyle, StringComparison.OrdinalIgnoreCase)
                 && ReferenceEquals(entry.Value, PSStyle.Instance))
             {
-                PSScopedPropertyFacade facade = sessionState.GlobalScope.GetVariable(SpecialVariables.PS)?.Value as PSScopedPropertyFacade;
+                PSScopedPropertyFacade facade = sessionState.GlobalScope.GetVariable(SpecialVariables.PSSettings)?.Value as PSScopedPropertyFacade;
                 if (facade is not null)
                 {
                     return new SessionStateVariableEntry(entry.Name, facade.GetStyleForRunspaceInitialization(), entry.Description, entry.Options, entry.Attributes, entry.Visibility);

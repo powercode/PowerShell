@@ -34,7 +34,7 @@ namespace System.Management.Automation
         internal static readonly VariablePath OFSVarPath = new VariablePath(OFS);
 
         internal const string PSStyle = "PSStyle";
-        internal const string PS = "PS";
+        internal const string PSSettings = "PSSettings";
 
         internal static readonly VariablePath PSStyleVarPath = new VariablePath(PSStyle);
 

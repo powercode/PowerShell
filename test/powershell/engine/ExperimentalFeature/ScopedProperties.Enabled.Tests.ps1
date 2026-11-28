@@ -27,15 +27,15 @@ Describe 'PSScopedProperties in an enabled test host' -Tag 'CI' {
 
     It 'exposes the constant AllScope facade in the test host' {
         [ExperimentalFeature]::IsEnabled('PSScopedProperties') | Should -BeTrue
-        (Get-Variable PS).Options | Should -Be ([System.Management.Automation.ScopedItemOptions]'Constant, AllScope')
-        $PS.Style.Progress.View | Should -BeOfType ([System.Management.Automation.ProgressView])
+        (Get-Variable PSSettings).Options | Should -Be ([System.Management.Automation.ScopedItemOptions]'Constant, AllScope')
+        $PSSettings.Style.Progress.View | Should -BeOfType ([System.Management.Automation.ProgressView])
     }
 
     It 'exposes the typed scalar preference defaults in the test host' {
-        $PS.ActionPreference.Progress | Should -Be ([System.Management.Automation.ActionPreference]::Continue)
-        $PS.ShouldProcess.Confirm | Should -Be ([System.Management.Automation.ConfirmImpact]::High)
-        $PS.ShouldProcess.WhatIf | Should -BeOfType ([bool])
-        $PS.ShouldProcess.WhatIf | Should -BeFalse
+        $PSSettings.ActionPreference.Progress | Should -Be ([System.Management.Automation.ActionPreference]::Continue)
+        $PSSettings.ShouldProcess.Confirm | Should -Be ([System.Management.Automation.ConfirmImpact]::High)
+        $PSSettings.ShouldProcess.WhatIf | Should -BeOfType ([bool])
+        $PSSettings.ShouldProcess.WhatIf | Should -BeFalse
         $ProgressPreference | Should -Be ([System.Management.Automation.ActionPreference]::Continue)
         $ConfirmPreference | Should -Be ([System.Management.Automation.ConfirmImpact]::High)
         $WhatIfPreference | Should -BeOfType ([bool])
@@ -44,9 +44,9 @@ Describe 'PSScopedProperties in an enabled test host' -Tag 'CI' {
 
     It 'normalizes native command error preference values to bool and controls non-zero child exits' {
         $nativeCommand = Join-Path $PSHOME $(if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' })
-        $PS.NativeCommand.UseErrorActionPreference = 'Yeah'
-        $PS.NativeCommand.UseErrorActionPreference | Should -BeOfType ([bool])
-        $PS.NativeCommand.UseErrorActionPreference | Should -BeTrue
+        $PSSettings.NativeCommand.UseErrorActionPreference = 'Yeah'
+        $PSSettings.NativeCommand.UseErrorActionPreference | Should -BeOfType ([bool])
+        $PSSettings.NativeCommand.UseErrorActionPreference | Should -BeTrue
 
         $ErrorActionPreference = 'Stop'
         $nativeError = try {
@@ -59,9 +59,9 @@ Describe 'PSScopedProperties in an enabled test host' -Tag 'CI' {
         $nativeError | Should -Not -BeNullOrEmpty
         $nativeError.FullyQualifiedErrorId | Should -Be 'ProgramExitedWithNonZeroCode'
 
-        $PS.NativeCommand.UseErrorActionPreference = 0
-        $PS.NativeCommand.UseErrorActionPreference | Should -BeOfType ([bool])
-        $PS.NativeCommand.UseErrorActionPreference | Should -BeFalse
+        $PSSettings.NativeCommand.UseErrorActionPreference = 0
+        $PSSettings.NativeCommand.UseErrorActionPreference | Should -BeOfType ([bool])
+        $PSSettings.NativeCommand.UseErrorActionPreference | Should -BeFalse
         $ErrorActionPreference = 'Continue'
         & $nativeCommand -NoLogo -NoProfile -Command 'exit 7'
         $LASTEXITCODE | Should -Be 7
@@ -74,7 +74,7 @@ Describe 'PSScopedProperties in an enabled test host' -Tag 'CI' {
         try {
             $null = $shell.AddScript({
                 param($name, $variableName)
-                $PS.ActionPreference.$name
+                $PSSettings.ActionPreference.$name
                 (Get-Variable -Name $variableName).Value
             }).AddArgument($PreferenceName).AddArgument($VariableName)
             $values = $shell.Invoke()
@@ -94,13 +94,13 @@ Describe 'PSScopedProperties in an enabled test host' -Tag 'CI' {
 
         & {
             Set-Variable -Name $VariableName -Value 'sIlEnTlYcOnTiNuE'
-            $PS.ActionPreference.$PreferenceName | Should -Be ([System.Management.Automation.ActionPreference]::SilentlyContinue)
+            $PSSettings.ActionPreference.$PreferenceName | Should -Be ([System.Management.Automation.ActionPreference]::SilentlyContinue)
             (Get-Variable -Name $VariableName).Value | Should -BeOfType ([System.Management.Automation.ActionPreference])
 
-            $PS.ActionPreference.$PreferenceName = 'Continue'
+            $PSSettings.ActionPreference.$PreferenceName = 'Continue'
             (Get-Variable -Name $VariableName).Value | Should -Be ([System.Management.Automation.ActionPreference]::Continue)
 
-            { $PS.ActionPreference.$PreferenceName = 'invalid preference' } | Should -Throw
+            { $PSSettings.ActionPreference.$PreferenceName = 'invalid preference' } | Should -Throw
             (Get-Variable -Name $VariableName).Value | Should -Be ([System.Management.Automation.ActionPreference]::Continue)
         }
     }
@@ -109,12 +109,12 @@ Describe 'PSScopedProperties in an enabled test host' -Tag 'CI' {
         param($PreferenceName, $VariableName)
 
         & {
-            $PS.ActionPreference.$PreferenceName = 'Continue'
+            $PSSettings.ActionPreference.$PreferenceName = 'Continue'
             & {
                 Set-Variable -Name $VariableName -Value 'SilentlyContinue' -Scope Local
-                $PS.ActionPreference.$PreferenceName | Should -Be ([System.Management.Automation.ActionPreference]::SilentlyContinue)
-                $PS.Reset("aCtIoNpReFeReNcE.$PreferenceName")
-                $PS.ActionPreference.$PreferenceName | Should -Be ([System.Management.Automation.ActionPreference]::Continue)
+                $PSSettings.ActionPreference.$PreferenceName | Should -Be ([System.Management.Automation.ActionPreference]::SilentlyContinue)
+                $PSSettings.Reset("aCtIoNpReFeReNcE.$PreferenceName")
+                $PSSettings.ActionPreference.$PreferenceName | Should -Be ([System.Management.Automation.ActionPreference]::Continue)
                 Get-Variable -Name $VariableName -Scope Local -ErrorAction Ignore | Should -BeNullOrEmpty
             }
             (Get-Variable -Name $VariableName).Value | Should -Be ([System.Management.Automation.ActionPreference]::Continue)
@@ -141,20 +141,20 @@ Describe 'PSScopedProperties in an enabled test host' -Tag 'CI' {
             $record.CategoryInfo.Reason | Should -BeExactly 'PSInvalidCastException'
             $reachedCommand | Should -BeFalse
             (Get-Variable -Name $VariableName -Scope Local).Value | Should -BeExactly $originalPreference
-            $PS.ActionPreference.$PreferenceName | Should -BeExactly $originalPreference
+            $PSSettings.ActionPreference.$PreferenceName | Should -BeExactly $originalPreference
         }
     }
 
     It 'isolates progress overrides and shares them with PSStyle' {
         & {
-            $PS.Style.Progress.View = 'Minimal'
+            $PSSettings.Style.Progress.View = 'Minimal'
             & {
                 $PSStyle.Progress.View = 'Classic'
-                $PS.Style.Progress.View | Should -Be ([System.Management.Automation.ProgressView]::Classic)
-                $PS.Reset('Style.Progress.View')
+                $PSSettings.Style.Progress.View | Should -Be ([System.Management.Automation.ProgressView]::Classic)
+                $PSSettings.Reset('Style.Progress.View')
                 $PSStyle.Progress.View | Should -Be ([System.Management.Automation.ProgressView]::Minimal)
             }
-            $PS.Style.Progress.View | Should -Be ([System.Management.Automation.ProgressView]::Minimal)
+            $PSSettings.Style.Progress.View | Should -Be ([System.Management.Automation.ProgressView]::Minimal)
         }
     }
 }

@@ -190,9 +190,9 @@ namespace PSTests.Sequential
             shell.AddScript("""
                 $global:LogEngineHealthEvent = $false
                 & {
-                    $PS.Logging.EngineHealthEvent = $null
+                    $PSSettings.Logging.EngineHealthEvent = $null
                     [pscustomobject]@{
-                        FacadeValue = $PS.Logging.EngineHealthEvent
+                        FacadeValue = $PSSettings.Logging.EngineHealthEvent
                         VariableValue = $LogEngineHealthEvent
                         ConsumerFallback = $getSettingWithFallback.Invoke('LogEngineHealthEvent', $true)
                         QualifiedGlobal = $getSettingWithFallback.Invoke('global:LogEngineHealthEvent', $true)
@@ -227,8 +227,8 @@ namespace PSTests.Sequential
                     $global:PSSessionConfigurationName = 'GlobalConfiguration'
                     $global:PSSessionApplicationName = 'GlobalApplication'
                     & {
-                        $PS.Remoting.ConfigurationName = 'ScopedConfiguration'
-                        $PS.Remoting.ApplicationName = 'ScopedApplication'
+                        $PSSettings.Remoting.ConfigurationName = 'ScopedConfiguration'
+                        $PSSettings.Remoting.ApplicationName = 'ScopedApplication'
                         Get-ScopedRemotingProbe
                     }
                     """);
