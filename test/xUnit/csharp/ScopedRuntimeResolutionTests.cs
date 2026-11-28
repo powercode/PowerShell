@@ -11,17 +11,6 @@ namespace PSTests.Sequential;
 
 public class ScopedRuntimeResolutionTests
 {
-    private static PSObject InvokeSingle(PowerShell shell, string script)
-    {
-        shell.Commands.Clear();
-        var results = shell.AddScript(script).Invoke<PSObject>();
-        Assert.Empty(shell.Streams.Error);
-        return Assert.Single(results);
-    }
-
-    private static bool Boolean(PSObject value, string name)
-        => Assert.IsType<bool>(value.Properties[name].Value);
-
     [Fact]
     public void RuntimeMembersExposeLegacyValuesAndReferences()
     {
@@ -35,7 +24,7 @@ public class ScopedRuntimeResolutionTests
         using var shell = PowerShell.Create();
         shell.Runspace = runspace;
 
-        var result = InvokeSingle(shell, """
+        string script = """
             $null = $global:LASTEXITCODE = 17
             $null = $global:StackTrace = 'scoped-runtime-stack'
             function Get-ScopedRuntimeIdentity {
@@ -113,7 +102,8 @@ public class ScopedRuntimeResolutionTests
                 }
             }
             Get-ScopedRuntimeIdentity -Name probe
-            """);
+            """;
+        var result = InvokeSingle(shell, script);
 
         foreach (string name in new[]
         {
@@ -148,7 +138,7 @@ public class ScopedRuntimeResolutionTests
         using var shell = PowerShell.Create();
         shell.Runspace = runspace;
 
-        var result = InvokeSingle(shell, """
+        string script = """
             $null = $global:LASTEXITCODE = 10
             $null = $globalView = $PSSettings.AtScope('Global')
             $null = $globalView.LastExitCode = 20
@@ -187,7 +177,8 @@ public class ScopedRuntimeResolutionTests
                 GlobalAfterChild = $global:LASTEXITCODE
                 ChildResult = $childResult
             }
-            """);
+            """;
+        var result = InvokeSingle(shell, script);
 
         Assert.Equal(20, result.Properties["GlobalValue"].Value);
         var scriptResult = Assert.IsType<PSObject>(result.Properties["ScriptResult"].Value);
@@ -200,7 +191,7 @@ public class ScopedRuntimeResolutionTests
         Assert.True(Boolean(childResult, "HostWriteDenied"));
 
         // A nested object returned by a runtime variable stays shared; it is not a configuration COW value.
-        var mutation = InvokeSingle(shell, """
+        string mutationScript = """
             $null = $values = $PSSettings.Diagnostics.Errors
             $null = $marker = 'runtime-no-cow-marker'
             $values.Add($marker) | Out-Null
@@ -213,7 +204,8 @@ public class ScopedRuntimeResolutionTests
             $table.Remove('ScopedRuntimeNoCowMarker') | Out-Null
 
             [pscustomobject]@{ ErrorShared = $errorShared; VersionShared = $versionShared }
-            """);
+            """;
+        var mutation = InvokeSingle(shell, mutationScript);
         Assert.True(Boolean(mutation, "ErrorShared"));
         Assert.True(Boolean(mutation, "VersionShared"));
     }
@@ -229,7 +221,7 @@ public class ScopedRuntimeResolutionTests
         string scriptPath = Path.Combine(Path.GetTempPath(), $"scoped-runtime-{Guid.NewGuid():N}.ps1");
         try
         {
-            File.WriteAllText(scriptPath, """
+            string dottedScript = """
                 [pscustomobject]@{
                     ArgumentsShared = [object]::ReferenceEquals($args, $PSSettings.Invocation.Arguments)
                 BoundArgumentsShared = [object]::ReferenceEquals($args, $PSSettings.AtScope('Local').Invocation.Arguments)
@@ -238,14 +230,15 @@ public class ScopedRuntimeResolutionTests
                     RootEqual = [object]::Equals($PSScriptRoot, $PSSettings.Invocation.ScriptRoot)
                     PathEqual = [object]::Equals($PSCommandPath, $PSSettings.Invocation.CommandPath)
                 }
-                """);
+                """;
+            File.WriteAllText(scriptPath, dottedScript);
 
             using var runspace = RunspaceFactory.CreateRunspace();
             runspace.Open();
             using var shell = PowerShell.Create();
             shell.Runspace = runspace;
             string quotedPath = "'" + scriptPath.Replace("'", "''", StringComparison.Ordinal) + "'";
-            var result = InvokeSingle(shell, $$"""
+            string script = $$"""
                 function Get-ScopedRuntimeNestedTuple {
                     [pscustomobject]@{
                         ArgumentsShared = [object]::ReferenceEquals($args, $PSSettings.Invocation.Arguments)
@@ -271,7 +264,8 @@ public class ScopedRuntimeResolutionTests
                 $null = $outer = Get-ScopedRuntimeOuterTuple outer
                 $null = $dotted = . {{quotedPath}} dotted-one dotted-two
                 [pscustomobject]@{ Outer = $outer; Dotted = $dotted }
-                """);
+                """;
+            var result = InvokeSingle(shell, script);
 
             var outer = Assert.IsType<PSObject>(result.Properties["Outer"].Value);
             Assert.True(Boolean(outer, "BeforeShared"));
@@ -343,7 +337,7 @@ public class ScopedRuntimeResolutionTests
         using var shell = PowerShell.Create();
         shell.Runspace = runspace;
 
-        var result = InvokeSingle(shell, """
+        string script = """
             Remove-Variable PROFILE -Scope Global -Force -ErrorAction Ignore
             Remove-Variable LASTEXITCODE -Scope Global -Force -ErrorAction Ignore
             Set-StrictMode -Off
@@ -416,7 +410,8 @@ public class ScopedRuntimeResolutionTests
                 ProfileExplicitNull = $null -eq $profileNull
                 ExitExplicitNull = $null -eq $exitNull
             }
-            """);
+            """;
+        var result = InvokeSingle(shell, script);
 
         Assert.True(Boolean(result, "ProfileIsNullWhenMissing"));
         Assert.True(Boolean(result, "ExitIsNullWhenMissing"));
@@ -452,7 +447,7 @@ public class ScopedRuntimeResolutionTests
             runspace.Open();
             using var shell = PowerShell.Create();
             shell.Runspace = runspace;
-            var result = InvokeSingle(shell, """
+            string script = """
                 Remove-Variable PROFILE -Scope Global -Force -ErrorAction Ignore
                 $null = $module = New-Module {}
                 $null = $moduleOutput = & $module {
@@ -463,7 +458,8 @@ public class ScopedRuntimeResolutionTests
                     ModuleOutput = $moduleOutput
                     OutsideIsNull = $null -eq $PSSettings.Session.Profile
                 }
-                """);
+                """;
+            var result = InvokeSingle(shell, script);
 
             Assert.Equal("private-module-profile", result.Properties["ModuleOutput"].Value);
             Assert.True(Boolean(result, "OutsideIsNull"));
@@ -487,4 +483,15 @@ public class ScopedRuntimeResolutionTests
 
         Assert.Equal("True|True|60", constrainedResult);
     }
+
+    private static PSObject InvokeSingle(PowerShell shell, string script)
+    {
+        shell.Commands.Clear();
+        var results = shell.AddScript(script).Invoke<PSObject>();
+        Assert.Empty(shell.Streams.Error);
+        return Assert.Single(results);
+    }
+
+    private static bool Boolean(PSObject value, string name)
+        => Assert.IsType<bool>(value.Properties[name].Value);
 }

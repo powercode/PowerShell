@@ -8,28 +8,11 @@ using System.Globalization;
 using System.Linq;
 using System.Management.Automation;
 using System.Management.Automation.Host;
-using System.Management.Automation.Internal.Host;
 using System.Management.Automation.Remoting;
 using System.Management.Automation.Runspaces;
 using Xunit;
 
 namespace PSTests.Sequential;
-
-[Cmdlet(VerbsLifecycle.Invoke, "ScopedQuestionMarkWriteError")]
-public sealed class ScopedQuestionMarkWriteErrorCommand : PSCmdlet
-{
-    protected override void ProcessRecord()
-    {
-        WriteError(new ErrorRecord(new InvalidOperationException("expected question-mark probe error"),
-            "ScopedQuestionMarkProbeError", ErrorCategory.NotSpecified, null));
-    }
-}
-
-[Cmdlet(VerbsLifecycle.Invoke, "ScopedNestedPrompt")]
-public sealed class ScopedNestedPromptCommand : PSCmdlet
-{
-    protected override void ProcessRecord() => ((InternalHost)Host).EnterNestedPrompt(this);
-}
 
 public sealed class ScopedRuntimePropertiesTests
 {
@@ -62,6 +45,17 @@ public sealed class ScopedRuntimePropertiesTests
         }
     }
 
+    public static IEnumerable<object[]> QuestionMarkTriggerCases()
+    {
+        foreach (object[] row in QuestionMarkExpressionCases())
+        {
+            if ((string)row[2] == "direct")
+            {
+                yield return new object[] { row[0], row[1], row[5] };
+            }
+        }
+    }
+
     [Theory]
     [MemberData(nameof(QuestionMarkExpressionCases))]
     public void LastStatementSuccessfulMatchesQuestionMarkInEveryExpressionForm(
@@ -88,17 +82,6 @@ public sealed class ScopedRuntimePropertiesTests
         Assert.Equal(expected, actual.BaseObject);
     }
 
-    public static IEnumerable<object[]> QuestionMarkTriggerCases()
-    {
-        foreach (object[] row in QuestionMarkExpressionCases())
-        {
-            if ((string)row[2] == "direct")
-            {
-                yield return new object[] { row[0], row[1], row[5] };
-            }
-        }
-    }
-
     [Fact]
     public void NativeExitCodeRemainsIndependentFromQuestionMarkFacade()
     {
@@ -106,33 +89,6 @@ public sealed class ScopedRuntimePropertiesTests
         PSObject result = InvokeQuestionMarkProbe("native exit 7", nativeCommand, "[pscustomobject]@{ Success = $facade.LastStatementSuccessful; ExitCode = $LASTEXITCODE }");
         Assert.False((bool)result.Properties["Success"].Value);
         Assert.Equal(7, result.Properties["ExitCode"].Value);
-    }
-
-    private static PSObject InvokeQuestionMarkProbe(string triggerName, string trigger, string expression, bool captureFacade = false)
-    {
-        InitialSessionState initialState = InitialSessionState.CreateDefault2();
-        initialState.Commands.Add(new SessionStateCmdletEntry(
-            "Invoke-ScopedQuestionMarkWriteError",
-            typeof(ScopedQuestionMarkWriteErrorCommand),
-            helpFileName: null));
-
-        using Runspace runspace = RunspaceFactory.CreateRunspace(initialState);
-        runspace.Open();
-        runspace.SessionStateProxy.SetVariable("facade", new PSScopedPropertyFacade());
-        using PowerShell shell = PowerShell.Create();
-        shell.Runspace = runspace;
-        string capture = captureFacade ? "$captured = $facade; " : string.Empty;
-        Collection<PSObject> output = shell.AddScript($"$ErrorActionPreference = 'Continue'; {capture}{trigger}; {expression}").Invoke();
-        if (triggerName is "Write-Error" or "function WriteError" or "PSCmdlet.WriteError")
-        {
-            Assert.NotEmpty(shell.Streams.Error);
-        }
-        else
-        {
-            Assert.Empty(shell.Streams.Error);
-        }
-
-        return Assert.Single(output);
     }
 
     [Fact]
@@ -252,21 +208,36 @@ public sealed class ScopedRuntimePropertiesTests
         Assert.Equal("True", removed[1].BaseObject.ToString());
     }
 
+    private static PSObject InvokeQuestionMarkProbe(string triggerName, string trigger, string expression, bool captureFacade = false)
+    {
+        InitialSessionState initialState = InitialSessionState.CreateDefault2();
+        initialState.Commands.Add(new SessionStateCmdletEntry(
+            "Invoke-ScopedQuestionMarkWriteError",
+            typeof(ScopedQuestionMarkWriteErrorCommand),
+            helpFileName: null));
+
+        using Runspace runspace = RunspaceFactory.CreateRunspace(initialState);
+        runspace.Open();
+        runspace.SessionStateProxy.SetVariable("facade", new PSScopedPropertyFacade());
+        using PowerShell shell = PowerShell.Create();
+        shell.Runspace = runspace;
+        string capture = captureFacade ? "$captured = $facade; " : string.Empty;
+        Collection<PSObject> output = shell.AddScript($"$ErrorActionPreference = 'Continue'; {capture}{trigger}; {expression}").Invoke();
+        if (triggerName is "Write-Error" or "function WriteError" or "PSCmdlet.WriteError")
+        {
+            Assert.NotEmpty(shell.Streams.Error);
+        }
+        else
+        {
+            Assert.Empty(shell.Streams.Error);
+        }
+
+        return Assert.Single(output);
+    }
+
     private sealed class NestedPromptProbeHost : PSHost
     {
         private readonly Guid _instanceId = Guid.NewGuid();
-
-        internal Runspace Runspace { get; set; }
-
-        internal int EnterCount { get; private set; }
-
-        internal object NestedCommandAtEntry { get; private set; }
-
-        internal object NestedCommandAtEntryFacade { get; private set; }
-
-        internal object NestedPromptLevelAtEntry { get; private set; }
-
-        internal object NestedPromptLevelAtEntryFacade { get; private set; }
 
         public override CultureInfo CurrentCulture => CultureInfo.CurrentCulture;
 
@@ -279,6 +250,18 @@ public sealed class ScopedRuntimePropertiesTests
         public override PSHostUserInterface UI => null;
 
         public override Version Version => new(1, 0);
+
+        internal Runspace Runspace { get; set; }
+
+        internal int EnterCount { get; private set; }
+
+        internal object NestedCommandAtEntry { get; private set; }
+
+        internal object NestedCommandAtEntryFacade { get; private set; }
+
+        internal object NestedPromptLevelAtEntry { get; private set; }
+
+        internal object NestedPromptLevelAtEntryFacade { get; private set; }
 
         public override void EnterNestedPrompt()
         {
@@ -296,12 +279,20 @@ public sealed class ScopedRuntimePropertiesTests
             exitPipeline.Invoke();
         }
 
-        public override void ExitNestedPrompt() { }
+        public override void ExitNestedPrompt()
+        {
+        }
 
-        public override void NotifyBeginApplication() { }
+        public override void NotifyBeginApplication()
+        {
+        }
 
-        public override void NotifyEndApplication() { }
+        public override void NotifyEndApplication()
+        {
+        }
 
-        public override void SetShouldExit(int exitCode) { }
+        public override void SetShouldExit(int exitCode)
+        {
+        }
     }
 }

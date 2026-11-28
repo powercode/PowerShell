@@ -9,24 +9,6 @@ using Xunit;
 
 namespace PSTests.Sequential
 {
-    [Cmdlet(VerbsCommon.Get, "ScopedRemotingProbe")]
-    public sealed class ScopedRemotingProbeCmdlet : Microsoft.PowerShell.Commands.PSRemotingCmdlet
-    {
-        protected override void BeginProcessing()
-        {
-            // This probe exercises preference resolution without starting a remoting transport.
-        }
-
-        protected override void ProcessRecord()
-        {
-            WriteObject(string.Join("|",
-                ResolveShell(null),
-                ResolveAppName(null),
-                ResolveShell("ExplicitShell"),
-                ResolveAppName("ExplicitApp")));
-        }
-    }
-
     public class ScopedPropertiesTests
     {
         [Theory]
@@ -180,10 +162,9 @@ namespace PSTests.Sequential
 
             using var runspace = RunspaceFactory.CreateRunspace();
             runspace.Open();
-            runspace.SessionStateProxy.SetVariable(
-                "getSettingWithFallback",
-                (Func<string, object, object>)((path, fallback) =>
-                    LocalPipeline.GetExecutionContextFromTLS().GetVariableValue(new VariablePath(path), fallback)));
+            Func<string, object, object> getSettingWithFallback = (path, fallback) =>
+                LocalPipeline.GetExecutionContextFromTLS().GetVariableValue(new VariablePath(path), fallback);
+            runspace.SessionStateProxy.SetVariable("getSettingWithFallback", getSettingWithFallback);
 
             using var shell = PowerShell.Create();
             shell.Runspace = runspace;

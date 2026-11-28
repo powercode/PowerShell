@@ -1,6 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+[System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars', '', Justification = 'The test verifies that the facade reflects the global PROFILE binding.')]
+[System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidAssignmentToAutomaticVariable', '', Justification = 'The test deliberately changes and restores PWD to verify live facade identity.')]
+param()
+
 class RuntimeThisProbe {
     [bool] SameThis([object] $facade) { return [object]::ReferenceEquals($this, $facade.Invocation.This) }
 }
@@ -195,7 +199,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
                 $seen.Add("$outer$inner")
             }
             [object]::ReferenceEquals($PSSettings.Invocation.ForEachEnumerator, $outerEnumerator) | Should -BeTrue
-            try { foreach ($inner in 'throw') { throw 'unwind inner loop' } } catch {}
+            try { foreach ($inner in 'throw') { throw 'unwind inner loop' } } catch { $_.Exception.Message | Should -Be 'unwind inner loop' }
             [object]::ReferenceEquals($PSSettings.Invocation.ForEachEnumerator, $outerEnumerator) | Should -BeTrue
             foreach ($inner in 'break') { break }
             [object]::ReferenceEquals($PSSettings.Invocation.ForEachEnumerator, $outerEnumerator) | Should -BeTrue
@@ -207,7 +211,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
                 [object]::ReferenceEquals($PSSettings.Invocation.SwitchEnumerator, $switch) | Should -BeTrue
                 $PSSettings.Invocation.SwitchEnumerator.Current | Should -Be 'alpha'
                 $outerSwitch = $PSSettings.Invocation.SwitchEnumerator
-                try { switch ('inner') { default { throw 'unwind switch' } } } catch {}
+                try { switch ('inner') { default { throw 'unwind switch' } } } catch { $_.Exception.Message | Should -Be 'unwind switch' }
                 [object]::ReferenceEquals($PSSettings.Invocation.SwitchEnumerator, $outerSwitch) | Should -BeTrue
                 switch ('inner') { default { break } }
                 [object]::ReferenceEquals($PSSettings.Invocation.SwitchEnumerator, $outerSwitch) | Should -BeTrue
@@ -215,7 +219,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         }
 
         foreach ($x in 1, 2) {
-            try { if ($x -eq 1) { throw 'early' } } catch {}
+            try { if ($x -eq 1) { throw 'early' } } catch { $_.Exception.Message | Should -Be 'early' }
         }
         $PSSettings.Invocation.ForEachEnumerator | Should -BeNullOrEmpty
         $PSSettings.Invocation.SwitchEnumerator | Should -BeNullOrEmpty

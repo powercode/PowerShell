@@ -1,6 +1,9 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+[System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidAssignmentToAutomaticVariable', '', Justification = 'The diagnostic deliberately assigns null to this to distinguish an absent automatic variable from a null binding.')]
+param()
+
 # Diagnostic only: compare the legacy $? expression with a helper getter that
 # reads the same ExecutionContext flag in isolated runspaces. No product files
 # are changed. Run with `pwsh -NoProfile -File ./docs/dev-process/scoped-properties-feasibility.ps1`.

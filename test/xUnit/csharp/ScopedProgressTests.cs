@@ -25,14 +25,13 @@ namespace PSTests.Sequential
             runspace.SessionStateProxy.SetVariable(
                 "getProgressView",
                 (Func<ProgressView>)(() => ScopedProperties.GetProgressView(LocalPipeline.GetExecutionContextFromTLS())));
-            runspace.SessionStateProxy.SetVariable(
-                "reportProgress",
-                (Action<ProgressView>)(view =>
-                {
-                    var context = LocalPipeline.GetExecutionContextFromTLS();
-                    ScopedProperties.SetProgressView(context, view);
-                    progress.Update(0, second, ScopedProperties.GetProgressView(context));
-                }));
+            Action<ProgressView> reportProgress = view =>
+            {
+                var context = LocalPipeline.GetExecutionContextFromTLS();
+                ScopedProperties.SetProgressView(context, view);
+                progress.Update(0, second, ScopedProperties.GetProgressView(context));
+            };
+            runspace.SessionStateProxy.SetVariable("reportProgress", reportProgress);
 
             progress.Update(0, first, ProgressView.Minimal);
             using var shell = PowerShell.Create();

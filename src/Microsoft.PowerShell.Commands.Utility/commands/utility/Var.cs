@@ -991,7 +991,6 @@ namespace Microsoft.PowerShell.Commands
                                 // Since the variable existed in the specified scope, or
                                 // in the local scope if no scope was specified, use
                                 // the reference returned to set the variable properties.
-
                                 var scopedVariable = Force && matchingVariable is ScopedSettingVariable { IsAttached: true } adapter
                                     ? adapter
                                     : null;

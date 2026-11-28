@@ -18,12 +18,6 @@ public class ScopedSettingVariableTests
         }
     }
 
-    private static ScopedActionPreferenceSetting GetPreferenceSetting(string path)
-    {
-        Assert.True(ScopedProperties.TryGetSetting(path, out var setting));
-        return Assert.IsType<ScopedActionPreferenceSetting>(setting);
-    }
-
     [Fact]
     public void DottedFramesKeepIndependentBindingTargetsAcrossStages()
     {
@@ -240,6 +234,12 @@ public class ScopedSettingVariableTests
         parent.ResetScopedSetting(setting);
         Assert.True(entry.Variable.WasRemoved);
         Assert.Null(entry.Variable.Value);
+    }
+
+    private static ScopedActionPreferenceSetting GetPreferenceSetting(string path)
+    {
+        Assert.True(ScopedProperties.TryGetSetting(path, out var setting));
+        return Assert.IsType<ScopedActionPreferenceSetting>(setting);
     }
 
     private sealed class TranslatePreferenceAttribute : ArgumentTransformationAttribute

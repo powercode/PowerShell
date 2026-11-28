@@ -13,6 +13,11 @@ namespace Microsoft.PowerShell
     internal partial
     class ConsoleHostUserInterface : PSHostUserInterface
     {
+        internal static ProgressView GetProgressViewForRendering(bool supportsVirtualTerminal)
+        {
+            return supportsVirtualTerminal ? PSStyle.Instance.Progress.View : ProgressView.Classic;
+        }
+
         /// <summary>
         /// Called at the end of a prompt loop to take down any progress display that might have appeared and purge any
         /// outstanding progress activity state.
@@ -126,11 +131,6 @@ namespace Microsoft.PowerShell
 
                 _progPane.Show(_pendingProgress);
             }
-        }
-
-        internal static ProgressView GetProgressViewForRendering(bool supportsVirtualTerminal)
-        {
-            return supportsVirtualTerminal ? PSStyle.Instance.Progress.View : ProgressView.Classic;
         }
 
         /// <summary>

@@ -505,27 +505,6 @@ namespace Microsoft.PowerShell
             return found;
         }
 
-        private sealed class AgeAndResetStyleVisitor : NodeVisitor
-        {
-            private readonly ProgressNode.RenderStyle _style;
-
-            internal AgeAndResetStyleVisitor(ProgressNode.RenderStyle style)
-            {
-                _style = style;
-            }
-
-            internal override
-            bool
-            Visit(ProgressNode node, ArrayList unused, int unusedToo)
-            {
-                node.Age = Math.Min(node.Age + 1, Int32.MaxValue - 1);
-
-                node.Style = _style;
-
-                return true;
-            }
-        }
-
         /// <summary>
         /// Increments the age of each of the nodes in the given list, and all their children.  Also sets the rendering
         /// style of each node to the initial style for the current view.
@@ -999,5 +978,26 @@ namespace Microsoft.PowerShell
         private int _nodeCount;
 
         private const int maxNodeCount = 128;
+
+        private sealed class AgeAndResetStyleVisitor : NodeVisitor
+        {
+            private readonly ProgressNode.RenderStyle _style;
+
+            internal AgeAndResetStyleVisitor(ProgressNode.RenderStyle style)
+            {
+                _style = style;
+            }
+
+            internal override
+            bool
+            Visit(ProgressNode node, ArrayList unused, int unusedToo)
+            {
+                node.Age = Math.Min(node.Age + 1, Int32.MaxValue - 1);
+
+                node.Style = _style;
+
+                return true;
+            }
+        }
     }
 }   // namespace

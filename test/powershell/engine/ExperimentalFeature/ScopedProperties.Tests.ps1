@@ -1,6 +1,9 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+[System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars', '', Justification = 'These isolated child-process tests explicitly verify global preference bindings and debugger callbacks.')]
+param()
+
 Describe 'PSScopedProperties' -Tag 'CI' {
     $preferenceCases = @(
         @{ PreferenceName = 'Error'; VariableName = 'ErrorActionPreference'; DefaultPreference = 'Continue' }
