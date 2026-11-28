@@ -2,6 +2,7 @@
 # Licensed under the MIT License.
 
 Describe 'PSScopedProperties scalar configuration' -Tag 'CI' {
+    $skipFeatureTests = -not [ExperimentalFeature]::IsEnabled('PSScopedProperties')
     $scalarDefaultCases = @(
         @{ SettingPath = 'Formatting.ErrorView'; LegacyName = 'ErrorView'; ExpectedValue = [System.Management.Automation.ErrorView]::ConciseView; ExpectedType = [System.Management.Automation.ErrorView]; CheckExpected = $true }
         @{ SettingPath = 'Formatting.EnumerationLimit'; LegacyName = 'FormatEnumerationLimit'; ExpectedValue = 4; ExpectedType = [int]; CheckExpected = $true }
@@ -27,16 +28,7 @@ Describe 'PSScopedProperties scalar configuration' -Tag 'CI' {
         @{ SettingPath = 'Remoting.ApplicationName'; LegacyName = 'PSSessionApplicationName'; ExpectedValue = 'wsman'; ExpectedType = [string]; CheckExpected = $true }
     )
 
-    BeforeAll {
-        $originalDefaultParameterValues = $PSDefaultParameterValues.Clone()
-        $PSDefaultParameterValues['It:Skip'] = -not [ExperimentalFeature]::IsEnabled('PSScopedProperties')
-    }
-
-    AfterAll {
-        $global:PSDefaultParameterValues = $originalDefaultParameterValues
-    }
-
-    It 'uses the expected default for <SettingPath> without materializing a legacy binding' -TestCases $scalarDefaultCases {
+    It 'uses the expected default for <SettingPath> without materializing a legacy binding' -TestCases $scalarDefaultCases -Skip:$skipFeatureTests {
         param($SettingPath, $LegacyName, $ExpectedValue, $ExpectedType, $CheckExpected)
 
         $environmentValue = [Environment]::GetEnvironmentVariable('PSModuleAutoLoadingPreference')
@@ -75,7 +67,7 @@ Describe 'PSScopedProperties scalar configuration' -Tag 'CI' {
         if ($snapshot.AfterPresent) { $snapshot.LegacyValue | Should -Be $snapshot.Value }
     }
 
-    It 'keeps concise error formatting after removing the ErrorView legacy variable' {
+    It 'keeps concise error formatting after removing the ErrorView legacy variable' -Skip:$skipFeatureTests {
         $shell = [PowerShell]::Create()
         try {
             $results = $shell.AddScript({
@@ -107,7 +99,7 @@ Describe 'PSScopedProperties scalar configuration' -Tag 'CI' {
         }
     }
 
-    It 'shares scalar values in both directions and keeps failed conversions atomic' {
+    It 'shares scalar values in both directions and keeps failed conversions atomic' -Skip:$skipFeatureTests {
         $PSSettings.Formatting.ErrorView = 'NormalView'
         $ErrorView | Should -Be ([System.Management.Automation.ErrorView]::NormalView)
         $ErrorView = 'DetailedView'
@@ -244,7 +236,7 @@ Describe 'PSScopedProperties scalar configuration' -Tag 'CI' {
         $PSSessionApplicationName | Should -BeNullOrEmpty
     }
 
-    It 'inherits and resets scalar overrides through local, script, and global views' {
+    It 'inherits and resets scalar overrides through local, script, and global views' -Skip:$skipFeatureTests {
         $globalView = $PSSettings.AtScope('Global')
         $scriptView = $null
         $originalGlobalLimit = Get-Variable -Name FormatEnumerationLimit -Scope Global -ErrorAction Ignore
@@ -286,7 +278,7 @@ Describe 'PSScopedProperties scalar configuration' -Tag 'CI' {
         $PSSettings.Reset('NativeCommand.Encoding.ToProcess')
     }
 
-    It 'uses FieldSeparator and EnumerationLimit in actual formatting' {
+    It 'uses FieldSeparator and EnumerationLimit in actual formatting' -Skip:$skipFeatureTests {
         $joined = & {
             $PSSettings.Formatting.FieldSeparator = '::'
             $items = 1, 2
@@ -310,7 +302,7 @@ Describe 'PSScopedProperties scalar configuration' -Tag 'CI' {
         $errorText | Should -Match 'CategoryInfo'
     }
 
-    It 'uses independent non-ASCII native stdin and stdout encodings' {
+    It 'uses independent non-ASCII native stdin and stdout encodings' -Skip:$skipFeatureTests {
         $pwshName = if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' }
         $pwsh = Join-Path $PSHOME $pwshName
         $inputProbe = Join-Path $TestDrive 'ReadNativeInput.ps1'
@@ -347,7 +339,7 @@ $errorBytes = [Text.Encoding]::Unicode.GetBytes('naïve')
         $stderrText | Should -BeExactly 'naïve'
     }
 
-    It 'uses a scoped Transcription.Path as the Start-Transcript default' {
+    It 'uses a scoped Transcription.Path as the Start-Transcript default' -Skip:$skipFeatureTests {
         $transcriptPath = Join-Path $TestDrive 'scoped-transcript.txt'
         & {
             $PSSettings.Transcription.Path = $transcriptPath
@@ -373,7 +365,7 @@ $errorBytes = [Text.Encoding]::Unicode.GetBytes('naïve')
         Get-Content -LiteralPath $generatedTranscript.FullName -Raw | Should -Match 'generated transcription marker'
     }
 
-    It 'uses AutoLoadingPreference overrides for real module discovery' {
+    It 'uses AutoLoadingPreference overrides for real module discovery' -Skip:$skipFeatureTests {
         $moduleName = 'ScopedPropertiesAutoLoad' + [guid]::NewGuid().ToString('N')
         $moduleRoot = Join-Path $TestDrive $moduleName
         $moduleDirectory = Join-Path $moduleRoot $moduleName

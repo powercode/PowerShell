@@ -2,16 +2,8 @@
 # Licensed under the MIT License.
 
 Describe 'PSScopedProperties mutable remoting settings' -Tag 'CI' {
-    BeforeAll {
-        $originalDefaultParameterValues = $PSDefaultParameterValues.Clone()
-        $PSDefaultParameterValues['It:Skip'] = -not [ExperimentalFeature]::IsEnabled('PSScopedProperties')
-    }
-
-    AfterAll {
-        $global:PSDefaultParameterValues = $originalDefaultParameterValues
-    }
-
-    It 'keeps PSSessionOption concrete and isolates property writes by scope' {
+    $skipFeatureTests = -not [ExperimentalFeature]::IsEnabled('PSScopedProperties')
+    It 'keeps PSSessionOption concrete and isolates property writes by scope' -Skip:$skipFeatureTests {
         & {
             $parentOptions = $PSSettings.AtScope('Local').Remoting.SessionOptions
             $parentOptions | Should -BeOfType ([System.Management.Automation.Remoting.PSSessionOption])
@@ -42,7 +34,7 @@ Describe 'PSScopedProperties mutable remoting settings' -Tag 'CI' {
         $standalone.OperationTimeout | Should -Be ([timespan]::FromSeconds(23))
     }
 
-    It 'uses live ApplicationArguments views with shallow copy-on-write and dictionary interfaces' {
+    It 'uses live ApplicationArguments views with shallow copy-on-write and dictionary interfaces' -Skip:$skipFeatureTests {
         & {
             $parentOptions = $PSSettings.AtScope('Local').Remoting.SessionOptions
             $dictionary = [System.Management.Automation.PSPrimitiveDictionary]::new()
@@ -96,7 +88,7 @@ Describe 'PSScopedProperties mutable remoting settings' -Tag 'CI' {
         }
     }
 
-    It 'preserves explicit null SessionOptions and rejects a captured view after nulling it' {
+    It 'preserves explicit null SessionOptions and rejects a captured view after nulling it' -Skip:$skipFeatureTests {
         & {
             $options = $PSSettings.AtScope('Local').Remoting.SessionOptions
             $options.OperationTimeout = [timespan]::FromSeconds(29)
@@ -112,7 +104,7 @@ Describe 'PSScopedProperties mutable remoting settings' -Tag 'CI' {
         }
     }
 
-    It 'copies ordinary Hashtable and primitive dictionary overrides without changing the parent' {
+    It 'copies ordinary Hashtable and primitive dictionary overrides without changing the parent' -Skip:$skipFeatureTests {
         & {
             $parentView = $PSSettings.AtScope('Local')
             $globalData = [hashtable]::new([StringComparer]::OrdinalIgnoreCase)

@@ -2,6 +2,7 @@
 # Licensed under the MIT License.
 
 Describe 'PSScopedProperties PSStyle configuration' -Tag 'CI' {
+    $skipFeatureTests = -not [ExperimentalFeature]::IsEnabled('PSScopedProperties')
     $styleLeafCases = @(
         @{ Path = 'OutputRendering'; Value = [System.Management.Automation.OutputRendering]::Ansi }
         @{ Path = 'AutoSizeDefaultFormatting'; Value = $true }
@@ -26,8 +27,6 @@ Describe 'PSScopedProperties PSStyle configuration' -Tag 'CI' {
     )
 
     BeforeAll {
-        $originalDefaultParameterValues = $PSDefaultParameterValues.Clone()
-        $PSDefaultParameterValues['It:Skip'] = -not [ExperimentalFeature]::IsEnabled('PSScopedProperties')
         $script:getStyleLeaf = {
             param($style, $path)
             foreach ($segment in $path.Split('.')) { $style = $style.$segment }
@@ -44,11 +43,7 @@ Describe 'PSScopedProperties PSStyle configuration' -Tag 'CI' {
         }
     }
 
-    AfterAll {
-        $global:PSDefaultParameterValues = $originalDefaultParameterValues
-    }
-
-    It 'exposes one concrete PSStyle type through the facade and legacy variable' {
+    It 'exposes one concrete PSStyle type through the facade and legacy variable' -Skip:$skipFeatureTests {
         $PSSettings.Style | Should -BeOfType ([System.Management.Automation.PSStyle])
         $PSStyle | Should -BeOfType ([System.Management.Automation.PSStyle])
         [object]::ReferenceEquals($PSSettings.Style, $PSStyle) | Should -BeTrue
@@ -60,7 +55,7 @@ Describe 'PSScopedProperties PSStyle configuration' -Tag 'CI' {
         $PSSettings.Style.FileInfo.Extension['.ps1'] | Should -Be "`e[33;1m"
     }
 
-    It 'scopes each style leaf independently and resumes inheritance after reset: <Path>' -TestCases $styleLeafCases {
+    It 'scopes each style leaf independently and resumes inheritance after reset: <Path>' -TestCases $styleLeafCases -Skip:$skipFeatureTests {
         param($Path, $Value)
 
         $targetStyle = $PSSettings.AtScope('Local').Style
@@ -74,7 +69,7 @@ Describe 'PSScopedProperties PSStyle configuration' -Tag 'CI' {
         }
     }
 
-    It 'scopes style leaves independently and resets only the selected local value' {
+    It 'scopes style leaves independently and resets only the selected local value' -Skip:$skipFeatureTests {
         $warningBaseline = $PSSettings.Style.Formatting.Warning
         $PSSettings.Style.Formatting.Error = "`e[35m"
         $PSSettings.Style.Progress.Style = "`e[36m"
@@ -93,7 +88,7 @@ Describe 'PSScopedProperties PSStyle configuration' -Tag 'CI' {
         $PSSettings.Style.Formatting.Warning | Should -Be $warningBaseline
     }
 
-    It 'binds AtScope style views and rejects a captured view after its target scope expires' {
+    It 'binds AtScope style views and rejects a captured view after its target scope expires' -Skip:$skipFeatureTests {
         $style = & { $PSSettings.AtScope('Local').Style }
         { $style.Progress.Style } | Should -Throw
         foreach ($property in 'Reset', 'BlinkOff', 'Blink', 'BoldOff', 'Bold', 'DimOff', 'Dim', 'Hidden', 'HiddenOff', 'Reverse', 'ReverseOff', 'ItalicOff', 'Italic', 'UnderlineOff', 'Underline', 'StrikethroughOff', 'Strikethrough') {
@@ -105,12 +100,12 @@ Describe 'PSScopedProperties PSStyle configuration' -Tag 'CI' {
         { $foreground.FromRgb(1, 2, 3) } | Should -Throw
     }
 
-    It 'preserves standalone ANSI constants' {
+    It 'preserves standalone ANSI constants' -Skip:$skipFeatureTests {
         [System.Management.Automation.PSStyle]::Instance.Reset | Should -Be "`e[0m"
         [System.Management.Automation.PSStyle]::Instance.Bold | Should -Be "`e[1m"
     }
 
-    It 'copies only the file extension dictionary when it is successfully mutated' {
+    It 'copies only the file extension dictionary when it is successfully mutated' -Skip:$skipFeatureTests {
         $PSSettings.Style.FileInfo.Extension['.scopedtest'] = "`e[34m"
         $PSSettings.Style.FileInfo.Extension.ContainsKey('.scopedtest') | Should -BeTrue
 
@@ -124,7 +119,7 @@ Describe 'PSScopedProperties PSStyle configuration' -Tag 'CI' {
         $PSSettings.Style.FileInfo.Extension.Remove('.scopedtest')
     }
 
-    It 'does not publish invalid scalar or extension mutations' {
+    It 'does not publish invalid scalar or extension mutations' -Skip:$skipFeatureTests {
         $before = $PSSettings.Style.Progress.Style
         { $PSSettings.Style.Progress.Style = 'visible text' } | Should -Throw
         { $PSSettings.Style.Progress.MaxWidth = 17 } | Should -Throw
@@ -135,7 +130,7 @@ Describe 'PSScopedProperties PSStyle configuration' -Tag 'CI' {
         $PSSettings.Style.FileInfo.Extension['.zip'] | Should -Be $beforeZip
     }
 
-    It 'keeps public nested style objects standalone' {
+    It 'keeps public nested style objects standalone' -Skip:$skipFeatureTests {
         $progress = [System.Management.Automation.PSStyle+ProgressConfiguration]::new()
         $formatting = [System.Management.Automation.PSStyle+FormattingData]::new()
         $fileInfo = [System.Management.Automation.PSStyle+FileInfoFormatting]::new()
@@ -154,7 +149,7 @@ Describe 'PSScopedProperties PSStyle configuration' -Tag 'CI' {
         $PSSettings.Style.FileInfo.Extension.ContainsKey('.standalone') | Should -BeFalse
     }
 
-    It 'resolves unbound style views in the caller runspace and rejects bound views from another runspace' {
+    It 'resolves unbound style views in the caller runspace and rejects bound views from another runspace' -Skip:$skipFeatureTests {
         $first = [powershell]::Create()
         $second = [powershell]::Create()
         try {

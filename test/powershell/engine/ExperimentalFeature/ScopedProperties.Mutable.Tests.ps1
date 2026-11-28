@@ -2,10 +2,8 @@
 # Licensed under the MIT License.
 
 Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
+    $skipFeatureTests = -not [ExperimentalFeature]::IsEnabled('PSScopedProperties')
     BeforeAll {
-        $originalDefaultParameterValues = $PSDefaultParameterValues.Clone()
-        $PSDefaultParameterValues['It:Skip'] = -not [ExperimentalFeature]::IsEnabled('PSScopedProperties')
-
         function Get-ScopedMutableDefaultProbe {
             [CmdletBinding()]
             param([int] $Value = 5)
@@ -28,11 +26,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         }
     }
 
-    AfterAll {
-        $global:PSDefaultParameterValues = $originalDefaultParameterValues
-    }
-
-    It 'keeps captured dictionary views caller-dynamic and isolates child mutations' {
+    It 'keeps captured dictionary views caller-dynamic and isolates child mutations' -Skip:$skipFeatureTests {
         $outerKey = 'ScopedMutableOuter:Value'
         $childKey = 'ScopedMutableChild:Value'
         $PSDefaultParameterValues.Remove($outerKey)
@@ -54,7 +48,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         $PSDefaultParameterValues.Remove($outerKey)
     }
 
-    It 'does not bind a child override when a dictionary mutation fails' {
+    It 'does not bind a child override when a dictionary mutation fails' -Skip:$skipFeatureTests {
         $duplicateKey = 'ScopedDuplicate:Value'
         $PSDefaultParameterValues.Remove($duplicateKey)
         $PSDefaultParameterValues[$duplicateKey] = 1
@@ -72,7 +66,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         $PSDefaultParameterValues.Remove($duplicateKey)
     }
 
-    It 'preserves explicit null and makes previously captured views unavailable' {
+    It 'preserves explicit null and makes previously captured views unavailable' -Skip:$skipFeatureTests {
         $saved = $PSSettings.Command.DefaultParameterValues.Clone()
         $captured = $PSSettings.Command.DefaultParameterValues
         try {
@@ -94,7 +88,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         }
     }
 
-    It 'routes IDictionary and IEnumerable reads and mutations through the scoped backing' {
+    It 'routes IDictionary and IEnumerable reads and mutations through the scoped backing' -Skip:$skipFeatureTests {
         $key = 'ScopedMutableEnumerable:Value'
         $PSDefaultParameterValues.Remove($key)
 
@@ -113,7 +107,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         $PSDefaultParameterValues.ContainsKey($key) | Should -BeFalse
     }
 
-    It 'applies scriptblock defaults through the pipeline caller snapshot' {
+    It 'applies scriptblock defaults through the pipeline caller snapshot' -Skip:$skipFeatureTests {
         $key = 'Get-ScopedMutableDefaultProbe:Value'
         $originalValue = $PSDefaultParameterValues[$key]
         try {
@@ -144,7 +138,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         }
     }
 
-    It 'keeps ordinary references stored inside dictionary entries shared across copy-on-write' {
+    It 'keeps ordinary references stored inside dictionary entries shared across copy-on-write' -Skip:$skipFeatureTests {
         $key = 'ScopedMutableNested:Value'
         $nested = [pscustomobject]@{ Value = 1 }
         $PSDefaultParameterValues.Remove($key)
@@ -160,7 +154,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         $PSDefaultParameterValues.Remove($key)
     }
 
-    It 'returns an ordinary retained value from a PSVariable after its scope exits' {
+    It 'returns an ordinary retained value from a PSVariable after its scope exits' -Skip:$skipFeatureTests {
         $key = 'ScopedMutableRetained:Value'
         $PSDefaultParameterValues.Remove($key)
         $retainedVariable = & {
@@ -175,7 +169,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         $PSDefaultParameterValues.ContainsKey($key) | Should -BeFalse
     }
 
-    It 'keeps a PSVariable object attached to its exact binding while a child scope is active' {
+    It 'keeps a PSVariable object attached to its exact binding while a child scope is active' -Skip:$skipFeatureTests {
         $key = 'ScopedMutableExactBinding:Value'
         $global:PSDefaultParameterValues[$key] = 11
         $retainedVariable = Get-Variable -Name PSDefaultParameterValues -Scope Global
@@ -189,7 +183,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         $global:PSDefaultParameterValues.Remove($key)
     }
 
-    It 'clears a retained PSVariable object when its binding is explicitly removed' {
+    It 'clears a retained PSVariable object when its binding is explicitly removed' -Skip:$skipFeatureTests {
         $key = 'ScopedMutableRemoved:Value'
         $retainedVariable = & {
             $PSDefaultParameterValues = @{ $key = 17 }
@@ -201,34 +195,44 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         $retainedVariable.Value | Should -BeNullOrEmpty
     }
 
-    It 'anchors explicitly qualified mutable variable reads and writes to their named scopes' {
+    It 'anchors explicitly qualified mutable variable reads and writes to their named scopes' -Skip:$skipFeatureTests {
         $key = 'ScopedMutableQualified:Value'
-        $global:PSDefaultParameterValues[$key] = 31
-        $script:PSDefaultParameterValues[$key] = 32
+        $scriptDefaults = Get-Variable PSDefaultParameterValues -Scope Script -ErrorAction Ignore
+        $originalScriptDefaults = if ($scriptDefaults) { $scriptDefaults.Value }
+        $script:PSDefaultParameterValues = $PSDefaultParameterValues.Clone()
+        try {
+            $global:PSDefaultParameterValues[$key] = 31
+            $script:PSDefaultParameterValues[$key] = 32
 
-        & {
-            $PSDefaultParameterValues = @{ $key = 33 }
+            & {
+                $PSDefaultParameterValues = @{ $key = 33 }
 
-            $global:PSDefaultParameterValues[$key] | Should -Be 31
-            $script:PSDefaultParameterValues[$key] | Should -Be 32
-            $local:PSDefaultParameterValues[$key] | Should -Be 33
+                $global:PSDefaultParameterValues[$key] | Should -Be 31
+                $script:PSDefaultParameterValues[$key] | Should -Be 32
+                $local:PSDefaultParameterValues[$key] | Should -Be 33
 
-            $global:PSDefaultParameterValues[$key] = 41
-            $script:PSDefaultParameterValues[$key] = 42
-            $local:PSDefaultParameterValues[$key] = 43
+                $global:PSDefaultParameterValues[$key] = 41
+                $script:PSDefaultParameterValues[$key] = 42
+                $local:PSDefaultParameterValues[$key] = 43
+
+                $global:PSDefaultParameterValues[$key] | Should -Be 41
+                $script:PSDefaultParameterValues[$key] | Should -Be 42
+                $local:PSDefaultParameterValues[$key] | Should -Be 43
+            }
 
             $global:PSDefaultParameterValues[$key] | Should -Be 41
             $script:PSDefaultParameterValues[$key] | Should -Be 42
-            $local:PSDefaultParameterValues[$key] | Should -Be 43
+        } finally {
+            $global:PSDefaultParameterValues.Remove($key)
+            if ($scriptDefaults) {
+                $script:PSDefaultParameterValues = $originalScriptDefaults
+            } else {
+                Remove-Variable PSDefaultParameterValues -Scope Script
+            }
         }
-
-        $global:PSDefaultParameterValues[$key] | Should -Be 41
-        $script:PSDefaultParameterValues[$key] | Should -Be 42
-        $global:PSDefaultParameterValues.Remove($key)
-        $script:PSDefaultParameterValues.Remove($key)
     }
 
-    It 'allows mutable member changes on read-only bindings but rejects replacement' {
+    It 'allows mutable member changes on read-only bindings but rejects replacement' -Skip:$skipFeatureTests {
         $key = 'ScopedMutableReadOnly:Value'
         & {
             $local = $PSSettings.AtScope('Local')
@@ -244,7 +248,7 @@ Describe 'PSScopedProperties mutable configuration' -Tag 'CI' {
         $PSDefaultParameterValues.ContainsKey($key) | Should -BeFalse
     }
 
-    It 'allows mutable member changes on constant bindings but rejects replacement' {
+    It 'allows mutable member changes on constant bindings but rejects replacement' -Skip:$skipFeatureTests {
         $key = 'ScopedMutableConstant:Value'
         & {
             $local = $PSSettings.AtScope('Local')

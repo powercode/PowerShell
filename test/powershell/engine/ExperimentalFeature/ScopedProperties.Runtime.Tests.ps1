@@ -10,14 +10,8 @@ class RuntimeThisProbe {
 }
 
 Describe 'PSScopedProperties runtime views' -Tag 'CI' {
-    BeforeAll {
-        $originalDefaults = $PSDefaultParameterValues.Clone()
-        $PSDefaultParameterValues['It:Skip'] = -not [ExperimentalFeature]::IsEnabled('PSScopedProperties')
-    }
-
-    AfterAll { $global:PSDefaultParameterValues = $originalDefaults }
-
-    It 'keeps runtime containers stable, non-consuming, and exposes actual automatic values' {
+    $skipFeatureTests = -not [ExperimentalFeature]::IsEnabled('PSScopedProperties')
+    It 'keeps runtime containers stable, non-consuming, and exposes actual automatic values' -Skip:$skipFeatureTests {
         function Get-RuntimeIdentity {
             param([Parameter(ValueFromPipeline)] $Item)
             process {
@@ -43,7 +37,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         $observed[0].Display | Should -Not -BeNullOrEmpty
     }
 
-    It 'resolves invocation variables from active function and dotted script frames' {
+    It 'resolves invocation variables from active function and dotted script frames' -Skip:$skipFeatureTests {
         function Get-InvocationView {
             [CmdletBinding()]
             param($First, $Second)
@@ -88,7 +82,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         $dot.InfoPath | Should -Be $dot.LegacyInfoPath
     }
 
-    It 'routes runtime reads through selected scopes and preserves legacy setters' {
+    It 'routes runtime reads through selected scopes and preserves legacy setters' -Skip:$skipFeatureTests {
         $savedExitCode = Get-Variable LASTEXITCODE -Scope Global -ErrorAction Ignore
         $savedExitCodeValue = if ($null -ne $savedExitCode) { $savedExitCode.Value }
         try {
@@ -111,7 +105,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         }
     }
 
-    It 'distinguishes absent optional runtime values from explicit null under strict modes' {
+    It 'distinguishes absent optional runtime values from explicit null under strict modes' -Skip:$skipFeatureTests {
         $savedProfile = Get-Variable PROFILE -Scope Global -ErrorAction Ignore
         $savedProfileValue = if ($null -ne $savedProfile) { $savedProfile.Value }
         try {
@@ -141,7 +135,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         }
     }
 
-    It 'uses PWD aliases and runspace location ownership, including caller shadowing' {
+    It 'uses PWD aliases and runspace location ownership, including caller shadowing' -Skip:$skipFeatureTests {
         $originalLocation = Get-Location
         Push-Location $originalLocation
         try {
@@ -160,7 +154,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         $PSSettings.Session.CurrentLocation.Path | Should -Be $originalLocation.Path
     }
 
-    It 'preserves class and ETS this ownership in methods, script properties, and script methods' {
+    It 'preserves class and ETS this ownership in methods, script properties, and script methods' -Skip:$skipFeatureTests {
         $instance = [RuntimeThisProbe]::new()
         $instance.SameThis($PSSettings) | Should -BeTrue
 
@@ -174,7 +168,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         $instance.ScopedThisMethod() | Should -BeTrue
     }
 
-    It 'keeps input identity and does not consume input during access or display' {
+    It 'keeps input identity and does not consume input during access or display' -Skip:$skipFeatureTests {
         function Test-InputView {
             $facadeInput = $PSSettings.Invocation.Input
             $display = "$($PSSettings) $($PSSettings.Invocation)"
@@ -189,7 +183,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         'record-1', 'record-2' | Test-InputView
     }
 
-    It 'preserves foreach and switch enumerator identity and restores nested loop state' {
+    It 'preserves foreach and switch enumerator identity and restores nested loop state' -Skip:$skipFeatureTests {
         $seen = [System.Collections.Generic.List[object]]::new()
         foreach ($outer in 1, 2) {
             $outerEnumerator = $PSSettings.Invocation.ForEachEnumerator
@@ -225,7 +219,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         $PSSettings.Invocation.SwitchEnumerator | Should -BeNullOrEmpty
     }
 
-    It 'keeps Matches from the last successful scalar, collection, and switch-regex match' {
+    It 'keeps Matches from the last successful scalar, collection, and switch-regex match' -Skip:$skipFeatureTests {
         'abc' -match '(?<letters>a)' | Should -BeTrue
         [object]::ReferenceEquals($Matches, $PSSettings.Invocation.Matches) | Should -BeTrue
         $PSSettings.Invocation.Matches.letters | Should -Be 'a'
@@ -237,7 +231,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         switch -Regex ('switch-3') { '(?<digit>\d)' { $PSSettings.Invocation.Matches.digit | Should -Be '3' } }
     }
 
-    It 'returns live diagnostic references and preserves error history identity' {
+    It 'returns live diagnostic references and preserves error history identity' -Skip:$skipFeatureTests {
         $errors = $PSSettings.Diagnostics.Errors
         [object]::ReferenceEquals($errors, $Error) | Should -BeTrue
         $count = $errors.Count
@@ -248,7 +242,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         $PSSettings.Diagnostics.ToString() | Should -Not -BeNullOrEmpty
     }
 
-    It 'keeps event values and event-local Error lists for a subscription lifetime' {
+    It 'keeps event values and event-local Error lists for a subscription lifetime' -Skip:$skipFeatureTests {
         $eventName = 'ScopedRuntimeEvent_' + [guid]::NewGuid().ToString('N')
         $secondEventName = $eventName + '_second'
         $received = [System.Collections.Generic.List[object]]::new()
@@ -304,7 +298,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         }
     }
 
-    It 'keeps optional producer values absent outside debugger, profile, prompt, and remoting lifetimes' {
+    It 'keeps optional producer values absent outside debugger, profile, prompt, and remoting lifetimes' -Skip:$skipFeatureTests {
         Set-StrictMode -Off
         $PSSettings.Diagnostics.DebugContext | Should -BeNullOrEmpty
         $legacyProfile = Get-Variable PROFILE -ErrorAction Ignore
@@ -320,7 +314,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         { $PSSettings.Invocation.CommandPath } | Should -Not -Throw
     }
 
-    It 'keeps process, runspace, culture, platform, and language constant values live' {
+    It 'keeps process, runspace, culture, platform, and language constant values live' -Skip:$skipFeatureTests {
         $PSSettings.Runtime.ProcessId | Should -Be $PID
         $PSSettings.Runtime.InstallationDirectory | Should -Be $PSHOME
         $PSSettings.Runtime.Edition | Should -Be $PSEdition
@@ -339,7 +333,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         { $PSSettings.LastStatementSuccessful = $false } | Should -Throw
     }
 
-    It 'tracks parser history tokens and success separately from exit status' {
+    It 'tracks parser history tokens and success separately from exit status' -Skip:$skipFeatureTests {
         $tokenComparison = & {
             [pscustomobject]@{ LegacyFirst = $^; FacadeFirst = $PSSettings.History.FirstToken; LegacyLast = $$; FacadeLast = $PSSettings.History.LastToken }
         }
@@ -365,7 +359,7 @@ Describe 'PSScopedProperties runtime views' -Tag 'CI' {
         }
     }
 
-    It 'preserves runspace ownership and rejects foreign and expired bound views' {
+    It 'preserves runspace ownership and rejects foreign and expired bound views' -Skip:$skipFeatureTests {
         $captured = $PSSettings.AtScope('Local').Session
         $runspace = [runspacefactory]::CreateRunspace()
         try {

@@ -2,6 +2,7 @@
 # Licensed under the MIT License.
 
 Describe 'PSScopedProperties in an enabled test host' -Tag 'CI' {
+    $skipFeatureTests = -not [ExperimentalFeature]::IsEnabled('PSScopedProperties')
     $preferenceCases = @(
         @{ PreferenceName = 'Error'; VariableName = 'ErrorActionPreference'; DefaultPreference = 'Continue' }
         @{ PreferenceName = 'Progress'; VariableName = 'ProgressPreference'; DefaultPreference = 'Continue' }
@@ -16,33 +17,25 @@ Describe 'PSScopedProperties in an enabled test host' -Tag 'CI' {
         $preferenceCase + @{ Value = 'Suspend'; ValueKind = 'a string' }
     }
 
-    BeforeAll {
-        $originalDefaultParameterValues = $PSDefaultParameterValues.Clone()
-        $PSDefaultParameterValues['It:Skip'] = -not [ExperimentalFeature]::IsEnabled('PSScopedProperties')
-    }
-
-    AfterAll {
-        $global:PSDefaultParameterValues = $originalDefaultParameterValues
-    }
-
-    It 'exposes the constant AllScope facade in the test host' {
+    It 'exposes the constant AllScope facade in the test host' -Skip:$skipFeatureTests {
         [ExperimentalFeature]::IsEnabled('PSScopedProperties') | Should -BeTrue
         (Get-Variable PSSettings).Options | Should -Be ([System.Management.Automation.ScopedItemOptions]'Constant, AllScope')
         $PSSettings.Style.Progress.View | Should -BeOfType ([System.Management.Automation.ProgressView])
     }
 
-    It 'exposes the typed scalar preference defaults in the test host' {
-        $PSSettings.ActionPreference.Progress | Should -Be ([System.Management.Automation.ActionPreference]::Continue)
+    It 'exposes the typed scalar preferences from the test host' -Skip:$skipFeatureTests {
+        # CI suppresses progress before starting Pester; the facade must reflect that preference.
+        $PSSettings.ActionPreference.Progress | Should -BeOfType ([System.Management.Automation.ActionPreference])
+        $PSSettings.ActionPreference.Progress | Should -Be $ProgressPreference
         $PSSettings.ShouldProcess.Confirm | Should -Be ([System.Management.Automation.ConfirmImpact]::High)
         $PSSettings.ShouldProcess.WhatIf | Should -BeOfType ([bool])
         $PSSettings.ShouldProcess.WhatIf | Should -BeFalse
-        $ProgressPreference | Should -Be ([System.Management.Automation.ActionPreference]::Continue)
         $ConfirmPreference | Should -Be ([System.Management.Automation.ConfirmImpact]::High)
         $WhatIfPreference | Should -BeOfType ([bool])
         $WhatIfPreference | Should -BeFalse
     }
 
-    It 'normalizes native command error preference values to bool and controls non-zero child exits' {
+    It 'normalizes native command error preference values to bool and controls non-zero child exits' -Skip:$skipFeatureTests {
         $nativeCommand = Join-Path $PSHOME $(if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' })
         $PSSettings.NativeCommand.UseErrorActionPreference = 'Yeah'
         $PSSettings.NativeCommand.UseErrorActionPreference | Should -BeOfType ([bool])
@@ -67,7 +60,7 @@ Describe 'PSScopedProperties in an enabled test host' -Tag 'CI' {
         $LASTEXITCODE | Should -Be 7
     }
 
-    It 'exposes the typed <PreferenceName> default in a fresh runspace' -TestCases $preferenceCases {
+    It 'exposes the typed <PreferenceName> default in a fresh runspace' -TestCases $preferenceCases -Skip:$skipFeatureTests {
         param($PreferenceName, $VariableName, $DefaultPreference)
 
         $shell = [powershell]::Create()
@@ -89,7 +82,7 @@ Describe 'PSScopedProperties in an enabled test host' -Tag 'CI' {
         }
     }
 
-    It 'shares typed values between the <PreferenceName> facade and legacy variable' -TestCases $preferenceCases {
+    It 'shares typed values between the <PreferenceName> facade and legacy variable' -TestCases $preferenceCases -Skip:$skipFeatureTests {
         param($PreferenceName, $VariableName)
 
         & {
@@ -105,7 +98,7 @@ Describe 'PSScopedProperties in an enabled test host' -Tag 'CI' {
         }
     }
 
-    It 'resets a child <PreferenceName> preference to the inherited value' -TestCases $preferenceCases {
+    It 'resets a child <PreferenceName> preference to the inherited value' -TestCases $preferenceCases -Skip:$skipFeatureTests {
         param($PreferenceName, $VariableName)
 
         & {
@@ -121,7 +114,7 @@ Describe 'PSScopedProperties in an enabled test host' -Tag 'CI' {
         }
     }
 
-    It 'rejects <PreferenceName> Suspend supplied as <ValueKind> during assignment' -TestCases $suspendCases {
+    It 'rejects <PreferenceName> Suspend supplied as <ValueKind> during assignment' -TestCases $suspendCases -Skip:$skipFeatureTests {
         param($PreferenceName, $VariableName, $Value, $ValueKind)
 
         & {
@@ -145,7 +138,7 @@ Describe 'PSScopedProperties in an enabled test host' -Tag 'CI' {
         }
     }
 
-    It 'isolates progress overrides and shares them with PSStyle' {
+    It 'isolates progress overrides and shares them with PSStyle' -Skip:$skipFeatureTests {
         & {
             $PSSettings.Style.Progress.View = 'Minimal'
             & {
